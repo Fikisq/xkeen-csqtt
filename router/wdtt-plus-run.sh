@@ -29,17 +29,21 @@ printf 'START_CONFIG|%s\n' "$PAYLOAD" > "$FIFO" &
 set -- --peer "$PEER" --device-id "$DEVICE_ID" --n "$WORKERS" \
     --listen 127.0.0.1:9089 --mode socks5 \
     --socks-listen 127.0.0.1:1088 --socks-udp=true \
-    --config-first-start --startup-config-stdin
+    --config-first-start=true --startup-config-stdin=true
+# Every group keeps its own hash as primary; the others stay eligible reserves.
+# Without this a group whose hash returns ANON_BLOCKED dies for the whole run.
+if [ "$(printf '%s' "$HASHES" | tr ',' '\n' | grep -c .)" -gt 1 ]; then
+    set -- "$@" --hash-fallback=true
+fi
 if [ "${RT_NETWORK:-0}" = 1 ]; then
-    set -- "$@" --turn-stream-first
+    set -- "$@" --turn-stream-first=true
     if [ -n "${TURN_SNI:-}" ]; then
         set -- "$@" --turn-sni "$TURN_SNI"
     fi
-    if [ "${RT_MASQUE:-0}" = 1 ]; then
-        set -- "$@" --rt-masque --rt-masque-config "$DIR/rt-masque-v1.json"
-        if [ "${RT_MASQUE_ACCEPT_TOS:-0}" = 1 ]; then
-            set -- "$@" --rt-masque-accept-tos
-        fi
+    if [ "${RT_MASQUE:-0}" = 1 ] && [ "${RT_MASQUE_ACCEPT_TOS:-0}" = 1 ]; then
+        set -- "$@" --rt-masque=true \
+            --rt-masque-config "$DIR/rt-masque-v1.json" \
+            --rt-masque-accept-tos=true
     fi
 fi
 exec "$DIR/wdtt-plus-client" "$@" < "$FIFO"

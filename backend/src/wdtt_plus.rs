@@ -126,13 +126,18 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
         return Json(json!({"success": false, "error": "Вставьте только значение VK access_token"}));
     }
     let rt_network = request.rt_network.unwrap_or(false);
-    let turn_sni = request.turn_sni.as_deref().unwrap_or("").trim();
+    let normalized_sni = request.turn_sni.as_deref().unwrap_or("").trim().to_ascii_lowercase();
+    let turn_sni = normalized_sni.as_str();
     let rt_masque = request.rt_masque.unwrap_or(false);
     let rt_masque_accept_tos = request.rt_masque_accept_tos.unwrap_or(false);
-    if !turn_sni.is_empty() && (turn_sni.len() > 253 || !turn_sni.contains('.')
+    // The client exits instead of falling back when the SNI is an IP address or
+    // has fewer than two labels, so those values must be refused here.
+    if !turn_sni.is_empty() && (turn_sni.len() > 253
+        || turn_sni.split('.').count() < 2
+        || turn_sni.split('.').all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()))
         || turn_sni.split('.').any(|part| part.is_empty() || part.len() > 63 || part.starts_with('-') || part.ends_with('-'))
-        || !turn_sni.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'))) {
-        return Json(json!({"success": false, "error": "Укажите корректное доменное имя SNI для Сети РТ"}));
+        || !turn_sni.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '-'))) {
+        return Json(json!({"success": false, "error": "Укажите доменное имя SNI для Сети РТ, например example.com"}));
     }
     if rt_masque && (!rt_network || !rt_masque_accept_tos) {
         return Json(json!({"success": false, "error": "Для MASQUE включите Сеть РТ и подтвердите условия Cloudflare WARP"}));
