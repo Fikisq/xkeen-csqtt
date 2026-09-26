@@ -6,6 +6,7 @@ case "$service" in csqtt|wdtt-plus) ;; *) exit 2 ;; esac
 dir="/opt/etc/$service"
 stage="$dir/vk_manual_stage"
 active="$dir/vk_manual_active"
+stale="$dir/vk_manual_stale"
 umask 077
 
 token_path() {
@@ -32,20 +33,53 @@ vk_request() {
             --data-urlencode 'v=5.199' "$@" "https://api.vk.ru/method/$method"
 }
 
+# A call that VK no longer knows about cannot be finished; that is success.
+call_gone() {
+    case "$1" in 104|951|9000) return 0 ;; esac
+    return 1
+}
+
 finish_file() {
     prefix=$1
     [ -f "$prefix.ids" ] || return 0
     token_file="$prefix.token"
     [ -s "$token_file" ] || return 1
-    failed=0
+    remaining=''
     while IFS= read -r call_id; do
         [ -n "$call_id" ] || continue
-        case "$call_id" in *[!A-Za-z0-9_-]*) failed=1; continue ;; esac
-        response=$(vk_request calls.forceFinish --data-urlencode "call_id=$call_id") || { failed=1; continue; }
-        printf '%s' "$response" | /opt/bin/jq -e '.error == null' >/dev/null 2>&1 || failed=1
+        case "$call_id" in *[!A-Za-z0-9_-]*) continue ;; esac
+        attempt=0
+        closed=0
+        while [ "$attempt" -lt 3 ]; do
+            attempt=$((attempt + 1))
+            if response=$(vk_request calls.forceFinish --data-urlencode "call_id=$call_id"); then
+                if printf '%s' "$response" | /opt/bin/jq -e '.error == null' >/dev/null 2>&1; then
+                    closed=1
+                    break
+                fi
+                code=$(printf '%s' "$response" | /opt/bin/jq -r '.error.error_code // 1' 2>/dev/null || echo 1)
+                if call_gone "$code"; then closed=1; break; fi
+            fi
+            [ "$attempt" -lt 3 ] && sleep 1
+        done
+        [ "$closed" -eq 1 ] || remaining="$remaining$call_id
+"
     done < "$prefix.ids"
-    [ "$failed" -eq 0 ] || return 1
+    if [ -n "$remaining" ]; then
+        printf '%s' "$remaining" > "$prefix.ids"
+        return 1
+    fi
     rm -f "$prefix.ids" "$prefix.token" "$prefix.hashes" "$prefix.time"
+}
+
+# Calls VK refuses to finish are set aside so they never block a later change.
+park() {
+    prefix=$1
+    [ -f "$prefix.ids" ] || return 0
+    cat "$prefix.ids" >> "$stale.ids"
+    [ -s "$stale.token" ] || cp "$prefix.token" "$stale.token" 2>/dev/null || true
+    rm -f "$prefix.ids" "$prefix.token" "$prefix.hashes" "$prefix.time"
+    echo 'часть звонков VK не закрылась; отложены до следующей попытки' >&2
 }
 
 expire_stage() {
@@ -62,7 +96,8 @@ case "${1:-}" in
         case "$count" in ''|*[!0-9]*) exit 2 ;; esac
         [ "$count" -ge 1 ] && [ "$count" -le 6 ] || exit 2
         [ "$service" = csqtt ] || [ "$count" -le 4 ] || exit 2
-        finish_file "$stage" || { echo 'Не удалось завершить предыдущие подготовленные звонки VK' >&2; exit 1; }
+        finish_file "$stage" || park "$stage"
+        finish_file "$stale" || true
         source=$(token_path) && [ -s "$source" ] || { echo 'VK-токен не сохранён' >&2; exit 1; }
         cp "$source" "$stage.token"
         chmod 600 "$stage.token"
@@ -104,18 +139,24 @@ case "${1:-}" in
             fi
             exit 0
         fi
-        finish_file "$active" || { echo 'Не удалось завершить прежние звонки VK' >&2; exit 1; }
+        finish_file "$active" || park "$active"
         mv "$stage.ids" "$active.ids"
         mv "$stage.token" "$active.token"
         mv "$stage.hashes" "$active.hashes"
         rm -f "$stage.time"
         ;;
     stop)
-        if [ "${KEEP_MANUAL_STAGE:-0}" != 1 ]; then finish_file "$stage"; else expire_stage || true; fi
+        if [ "${KEEP_MANUAL_STAGE:-0}" != 1 ]; then
+            finish_file "$stage" || park "$stage"
+        else
+            expire_stage || park "$stage"
+        fi
+        finish_file "$stale" || true
         ;;
     release)
-        finish_file "$active"
-        finish_file "$stage"
+        finish_file "$active" || park "$active"
+        finish_file "$stage" || park "$stage"
+        finish_file "$stale" || true
         ;;
     expire) expire_stage || true ;;
     *) exit 2 ;;

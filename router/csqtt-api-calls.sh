@@ -15,22 +15,61 @@ vk_request() {
             --data-urlencode 'v=5.199' "$@" "https://api.vk.ru/method/$method"
 }
 
-finish_calls() {
-    [ -f "$CALLS_FILE" ] || return 0
-    failed=0
+# A call that VK no longer knows about cannot be finished; that is success.
+call_gone() {
+    case "$1" in 104|951|9000) return 0 ;; esac
+    return 1
+}
+
+# Identifiers that fail for another reason stay in the file and the function
+# returns 1. The caller must not treat that as fatal: a call VK refuses to
+# finish would otherwise block every later start.
+finish_file() {
+    file=$1
+    [ -f "$file" ] || return 0
+    remaining=''
     while IFS= read -r call_id; do
         [ -n "$call_id" ] || continue
-        case "$call_id" in *[!A-Za-z0-9_-]*) failed=1; continue ;; esac
-        response=$(vk_request calls.forceFinish --data-urlencode "call_id=$call_id") || { failed=1; continue; }
-        printf '%s' "$response" | /opt/bin/jq -e '.error == null' >/dev/null 2>&1 || failed=1
-    done < "$CALLS_FILE"
-    if [ "$failed" -eq 0 ]; then rm -f "$CALLS_FILE"; else return 1; fi
+        case "$call_id" in *[!A-Za-z0-9_-]*) continue ;; esac
+        attempt=0
+        closed=0
+        while [ "$attempt" -lt 3 ]; do
+            attempt=$((attempt + 1))
+            if response=$(vk_request calls.forceFinish --data-urlencode "call_id=$call_id"); then
+                if printf '%s' "$response" | /opt/bin/jq -e '.error == null' >/dev/null 2>&1; then
+                    closed=1
+                    break
+                fi
+                code=$(printf '%s' "$response" | /opt/bin/jq -r '.error.error_code // 1' 2>/dev/null || echo 1)
+                if call_gone "$code"; then closed=1; break; fi
+            fi
+            [ "$attempt" -lt 3 ] && sleep 1
+        done
+        [ "$closed" -eq 1 ] || remaining="$remaining$call_id
+"
+    done < "$file"
+    if [ -n "$remaining" ]; then
+        printf '%s' "$remaining" > "$file"
+        return 1
+    fi
+    rm -f "$file"
+    return 0
+}
+
+# Never let an unfinishable call block the service: park it and retry later.
+finish_calls() {
+    if ! finish_file "$CALLS_FILE"; then
+        cat "$CALLS_FILE" >> "$CALLS_FILE.stale"
+        rm -f "$CALLS_FILE"
+        echo "Часть прежних звонков VK не закрылась; отложены в vk_api_calls.stale" >&2
+    fi
+    finish_file "$CALLS_FILE.stale" || true
 }
 
 case "${1:-}" in
     stop) finish_calls ;;
     start)
-        finish_calls || { echo "Предыдущие звонки VK ещё не завершены" >&2; exit 1; }
+        finish_calls
         . "$DIR/csqtt.conf"
         case "$WORKERS" in ''|*[!0-9]*) echo "Неверное число потоков" >&2; exit 1 ;; esac
         count=$(( (WORKERS + 26) / 27 ))
