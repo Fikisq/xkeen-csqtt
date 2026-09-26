@@ -115,6 +115,44 @@ pub async fn get_backups(State(state): State<AppState>) -> impl IntoResponse {
     .await
 }
 
+#[derive(Deserialize)]
+pub struct DownloadBackup { name: String }
+
+pub async fn download_backup(axum::extract::Query(req): axum::extract::Query<DownloadBackup>) -> axum::response::Response {
+    let result = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, String> {
+        let path = resolve_backup_path(&req.name)?;
+        if fs::metadata(&path).map_err(io_error)?.len() > 16 * 1024 * 1024 { return Err("Архив больше 16 МБ".into()) }
+        fs::read(path).map_err(io_error)
+    }).await;
+    match result {
+        Ok(Ok(bytes)) => ([("content-type", "application/x-tar"), ("cache-control", "no-store")], bytes).into_response(),
+        Ok(Err(error)) => (axum::http::StatusCode::BAD_REQUEST, error).into_response(),
+        Err(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+pub async fn upload_backup(body: axum::body::Bytes) -> impl IntoResponse {
+    run_blocking(tokio::task::spawn_blocking(move || {
+        use std::os::unix::fs::OpenOptionsExt;
+        use std::io::Write;
+        if body.is_empty() || body.len() > 16 * 1024 * 1024 { return Err("Допустим архив до 16 МБ".into()) }
+        ensure_backup_dir().map_err(io_error)?;
+        let name = format!("import-{}_{}", uuid::Uuid::new_v4(), BACKUP_SUFFIX);
+        let path = Path::new(BACKUP_DIR).join(name);
+        let temporary = path.with_extension("upload");
+        let result = (|| {
+            let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary).map_err(io_error)?;
+            file.write_all(&body).map_err(io_error)?;
+            file.sync_all().map_err(io_error)?;
+            validate_backup_entries(&temporary)?;
+            fs::rename(&temporary, &path).map_err(io_error)?;
+            Ok(None::<()>)
+        })();
+        if result.is_err() { let _ = fs::remove_file(&temporary); }
+        result
+    }), "Не удалось загрузить архив").await
+}
+
 pub async fn put_backup(State(state): State<AppState>) -> impl IntoResponse {
     let tz = state.settings.read().unwrap().log.timezone;
     run_blocking(
@@ -335,8 +373,13 @@ fn is_tar_file(path: &Path) -> bool {
 fn collect_backup_files() -> io::Result<Vec<(PathBuf, String)>> {
     let mut files = Vec::new();
     files.extend(collect_dir_files(XKEEN_CONF_DIR, &["lst", "json"])?);
+    for name in ["xray-subscription-url", "global_direct_xray.flag", "global_direct_mihomo.flag"] {
+        let path = Path::new(XKEEN_CONF_DIR).join(name);
+        if path.is_file() { files.push((path.clone(), to_archive_relative(&path))); }
+    }
     files.extend(collect_dir_files(XRAY_CONF_DIR, &["json"])?);
     files.extend(collect_dir_files(MIHOMO_CONF_DIR, &["yaml", "yml"])?);
+    files.extend(collect_dir_files(&format!("{MIHOMO_CONF_DIR}/proxy_providers"), &["yaml", "yml"])?);
     files.sort_by(|a, b| a.1.cmp(&b.1));
     Ok(files)
 }
@@ -477,13 +520,17 @@ fn detect_content_key(relative: &str) -> Option<&'static str> {
             .filter(|name| !name.contains('/') && matches_file_name(name, exts))
     };
 
-    if check_prefix(XKEEN_CONF_DIR, &["lst", "json"]).is_some() {
+    if check_prefix(XKEEN_CONF_DIR, &["lst", "json"]).is_some()
+        || ["xray-subscription-url", "global_direct_xray.flag", "global_direct_mihomo.flag"]
+            .iter().any(|name| relative == format!("{}/{}", XKEEN_CONF_DIR.trim_start_matches('/'), name)) {
         return Some("xkeen");
     }
     if check_prefix(XRAY_CONF_DIR, &["json"]).is_some() {
         return Some("xray");
     }
-    if check_prefix(MIHOMO_CONF_DIR, &["yaml", "yml"]).is_some() {
+    if check_prefix(MIHOMO_CONF_DIR, &["yaml", "yml"]).is_some()
+        || relative.strip_prefix(&format!("{}/proxy_providers/", MIHOMO_CONF_DIR.trim_start_matches('/')))
+            .is_some_and(|name| !name.contains('/') && matches_file_name(name, &["yaml", "yml"])) {
         return Some("mihomo");
     }
 

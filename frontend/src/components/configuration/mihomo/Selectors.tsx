@@ -1,7 +1,11 @@
+import * as yaml from 'js-yaml'
+import { readSelections } from '@/lib/mihomoRoutingBackup'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Combobox, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList } from '@/components/ui/combobox'
 import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { InputGroupAddon } from '@/components/ui/input-group'
+import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
@@ -12,15 +16,19 @@ import {
   IconCircleArrowRightFilled,
   IconLoader2,
   IconLock,
+  IconGripVertical,
   IconPlugX,
 } from '@tabler/icons-react'
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { createContext, useContext, memo, useCallback, useEffect, useMemo, useState } from 'react'
 
 import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
-import { clashFetch } from '../../../lib/api'
-import { fetchClashProxies, getConnections, useProxiesStore, useSettings } from '../../../lib/store'
-import { DEFAULT_PING_TEST_TIMEOUT, DEFAULT_PING_TEST_URL } from '../../../lib/types'
+import { apiCall, clashFetch } from '../../../lib/api'
+import { fetchClashProxies, useProxiesStore, useSettings } from '../../../lib/store'
+import { defaultMihomoChoices, mihomoRouteTags, orderedMihomoRouteTags, readMihomoCustomRoutes, readMihomoDevices } from '../../../lib/mihomoDeviceRouting'
+import { findRoutePresets } from '../../../lib/routePresets'
+import { validDeviceIp, type RouteTag } from '../../../lib/xrayDeviceRouting'
+import { RouteIcon, routeLabel } from '../RouteIcon'
 
 interface ProxyHistory {
   time: string
@@ -33,6 +41,7 @@ interface ProxyInfo {
   udp: boolean
   uot?: boolean
   xudp?: boolean
+  network?: string
   alive: boolean
   hidden?: boolean
   now?: string
@@ -51,23 +60,75 @@ interface Props {
   clashApiSecret: string | null
   clashApiUnix?: string | null
   onCollapsedStateChange?: (collapsed: boolean) => void
+  isDraft?: boolean
+  configContent: string
+  onSelectDraft: (name: string, target: string) => Promise<boolean>
+  onDeviceSelect: (ip: string, route: RouteTag | null, target?: string) => Promise<boolean>
+  onAddRoute: (name: string, domains: string[]) => Promise<boolean>
+  onRemoveRoute: (tag: string) => Promise<boolean>
+  onRenameRoute: (tag: string, name: string) => Promise<boolean>
+  onReorderRoute: (source: RouteTag, target: RouteTag) => Promise<boolean>
 }
 
-const NO_DELAY_TYPES = new Set(['reject', 'reject-drop', 'dns', 'pass', 'relay'])
+const NO_DELAY_TYPES = new Set(['reject', 'reject-drop', 'dns', 'pass', 'relay', 'direct', 'socks5'])
+function specialPingTag(name: string): string | null {
+  if (/^csqtt$/i.test(name)) return 'CSQTT'
+  if (/^wdtt[ -]plus$/i.test(name)) return 'wdtt-plus'
+  return null
+}
+function canProbe(proxy?: ProxyInfo): boolean {
+  return !!proxy && (!!specialPingTag(proxy.name) || !NO_DELAY_TYPES.has(proxy.type.toLowerCase()))
+}
 const SELECTOR_TYPES = new Set(['Selector', 'Fallback', 'URLTest', 'LoadBalance'])
 const AUTO_POLICY_TYPES = new Set(['Fallback', 'URLTest', 'LoadBalance'])
 const COLLAPSE_SELECTORS_KEY = 'collapseSelectors'
+const DEVICE_IP_KEY = 'mihomoDeviceIp'
 const NO_SORT_TYPES = new Set(['Dns', 'Compatible', 'Direct', 'Reject', 'RejectDrop', 'Pass', 'Fallback', 'URLTest', 'LoadBalance', 'Selector'])
 const TOGGLE_ALL_SELECTORS_EVENT = 'mihomo:toggle-all-selectors'
+
+function isGeneralSelector(name: string): boolean { return name === 'VPN' || name === 'Селектор' }
+function isNoVpn(name: string): boolean { return /без\s*(?:vpn|впн)/i.test(name) }
+function isGeneralDirect(proxies: Record<string, ProxyInfo | undefined>, override?: { selector: string; target: string }): boolean {
+  let name: string | undefined = proxies.VPN ? 'VPN' : 'Селектор'
+  const seen = new Set<string>()
+  while (name && !seen.has(name)) {
+    if (name === 'DIRECT' || isNoVpn(name)) return true
+    seen.add(name)
+    const proxy: ProxyInfo | undefined = proxies[name]
+    if (!proxy || !SELECTOR_TYPES.has(proxy.type)) return false
+    name = name === override?.selector ? override.target : proxy.now
+  }
+  return false
+}
+function displayName(name: string): string {
+  if (isGeneralSelector(name)) return 'Селектор'
+  if (isNoVpn(name)) return '🔓 Без VPN'
+  return name
+}
+function isProtocolProxy(proxy?: ProxyInfo): boolean {
+  return !!proxy && ['vless', 'hysteria2', 'hy2', 'tuic'].includes(proxy.type.toLowerCase())
+}
+function isRouteOption(name: string, general: boolean, proxies: Record<string, ProxyInfo | undefined>): boolean {
+  if (name === 'DIRECT' && !general) return true
+  const proxy = proxies[name]
+  if (!proxy) return false
+  if (isProtocolProxy(proxy) || /csqtt|wdtt/i.test(name) || isNoVpn(name)) return true
+  if (name === 'DIRECT') return !Object.keys(proxies).some((key) => isNoVpn(key))
+  return !general && isGeneralSelector(name)
+}
 
 interface SelectorsStore {
   testingAll: Record<string, boolean>
   testingSingle: Record<string, boolean>
+  nodeTransports: Record<string, string>
+  httpHistory: Record<string, ProxyHistory[]>
 }
 
 const useSelectorsStore = create<SelectorsStore>(() => ({
   testingAll: {},
   testingSingle: {},
+  nodeTransports: {},
+  httpHistory: {},
 }))
 
 function GraveIcon({ className, size = 16 }: { className?: string; size?: number }) {
@@ -80,12 +141,12 @@ function GraveIcon({ className, size = 16 }: { className?: string; size?: number
 }
 
 function getLastDelay(proxy: ProxyInfo): number | null {
-  if (NO_DELAY_TYPES.has(proxy.type.toLowerCase())) return null
+  if (!canProbe(proxy)) return null
   return proxy.history.length > 0 ? proxy.history.at(-1)!.delay : null
 }
 
 function hasDelayHistory(proxy?: ProxyInfo): boolean {
-  return !!proxy && !NO_DELAY_TYPES.has(proxy.type.toLowerCase()) && proxy.history.length > 0
+  return canProbe(proxy) && proxy!.history.length > 0
 }
 
 function isTimedOutProxy(proxy?: ProxyInfo): boolean {
@@ -111,14 +172,24 @@ function delayColorImportant(delay: number | null): string {
 }
 
 function shouldShowDelay(proxy?: ProxyInfo, isTesting = false): boolean {
-  if (!proxy || NO_DELAY_TYPES.has(proxy.type.toLowerCase())) return false
+  if (!proxy || !canProbe(proxy)) return false
   return getLastDelay(proxy) !== null || isTesting
 }
 
-function getProxyTransport(proxy?: Pick<ProxyInfo, 'udp' | 'xudp'>): string | null {
-  if (!proxy) return null
-  if (proxy.xudp) return 'XUDP'
-  return proxy.udp ? 'UDP' : 'TCP'
+function getProxyTransport(proxy: ProxyInfo): string {
+  const type = proxy.type.toLowerCase()
+  if (isNoVpn(proxy.name)) return 'прямое соединение'
+  if (isGeneralSelector(proxy.name)) return 'общий выбор'
+  if (SELECTOR_TYPES.has(proxy.type)) return 'группа'
+  if (/csqtt/i.test(proxy.name)) return 'интерфейс csqtt0'
+  if (type === 'direct') return 'прямое соединение'
+  if (type === 'hysteria2' || type === 'hy2') return 'Hysteria2 · TLS / QUIC'
+  if (type === 'tuic') return 'TUIC · TLS / QUIC'
+  if (type === 'vless') {
+    const network = proxy.network?.toLowerCase()
+    return network === 'xhttp' ? 'VLESS · XHTTP / REALITY' : network === 'tcp' || network === 'raw' ? 'VLESS · TCP / TLS' : network ? `VLESS · ${network.toUpperCase()}` : 'VLESS · транспорт не указан'
+  }
+  return proxy.network?.toUpperCase() || 'транспорт не указан'
 }
 
 function hasNConsecutiveTimeouts(proxy: ProxyInfo | undefined, n: number): boolean {
@@ -226,12 +297,13 @@ const ProxyCard = memo(function ProxyCard({
   onSelect: (selectorName: string, proxyName: string) => void
   onTestSingle: (proxyName: string) => Promise<void>
 }) {
-  const proxy = useProxiesStore((s) => s.proxies[proxyName] as ProxyInfo | undefined)
-  const isActive = useProxiesStore((s) => (s.proxies[selectorName] as ProxyInfo | undefined)?.now === proxyName)
-  const isFixed = useProxiesStore((s) => (s.proxies[selectorName] as ProxyInfo | undefined)?.fixed === proxyName)
+  const proxy = useRoutingProxies((s) => s.proxies[proxyName] as ProxyInfo | undefined)
+  const isActive = useRoutingProxies((s) => (s.proxies[selectorName] as ProxyInfo | undefined)?.now === proxyName)
+  const isFixed = useRoutingProxies((s) => (s.proxies[selectorName] as ProxyInfo | undefined)?.fixed === proxyName)
   const isTestingSingle = useSelectorsStore((s) => !!s.testingSingle[proxyName])
+  const cachedTransport = useSelectorsStore((s) => s.nodeTransports[proxyName])
 
-  const chainStr = useProxiesStore((s): string => {
+  const chainStr = useRoutingProxies((s): string => {
     const p = s.proxies[proxyName] as ProxyInfo | undefined
     return !p || !SELECTOR_TYPES.has(p.type) || !p.now ? '' : getChainData(s.proxies as Record<string, ProxyInfo | undefined>, proxyName)
   })
@@ -241,22 +313,22 @@ const ProxyCard = memo(function ProxyCard({
 
   const delay = getLastDelay(proxy)
   const hasHistory = hasDelayHistory(proxy)
-  const canTest = !NO_DELAY_TYPES.has(proxy.type.toLowerCase())
+  const canTest = canProbe(proxy)
   const selectionDisabled = lockSelection || isSelectionDisabled(autoPolicy, proxy)
-  const transport = getProxyTransport(proxy)?.toLowerCase() ?? proxy.type.toLowerCase()
+  const transport = cachedTransport ?? getProxyTransport(proxy)
 
   return (
     <div
       className={cn(
-        'flex flex-col gap-2 rounded-sm border px-3 py-2.5 text-sm transition-all',
+        'relative flex min-h-22 flex-col justify-between gap-2 rounded-md border px-3 py-2.5 pr-12 text-sm transition-colors',
         selectionDisabled ? 'cursor-not-allowed opacity-55' : 'cursor-pointer',
         isFixed
           ? 'border-purple-400 bg-linear-to-b from-purple-500/25 to-purple-500/15'
           : isActive
-            ? 'border-[#60a5fa] bg-linear-to-b from-blue-500/25 to-blue-500/15'
+            ? 'border-blue-400 bg-blue-500/20'
             : selectionDisabled
               ? 'border-ring/35 bg-[linear-gradient(135deg,rgba(148,163,184,0.08)_0%,transparent_55%)]'
-              : 'border-ring/40 bg-[linear-gradient(135deg,rgba(59,130,246,0.05)_0%,transparent_50%)] hover:border-[#60a5fa] hover:bg-linear-to-b hover:from-blue-500/15 hover:to-blue-500/5'
+              : 'border-ring/40 hover:border-blue-400 hover:bg-blue-500/10'
       )}
       onClick={() => !selectionDisabled && onSelect(selectorName, proxyName)}
     >
@@ -271,7 +343,7 @@ const ProxyCard = memo(function ProxyCard({
         )}
         {chain.length > 0 ? (
           <Tooltip>
-            <TooltipTrigger render={<span className="truncate text-[13px] font-medium">{proxyName}</span>} />
+            <TooltipTrigger render={<span className="truncate text-sm font-medium">{displayName(proxyName)}</span>} />
             <TooltipContent side="top" className="p-2">
               <div className="flex flex-wrap items-center gap-1">
                 {chain.map((item, i) => (
@@ -285,20 +357,20 @@ const ProxyCard = memo(function ProxyCard({
                         onError={(e) => ((e.target as HTMLImageElement).style.display = 'none')}
                       />
                     )}
-                    <span className="text-[13px]">{item.name}</span>
+                    <span className="text-[13px]">{displayName(item.name)}</span>
                   </div>
                 ))}
               </div>
             </TooltipContent>
           </Tooltip>
         ) : (
-          <span className="truncate text-[13px] font-medium">{proxyName}</span>
+          <span className="truncate text-sm font-medium">{displayName(proxyName)}</span>
         )}
       </div>
 
       <div className="flex items-center justify-between gap-1">
         <span className="text-muted-foreground text-xs">
-          {proxy.type.toLowerCase()} / {transport}
+          {proxy.type.toLowerCase()} · {transport}
         </span>
 
         {canTest && (
@@ -306,7 +378,7 @@ const ProxyCard = memo(function ProxyCard({
             <TooltipTrigger render={
               <span
                 className={cn(
-                  'shrink-0 cursor-pointer text-xs font-medium tabular-nums transition-opacity',
+                  'absolute right-2 top-2 cursor-pointer rounded p-1 text-xs font-medium tabular-nums transition-opacity',
                   delayColor(delay),
                   isTestingSingle && 'opacity-40'
                 )}
@@ -340,7 +412,7 @@ const ProxyCard = memo(function ProxyCard({
                 </div>
               </TooltipContent>
             ) : (
-              <TooltipContent>Замерить отклик</TooltipContent>
+              <TooltipContent>HTTP GET через выбранное подключение</TooltipContent>
             )}
           </Tooltip>
         )}
@@ -361,7 +433,7 @@ const SelectorStatusRow = memo(function SelectorStatusRow({
   fixedProxyName?: string
   onClearFixed?: () => Promise<void>
 }) {
-  const chainStr = useProxiesStore((s) =>
+  const chainStr = useRoutingProxies((s) =>
     getChainData(s.proxies as Record<string, ProxyInfo | undefined>, (s.proxies[selectorName] as ProxyInfo | undefined)?.now)
   )
   const chain = useMemo(() => parseChain(chainStr), [chainStr])
@@ -410,7 +482,7 @@ const SelectorStatusRow = memo(function SelectorStatusRow({
               <TooltipContent>Снять фиксацию</TooltipContent>
             </Tooltip>
           )}
-          <span className="truncate">{item.name}</span>
+          <span className="truncate">{displayName(item.name)}</span>
         </div>
       ))}
     </div>
@@ -426,12 +498,12 @@ const CollapsedProxyOption = memo(function CollapsedProxyOption({
   disabled: boolean
   onTestSingle: (proxyName: string) => Promise<void>
 }) {
-  const proxy = useProxiesStore((s) => s.proxies[proxyName] as ProxyInfo | undefined)
+  const proxy = useRoutingProxies((s) => s.proxies[proxyName] as ProxyInfo | undefined)
   const isTestingSingle = useSelectorsStore((s) => !!s.testingSingle[proxyName])
   const delay = proxy ? getLastDelay(proxy) : null
   const hasHistory = hasDelayHistory(proxy)
   const showDelay = shouldShowDelay(proxy, isTestingSingle)
-  const canTest = !!proxy && !NO_DELAY_TYPES.has(proxy.type.toLowerCase())
+  const canTest = canProbe(proxy)
 
   return (
     <div className={cn('flex w-full min-w-0 items-center gap-2', disabled && 'opacity-70')}>
@@ -444,7 +516,7 @@ const CollapsedProxyOption = memo(function CollapsedProxyOption({
             onError={(e) => ((e.target as HTMLImageElement).style.display = 'none')}
           />
         )}
-        <span className="truncate">{proxyName}</span>
+        <span className="truncate">{displayName(proxyName)}</span>
       </div>
       {canTest && (
         <Tooltip>
@@ -470,7 +542,7 @@ const CollapsedProxyOption = memo(function CollapsedProxyOption({
               {isTestingSingle ? <Spinner /> : hasHistory ? delay || <GraveIcon size={14} /> : <IconBoltFilled className="size-3.5" />}
             </button>
           } />
-          <TooltipContent>Замерить отклик</TooltipContent>
+          <TooltipContent>HTTP GET через выбранное подключение</TooltipContent>
         </Tooltip>
       )}
     </div>
@@ -494,11 +566,11 @@ const SelectorCombobox = memo(function SelectorCombobox({
   onTestSingle: (proxyName: string) => Promise<void>
   visible: boolean
 }) {
-  const selector = useProxiesStore((s) => s.proxies[selectorName] as ProxyInfo | undefined)
+  const selector = useRoutingProxies((s) => s.proxies[selectorName] as ProxyInfo | undefined)
   const value = selector?.now ?? null
-  const selectedProxy = useProxiesStore((s) => (value ? (s.proxies[value] as ProxyInfo | undefined) : undefined))
+  const selectedProxy = useRoutingProxies((s) => (value ? (s.proxies[value] as ProxyInfo | undefined) : undefined))
   const isFixed = !!value && selector?.fixed === value
-  const disabledOptions = useProxiesStore(
+  const disabledOptions = useRoutingProxies(
     useShallow((s) =>
       Object.fromEntries(
         options.map((proxyName) => [proxyName, lockSelection || isSelectionDisabled(autoPolicy, s.proxies[proxyName] as ProxyInfo | undefined)])
@@ -519,7 +591,7 @@ const SelectorCombobox = memo(function SelectorCombobox({
       items={options}
       value={value}
       open={visible ? open : false}
-      itemToStringLabel={(item) => item}
+      itemToStringLabel={(item) => displayName(item)}
       itemToStringValue={(item) => item}
       onOpenChange={setOpen}
       onValueChange={(proxyName) => proxyName && !disabledOptions[proxyName] && onSelect(selectorName, proxyName)}
@@ -577,6 +649,7 @@ const SelectorRow = memo(function SelectorRow({
   onClearFixed,
   collapsed,
   onToggleCollapse,
+  orderControls,
 }: {
   selectorName: string
   onTestAll: (name: string) => void
@@ -585,10 +658,11 @@ const SelectorRow = memo(function SelectorRow({
   onClearFixed: (selectorName: string) => Promise<void>
   collapsed: boolean
   onToggleCollapse: (name: string) => void
+  orderControls?: import('react').ReactNode
 }) {
-  const selector = useProxiesStore((s) => s.proxies[selectorName] as ProxyInfo | undefined)
+  const selector = useRoutingProxies((s) => s.proxies[selectorName] as ProxyInfo | undefined)
   const isTesting = useSelectorsStore((s) => !!s.testingAll[selectorName])
-  const selectedProxy = useProxiesStore((s) => {
+  const selectedProxy = useRoutingProxies((s) => {
     const currentName = (s.proxies[selectorName] as ProxyInfo | undefined)?.now
     return currentName ? (s.proxies[currentName] as ProxyInfo | undefined) : undefined
   })
@@ -604,10 +678,10 @@ const SelectorRow = memo(function SelectorRow({
   const hideUnavailable = useSettings((s) => s.hideUnavailableProxies)
   const hideCounter = useSettings((s) => s.hideUnavailableProxiesCounter)
   const sortOrder = useSettings((s) => s.proxySortOrder)
-  const allProxiesMap = useProxiesStore((s) => s.proxies as Record<string, ProxyInfo | undefined>)
+  const allProxiesMap = useRoutingProxies((s) => s.proxies as Record<string, ProxyInfo | undefined>)
 
   const filteredSortedProxies = useMemo(() => {
-    let result = allProxies
+    let result = allProxies.filter((name) => isRouteOption(name, isGeneralSelector(selectorName), allProxiesMap))
     if (hideUnavailable) {
       result = result.filter((name) => !hasNConsecutiveTimeouts(allProxiesMap[name], hideCounter))
     }
@@ -615,13 +689,14 @@ const SelectorRow = memo(function SelectorRow({
       result = sortProxyNames(result, sortOrder, allProxiesMap)
     }
     return result
-  }, [allProxies, hideUnavailable, hideCounter, sortOrder, allProxiesMap])
+  }, [allProxies, selectorName, hideUnavailable, hideCounter, sortOrder, allProxiesMap])
 
   return (
     <div className="border-border bg-input-background rounded-xl border p-4">
       <div className="mb-2.5 flex flex-col gap-2">
         <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {orderControls}
             {selector.icon && (
               <img
                 src={selector.icon}
@@ -630,7 +705,7 @@ const SelectorRow = memo(function SelectorRow({
                 onError={(e) => ((e.target as HTMLImageElement).style.display = 'none')}
               />
             )}
-            <span className="truncate text-[15px] font-medium">{selectorName}</span>
+            <span className="truncate text-[15px] font-medium">{displayName(selectorName)}</span>
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
@@ -647,21 +722,16 @@ const SelectorRow = memo(function SelectorRow({
               <TooltipTrigger render={
                 <Button
                   variant="outline"
-                  size={showSelectedDelay ? 'sm' : 'icon-sm'}
-                  className={cn(showSelectedDelay && 'px-2 text-xs font-medium tabular-nums', showSelectedDelay && delayColor(selectedDelay))}
+                  size="sm"
+                  className={cn('px-2 text-xs font-medium tabular-nums', showSelectedDelay && delayColor(selectedDelay))}
                   onClick={() => onTestAll(selectorName)}
                   disabled={isTesting}
                 >
-                  {isTesting ? (
-                    <IconLoader2 size={13} className="animate-spin" />
-                  ) : showSelectedDelay ? (
-                    selectedDelay
-                  ) : (
-                    <IconBoltFilled size={13} />
-                  )}
+                  {isTesting ? <IconLoader2 size={13} className="animate-spin" /> : <IconBoltFilled size={13} />}
+                  GET{showSelectedDelay ? ` ${selectedDelay} мс` : ''}
                 </Button>
               } />
-              <TooltipContent>Замерить отклик</TooltipContent>
+              <TooltipContent>HTTP GET через выбранное подключение</TooltipContent>
             </Tooltip>
           </div>
         </div>
@@ -682,7 +752,7 @@ const SelectorRow = memo(function SelectorRow({
           )}
         >
           <div className="min-h-0 overflow-hidden">
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
               {filteredSortedProxies.map((proxyName) => (
                 <ProxyCard
                   key={proxyName}
@@ -723,18 +793,47 @@ const SelectorRow = memo(function SelectorRow({
 })
 
 /* ====================== ОСНОВНОЙ КОМПОНЕНТ ====================== */
-export function SelectorsPanel({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCollapsedStateChange }: Props) {
-  const loading = useProxiesStore((s) => s.loading)
-  const error = useProxiesStore((s) => s.error)
-  const pingTestUrl = useSettings((s) => s.pingTestUrl)
-  const pingTestTimeout = useSettings((s) => s.pingTestTimeout)
+function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCollapsedStateChange, configContent, onDeviceSelect, onAddRoute, onRemoveRoute, onRenameRoute, onReorderRoute, onSelectDraft }: Props) {
+  const loading = useRoutingProxies((s) => s.loading)
+  const error = useRoutingProxies((s) => s.error)
   const [collapsedSelectors, setCollapsedSelectors] = useState<Record<string, boolean>>(() => readCollapsedSelectors())
+  const [deviceIp, setDeviceIp] = useState(() => sessionStorage.getItem(DEVICE_IP_KEY) ?? '')
+  const [newIp, setNewIp] = useState('')
+  const [devicePending, setDevicePending] = useState(false)
+  const testingGroups = useSelectorsStore((s) => s.testingAll)
+  const [addingRoute, setAddingRoute] = useState(false)
+  const [routeSearch, setRouteSearch] = useState('')
+  const [routeName, setRouteName] = useState('')
+  const [routeDomains, setRouteDomains] = useState('')
+  const [routePending, setRoutePending] = useState(false)
+  const [draggedRoute, setDraggedRoute] = useState<RouteTag | null>(null)
+  const [renamingTag, setRenamingTag] = useState('')
+  const [renamingName, setRenamingName] = useState('')
+  
+  const devices = useMemo(() => readMihomoDevices(configContent), [configContent])
+  const routeTags = useMemo(() => mihomoRouteTags(configContent), [configContent])
+  const customRoutes = useMemo(() => readMihomoCustomRoutes(configContent), [configContent])
+  const defaultChoices = useMemo(() => defaultMihomoChoices(configContent), [configContent])
+  const orderedTags = useMemo(() => orderedMihomoRouteTags(configContent), [configContent])
+  useEffect(() => { sessionStorage.setItem(DEVICE_IP_KEY, deviceIp) }, [deviceIp])
+  const allProxyData = useRoutingProxies((s) => s.proxies as Record<string, ProxyInfo | undefined>)
+  const nodeTransports = useSelectorsStore((s) => s.nodeTransports)
+  useEffect(() => {
+    let mounted = true
+    void apiCall<{ success: boolean; nodes?: Record<string, string> }>('GET', 'mihomo/node-metadata')
+      .then((result) => { if (mounted && result.success && result.nodes) useSelectorsStore.setState({ nodeTransports: result.nodes }) })
+      .catch(() => {})
+    return () => { mounted = false }
+  }, [])
+  const deviceOptions = useMemo(() => {
+    const names = ['DIRECT', ...Object.keys(allProxyData).filter((name) => name !== 'GLOBAL' && name !== 'REJECT' && !allProxyData[name]?.hidden)]
+    return [...new Set(names)]
+  }, [allProxyData])
 
-  const pingTestQuery = useMemo(() => {
-    const url = pingTestUrl.trim() || DEFAULT_PING_TEST_URL
-    const timeout = Number.isFinite(pingTestTimeout) && pingTestTimeout > 0 ? Math.trunc(pingTestTimeout) : DEFAULT_PING_TEST_TIMEOUT
-    return `url=${encodeURIComponent(url)}&timeout=${timeout}`
-  }, [pingTestTimeout, pingTestUrl])
+  async function changeDevice(ip: string, route: RouteTag | null, target?: string): Promise<boolean> {
+    setDevicePending(true)
+    try { return await onDeviceSelect(ip, route, target) } finally { setDevicePending(false) }
+  }
 
   const clearFixedSelection = useCallback(
     async (selectorName: string) => {
@@ -755,44 +854,42 @@ export function SelectorsPanel({ clashApiPort, mode, clashApiSecret, clashApiUni
   const requestProxyDelay = useCallback(
     async (proxyName: string) => {
       try {
-        const providerName = (useProxiesStore.getState().proxies[proxyName] as ProxyInfo | undefined)?.['provider-name']
-        const endpoint = providerName
-          ? `providers/proxies/${encodeURIComponent(providerName)}/${encodeURIComponent(proxyName)}/healthcheck?${pingTestQuery}`
-          : `proxies/${encodeURIComponent(proxyName)}/delay?${pingTestQuery}`
-        const data = await clashFetch<{ delay?: number }>(clashApiPort, endpoint, {
-          secret: clashApiSecret,
-          unix: clashApiUnix ?? null,
-          retry: false,
-        })
+        const special = specialPingTag(proxyName)
+        if (special) {
+          const result = await apiCall<{success: boolean; latencyMs?: number; error?: string}>('POST', 'xray/latency', {tag: special})
+          if (!result.success || !result.latencyMs) throw new Error(result.error || 'Нет ответа от подключения')
+          return result.latencyMs
+        }
+        let name = proxyName
+        const seen = new Set<string>()
+        const proxies = useProxiesStore.getState().proxies as Record<string, ProxyInfo | undefined>
+        while (proxies[name]?.now && !seen.has(name)) { seen.add(name); name = proxies[name]!.now! }
+        const data = await apiCall<{success: boolean; delay?: number; error?: string}>('POST', 'mihomo/node-ping', {name})
+        if (!data.success) throw new Error(data.error || 'Нет ответа от узла')
         return data.delay && data.delay > 0 ? data.delay : 0
       } catch {
         return 0
       }
     },
-    [clashApiPort, clashApiSecret, clashApiUnix, pingTestQuery]
+    [clashApiPort, clashApiSecret, clashApiUnix]
   )
 
   const applyDelayResults = useCallback((results: ReadonlyArray<readonly [string, number]>) => {
     if (!results.length) return
     const time = new Date().toISOString()
-    useProxiesStore.setState((state) => {
-      const next = { ...state.proxies }
-      let changed = false
+    useSelectorsStore.setState((state) => {
+      const next = { ...state.httpHistory }
       for (const [name, delay] of results) {
-        const proxy = state.proxies[name] as ProxyInfo | undefined
-        if (!proxy) continue
-        const newHistory = [...proxy.history, { time, delay }].slice(-10)
-        next[name] = { ...proxy, history: newHistory, alive: delay > 0 }
-        changed = true
+        next[name] = [...(next[name] ?? []), { time, delay }].slice(-10)
       }
-      return changed ? { proxies: next } : {}
+      return { httpHistory: next }
     })
   }, [])
 
-  const selectorNames = useProxiesStore(
+  const selectorNames = useRoutingProxies(
     useShallow((s) => {
       const allSelectors = Object.values(s.proxies).filter((p: any) => {
-        if (!SELECTOR_TYPES.has(p.type) || p.hidden) return false
+        if (!SELECTOR_TYPES.has(p.type) || p.hidden || isNoVpn(p.name) || /fallback/i.test(p.name)) return false
         return mode === 'global' ? p.name === 'GLOBAL' : p.name !== 'GLOBAL'
       }) as ProxyInfo[]
       const globalProxy = s.proxies['GLOBAL'] as ProxyInfo | undefined
@@ -802,6 +899,24 @@ export function SelectorsPanel({ clashApiPort, mode, clashApiSecret, clashApiUni
       return [...allSelectors].sort((a, b) => (orderMap.get(a.name) ?? Infinity) - (orderMap.get(b.name) ?? Infinity)).map((p) => p.name)
     })
   )
+  const generalSelector = selectorNames.find((name) => name === 'VPN') ?? selectorNames.find(isGeneralSelector)
+  const globalDirect = !!generalSelector && isGeneralDirect(allProxyData)
+  const activeDevice = devices.find((profile) => profile.ip === deviceIp)
+  const activeDeviceDirect = activeDevice?.choices.VPN === 'DIRECT'
+  const orderedSelectorNames = useMemo(() => {
+    const priority = orderedTags.map((tag) => defaultChoices[tag])
+    return [...selectorNames].sort((a, b) => {
+      if (isGeneralSelector(a)) return -1
+      if (isGeneralSelector(b)) return 1
+      return (priority.indexOf(a) < 0 ? Infinity : priority.indexOf(a)) - (priority.indexOf(b) < 0 ? Infinity : priority.indexOf(b))
+    })
+  }, [selectorNames, orderedTags, defaultChoices])
+
+  async function moveRoute(source: RouteTag, target: RouteTag) {
+    if (source === target || routePending) return
+    setRoutePending(true)
+    try { await onReorderRoute(source, target) } finally { setRoutePending(false); setDraggedRoute(null) }
+  }
 
   const persistedCollapsedSelectors = useMemo(
     () => Object.fromEntries(selectorNames.map((name) => [name, collapsedSelectors[name] ?? false])),
@@ -836,8 +951,9 @@ export function SelectorsPanel({ clashApiPort, mode, clashApiSecret, clashApiUni
     async (proxyName: string) => {
       useSelectorsStore.setState((s) => ({ testingSingle: { ...s.testingSingle, [proxyName]: true } }))
       try {
-        applyDelayResults([[proxyName, await requestProxyDelay(proxyName)]])
+        const delay = await requestProxyDelay(proxyName)
         await fetchClashProxies(clashApiPort, clashApiSecret, true, clashApiUnix ?? null)
+        applyDelayResults([[proxyName, delay]])
       } catch {
         /* */
       } finally {
@@ -847,58 +963,25 @@ export function SelectorsPanel({ clashApiPort, mode, clashApiSecret, clashApiUni
     [applyDelayResults, clashApiPort, clashApiSecret, clashApiUnix, requestProxyDelay]
   )
 
-  const selectProxy = useCallback(
-    (selectorName: string, proxyName: string) => {
-      const proxies = useProxiesStore.getState().proxies as Record<string, ProxyInfo | undefined>
-      if (isSelectionDisabled(AUTO_POLICY_TYPES.has(proxies[selectorName]?.type ?? ''), proxies[proxyName])) return
-
-      useProxiesStore.setState((state) => ({
-        proxies: { ...state.proxies, [selectorName]: { ...state.proxies[selectorName], now: proxyName } },
-      }))
-        ; (async () => {
-          try {
-            await clashFetch(clashApiPort, `proxies/${encodeURIComponent(selectorName)}`, {
-              method: 'PUT',
-              secret: clashApiSecret,
-              unix: clashApiUnix ?? null,
-              body: { name: proxyName },
-            })
-            await fetchClashProxies(clashApiPort, clashApiSecret, true, clashApiUnix ?? null)
-            const affected = getConnections()
-              .filter((conn) => conn.chains?.includes(selectorName))
-              .map((conn) => conn.id)
-            await Promise.all(
-              affected.map((id) =>
-                clashFetch(clashApiPort, `connections/${id}`, { method: 'DELETE', secret: clashApiSecret, unix: clashApiUnix ?? null })
-              )
-            )
-          } catch {
-            /* */
-          }
-        })()
-    },
-    [clashApiPort, clashApiSecret, clashApiUnix]
-  )
+  const selectProxy = useCallback((name: string, target: string) => {
+    void onSelectDraft(name, target)
+  }, [onSelectDraft])
 
   const testAll = useCallback(
-    async (selectorName: string) => {
+    async (selectorName: string, targets?: string[]) => {
       const selector = useProxiesStore.getState().proxies[selectorName] as ProxyInfo | undefined
-      if (!selector?.all) return
+      const candidates = targets ?? selector?.all
+      if (!candidates || useSelectorsStore.getState().testingAll[selectorName]) return
 
       useSelectorsStore.setState((s) => ({ testingAll: { ...s.testingAll, [selectorName]: true } }))
 
       try {
         const proxies = useProxiesStore.getState().proxies as Record<string, ProxyInfo | undefined>
-        const results = await Promise.all(
-          selector.all
-            .filter((name) => {
-              const type = proxies[name]?.type?.toLowerCase()
-              return !!type && !NO_DELAY_TYPES.has(type)
-            })
-            .map(async (name) => [name, await requestProxyDelay(name)] as const)
-        )
-        applyDelayResults(results)
+        const names = candidates.filter((name) => canProbe(proxies[name]))
+        const results: Array<readonly [string, number]> = []
+        for (const name of names) results.push([name, await requestProxyDelay(name)])
         await fetchClashProxies(clashApiPort, clashApiSecret, true, clashApiUnix ?? null)
+        applyDelayResults(results)
       } catch {
         /* */
       } finally {
@@ -907,6 +990,15 @@ export function SelectorsPanel({ clashApiPort, mode, clashApiSecret, clashApiUni
     },
     [applyDelayResults, clashApiPort, clashApiSecret, clashApiUnix, requestProxyDelay]
   )
+
+  useEffect(() => {
+    const handleTestAll = () => {
+      const general = selectorNames.find(isGeneralSelector) ?? selectorNames[0]
+      if (general) void testAll(general)
+    }
+    window.addEventListener('mihomo:test-all', handleTestAll)
+    return () => window.removeEventListener('mihomo:test-all', handleTestAll)
+  }, [selectorNames, testAll])
 
   const toggleCollapse = useCallback((selectorName: string) => {
     blurActiveElement()
@@ -949,20 +1041,128 @@ export function SelectorsPanel({ clashApiPort, mode, clashApiSecret, clashApiUni
 
   return (
     <TooltipProvider delayDuration={500}>
-      <div className="absolute inset-4 flex scrollbar-thin flex-col gap-4 overflow-y-auto">
-        {selectorNames.map((name) => (
-          <SelectorRow
+      <div className="absolute inset-0 space-y-4 overflow-y-auto p-4">
+        <div className="bg-card flex shrink-0 flex-wrap items-center gap-2 border-b pb-3">
+          <Button size="sm" variant={!activeDevice ? 'default' : 'outline'} onClick={() => setDeviceIp('')}>Общая маршрутизация</Button>
+          {devices.map((profile) => <Button size="sm" key={profile.ip} variant={activeDevice?.ip === profile.ip ? 'default' : 'outline'} onClick={() => setDeviceIp(profile.ip)}>{profile.ip}</Button>)}
+          {activeDevice && <Button size="sm" variant="outline" disabled={devicePending} onClick={async () => { if (await changeDevice(activeDevice.ip, null)) setDeviceIp('') }}>Удалить {activeDevice.ip}</Button>}
+        </div>
+        <div className="border-border flex shrink-0 flex-wrap items-center gap-2 border-b pb-3">
+          <span className="text-sm font-medium">Маршрутизация для устройства</span>
+          <Input className="max-w-44" value={newIp} onChange={(event) => setNewIp(event.target.value)} placeholder="192.168.0.20" aria-label="IP устройства" />
+          <Button size="sm" disabled={!validDeviceIp(newIp) || devices.some((device) => device.ip === newIp.trim()) || devicePending} onClick={async () => { const ip = newIp.trim(); if (await changeDevice(ip, 'VPN')) { setDeviceIp(ip); setNewIp('') } }}>Добавить IP</Button>
+        </div>
+        <div className="space-y-4">
+        {!activeDevice && <div className="border-border border-b pb-3">
+          <Button size="sm" variant="outline" onClick={() => setAddingRoute(true)}>+ Добавить маршрут</Button>
+          <Dialog open={addingRoute} onOpenChange={setAddingRoute}><DialogContent className="max-w-[min(94vw,680px)]! max-h-[85dvh] overflow-y-auto"><DialogHeader><DialogTitle>Новый маршрут</DialogTitle></DialogHeader><div className="flex flex-col gap-4">
+<label className="space-y-2 text-sm font-medium">Название маршрута<Input value={routeName} onChange={(event) => setRouteName(event.target.value)} placeholder="Например, Работа или Видеосервисы" aria-label="Название маршрута" maxLength={40} /></label>
+            <Input value={routeSearch} onChange={(event) => setRouteSearch(event.target.value)} placeholder="Найти сервис: Telegram, YouTube, нейронки…" aria-label="Поиск сервиса" />
+            <div className="flex flex-wrap gap-2">{findRoutePresets(routeSearch).map((preset) => <Button key={preset.name} size="sm" variant="outline" onClick={() => { setRouteName(current => current || preset.name); setRouteDomains(preset.domains.join('\n')) }}>{preset.name}</Button>)}</div>
+
+            <textarea className="bg-input-background border-border min-h-20 rounded-md border p-2 text-sm" value={routeDomains} onChange={(event) => setRouteDomains(event.target.value)} placeholder="Домены, по одному в строке" aria-label="Домены маршрута" />
+            <Button size="sm" disabled={routePending || !routeName.trim() || !routeDomains.trim()} onClick={async () => { setRoutePending(true); try { const saved = await onAddRoute(routeName, routeDomains.split(/\r?\n|,/).map((domain) => domain.trim()).filter(Boolean)); if (saved) { setRouteName(''); setRouteDomains(''); setRouteSearch(''); setAddingRoute(false) } } finally { setRoutePending(false) } }}>Создать маршрут</Button>
+          </div></DialogContent></Dialog>
+          {customRoutes.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{customRoutes.map((route) => <div key={route.tag} className="border-border flex flex-wrap items-center gap-2 rounded-md border px-2 py-1 text-sm">
+            {renamingTag === route.tag ? <>
+              <Input className="w-48" value={renamingName} maxLength={40} onChange={(event) => setRenamingName(event.target.value)} aria-label="Новое название маршрута" />
+              <Button size="sm" disabled={routePending || !renamingName.trim()} onClick={async () => { setRoutePending(true); try { if (await onRenameRoute(route.tag, renamingName)) { setRenamingTag(''); setRenamingName('') } } finally { setRoutePending(false) } }}>Сохранить</Button>
+              <Button size="sm" variant="ghost" onClick={() => { setRenamingTag(''); setRenamingName('') }}>Отмена</Button>
+            </> : <>
+              <span>{route.name}</span>
+              <Button size="sm" variant="ghost" disabled={routePending} onClick={() => { setRenamingTag(route.tag); setRenamingName(route.name) }}>Переименовать</Button>
+              <Button size="sm" variant="ghost" disabled={routePending} onClick={async () => { if (!window.confirm(`Удалить маршрут «${route.name}»?`)) return; setRoutePending(true); try { await onRemoveRoute(route.tag) } finally { setRoutePending(false) } }}>Удалить</Button>
+            </>}
+          </div>)}</div>}
+        </div>}
+        {globalDirect && <p className="text-muted-foreground text-sm">Общий трафик идёт напрямую. Для отдельных правил и устройств можно выбрать VPN ниже.</p>}
+        {!activeDevice && orderedSelectorNames.map((name) => {
+          const route = orderedTags.find((tag) => defaultChoices[tag] === name)
+          const index = route ? orderedTags.indexOf(route) : -1
+          return <div key={name} onDragOver={(event) => { if (route && draggedRoute && draggedRoute !== route) { event.preventDefault(); event.dataTransfer.dropEffect = 'move' } }} onDrop={(event) => { event.preventDefault(); if (route && draggedRoute) void moveRoute(draggedRoute, route) }}>
+            <SelectorRow
             key={name}
             selectorName={name}
+            orderControls={<div className="flex items-center gap-1.5 text-xs">
+              <span className="text-muted-foreground flex w-7 justify-center rounded border px-1 py-0.5 tabular-nums">{isGeneralSelector(name) ? '−1' : route ? index + 1 : '—'}</span>
+              {route && <>
+                <span draggable={!routePending} onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', route); setDraggedRoute(route) }} onDragEnd={() => setDraggedRoute(null)} className="text-muted-foreground cursor-grab rounded p-1 active:cursor-grabbing" title={`Перетащить ${routeLabel(route)}`} aria-label={`Перетащить ${routeLabel(route)}`}><IconGripVertical size={18} /></span>
+                <Button size="sm" variant="outline" disabled={routePending || index === 0} onClick={() => void moveRoute(route, orderedTags[index - 1])}>↑ Выше</Button>
+                <Button size="sm" variant="outline" disabled={routePending || index === orderedTags.length - 1} onClick={() => void moveRoute(route, orderedTags[index + 1])}>↓ Ниже</Button>
+              </>}
+            </div>}
             onTestAll={testAll}
             onSelect={selectProxy}
             onTestSingle={testSingle}
             onClearFixed={clearFixedSelection}
             collapsed={!!collapsedSelectors[name]}
             onToggleCollapse={toggleCollapse}
-          />
+            />
+          </div>
+        })}
+        {activeDeviceDirect && <p className="text-muted-foreground text-sm">Остальной трафик {activeDevice?.ip} идёт напрямую. Для отдельного правила можно выбрать VPN.</p>}
+        {activeDevice && ['VPN', ...orderedTags, ...routeTags.filter((tag) => tag !== 'VPN' && !orderedTags.includes(tag))].map((route) => (
+          <section key={route} className="border-border bg-input-background rounded-xl border p-4">
+            <div className="mb-2 flex items-center gap-2 text-[15px] font-medium"><RouteIcon route={route} />{routeLabel(route)}<Button size="sm" variant="outline" className="ml-auto" disabled={!!testingGroups[defaultChoices[route]]} onClick={() => void testAll(defaultChoices[route], deviceOptions.filter((name) => name === 'DIRECT' || (!isNoVpn(name) && isRouteOption(name, route === 'VPN', allProxyData))))}> <IconBoltFilled size={16} />{testingGroups[defaultChoices[route]] ? 'Пинг…' : 'Пинг'}</Button></div>
+            <div className="text-muted-foreground mb-3 text-sm">{route === 'VPN' ? 'Весь остальной трафик' : `Правила группы ${defaultChoices[route]}`} → {displayName(activeDevice.choices[route] === defaultChoices[route] ? allProxyData[defaultChoices[route]]?.now ?? activeDevice.choices[route] : activeDevice.choices[route])}</div>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
+              {deviceOptions.filter((name) => name === 'DIRECT' || (!isNoVpn(name) && isRouteOption(name, route === 'VPN', allProxyData))).map((name) => {
+                const proxy = allProxyData[name]
+                const selected = activeDevice.choices[route] === defaultChoices[route] ? allProxyData[defaultChoices[route]]?.now ?? activeDevice.choices[route] : activeDevice.choices[route]
+                const delay = proxy ? getLastDelay(proxy) : null
+                return <div key={name} role="button" tabIndex={0} aria-pressed={selected === name} aria-disabled={devicePending}
+                  onClick={() => { if (!devicePending && activeDevice.choices[route] !== name) void changeDevice(activeDevice.ip, route, name) }}
+                  onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && !devicePending && activeDevice.choices[route] !== name) { event.preventDefault(); void changeDevice(activeDevice.ip, route, name) } }}
+                  className={cn('relative flex min-h-22 flex-col justify-between rounded-md border px-3 py-2.5 pr-12 text-left text-sm transition-colors', selected === name ? 'border-blue-400 bg-blue-500/20' : 'border-ring/40 hover:border-blue-400 hover:bg-blue-500/10', devicePending && 'opacity-60')}>
+                  <span className="font-medium">{name === 'DIRECT' ? '🔓 Без VPN' : displayName(name)}</span>
+                  <span className="flex items-center justify-between gap-2"><span className="text-muted-foreground text-xs">{nodeTransports[name] ?? (proxy ? getProxyTransport(proxy) : 'Прямое соединение')}</span>
+                    {canProbe(proxy) && <button type="button" title={specialPingTag(name) ? 'HTTP через туннель' : 'HTTP GET через выбранное подключение'} aria-label={`Пинг ${name}`} className={cn('absolute right-2 top-2 rounded p-1 text-xs tabular-nums', delay === null ? 'text-muted-foreground' : delayColor(delay))} onClick={(event) => { event.stopPropagation(); void testSingle(name) }}>{delay === null ? <IconBoltFilled size={15} /> : delay || <GraveIcon size={14} />}</button>}
+                  </span>
+                </div>
+              })}
+            </div>
+            {route !== 'VPN' && activeDevice.choices[route] !== defaultChoices[route] && <Button size="sm" variant="ghost" className="mt-2" disabled={devicePending} onClick={() => void changeDevice(activeDevice.ip, route, defaultChoices[route])}>Вернуть общую настройку</Button>}
+          </section>
         ))}
+        </div>
       </div>
     </TooltipProvider>
   )
+}
+
+const RoutingProxies = createContext<Record<string, any> | null>(null)
+function useRoutingProxies<T>(selector: (state: ReturnType<typeof useProxiesStore.getState>) => T): T {
+  const state = useProxiesStore()
+  const proxies = useContext(RoutingProxies)
+  return selector(proxies ? { ...state, proxies } : state)
+}
+export function SelectorsPanel(props: Props) {
+  const live = useProxiesStore(s => s.proxies)
+  const httpHistory = useSelectorsStore(s => s.httpHistory)
+  const preview = useMemo(() => {
+    try {
+      const config = yaml.load(props.configContent) as any
+      const groups = config?.['proxy-groups'] ?? []
+      const selections = props.isDraft ? readSelections(props.configContent) : {}
+      const result: Record<string, any> = { ...live }
+      const names = new Set(groups.map((g: any) => g.name))
+      for (const [name, proxy] of Object.entries(result)) {
+        if (SELECTOR_TYPES.has(proxy.type) && name !== 'GLOBAL' && !names.has(name)) delete result[name]
+      }
+      for (const group of groups) {
+        const current = result[group.name]
+        const providerNodes = Object.values(live).filter((p: any) => group.use?.includes(p['provider-name'])).map((p: any) => p.name)
+        const all = [...new Set([...(group.proxies ?? []), ...providerNodes, ...(group.use?.length ? current?.all ?? [] : [])])]
+        result[group.name] = { history: [], alive: true, udp: true, ...current, name: group.name,
+          type: ({select: 'Selector', fallback: 'Fallback', 'url-test': 'URLTest', 'load-balance': 'LoadBalance'} as any)[group.type] ?? 'Selector',
+          all, now: selections[group.name] ?? current?.now ?? all[0], icon: group.icon, hidden: group.hidden }
+      }
+      return Object.fromEntries(Object.entries(result).map(([name, proxy]) => [name, {
+        ...proxy, history: httpHistory[name] ?? [],
+      }]))
+    } catch { return Object.fromEntries(Object.entries(live).map(([name, proxy]) => [name, {
+      ...proxy, history: httpHistory[name] ?? [],
+    }])) }
+  }, [props.configContent, props.isDraft, live, httpHistory])
+  return <RoutingProxies.Provider value={preview}><SelectorsBody {...props} /></RoutingProxies.Provider>
 }

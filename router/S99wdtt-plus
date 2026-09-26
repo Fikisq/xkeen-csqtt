@@ -1,0 +1,56 @@
+#!/bin/sh
+DIR=/opt/etc/wdtt-plus
+PID_FILE=/var/run/wdtt-plus.pid
+case "${1:-}" in
+    start)
+        if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+            echo "WDTT Plus уже запущен"; exit 0
+        fi
+        [ -x "$DIR/wdtt-plus-client" ] && [ -s "$DIR/wdtt-plus.conf" ] &&
+        [ -s "$DIR/password" ] && [ -s "$DIR/device_id" ] || {
+            echo "WDTT Plus не настроен" >&2; exit 1;
+        }
+        rm -f "$DIR/stopped"
+        rm -f /var/run/wdtt-plus-health
+        echo "WDTT_PLUS_START" >> "$DIR/wdtt-plus.log"
+        nohup "$DIR/wdtt-plus-run.sh" >> "$DIR/wdtt-plus.log" 2>&1 &
+        echo $! > "$PID_FILE"
+        nohup "$DIR/wdtt-plus-watchdog.sh" >/dev/null 2>&1 &
+        echo $! > /var/run/wdtt-plus-watchdog.pid
+        echo "WDTT Plus запускается (PID $(cat "$PID_FILE"))"
+        ;;
+    stop)
+        touch "$DIR/stopped"
+        rm -f /var/run/wdtt-plus-health
+        if [ -s /var/run/wdtt-plus-watchdog.pid ]; then
+            kill "$(cat /var/run/wdtt-plus-watchdog.pid)" 2>/dev/null
+            rm -f /var/run/wdtt-plus-watchdog.pid
+        fi
+        if [ -f "$PID_FILE" ]; then
+            pid=$(cat "$PID_FILE")
+            kill -INT "$pid" 2>/dev/null
+            n=0
+            while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 10 ]; do
+                sleep 1; n=$((n+1))
+            done
+            kill -9 "$pid" 2>/dev/null
+            rm -f "$PID_FILE"
+        fi
+        if [ -f "$DIR/vk_api_calls" ]; then
+            "$DIR/wdtt-plus-calls.sh" stop || {
+                echo "WDTT Plus остановлен, но звонки VK не удалось завершить" >&2; exit 1;
+            }
+        fi
+        KEEP_MANUAL_STAGE=${KEEP_MANUAL_STAGE:-0} /opt/bin/vk-manual-hashes.sh stop wdtt-plus || {
+            echo "WDTT Plus остановлен, но ручные звонки VK не удалось завершить" >&2; exit 1;
+        }
+        echo "WDTT Plus остановлен"
+        ;;
+    restart) KEEP_MANUAL_STAGE=1 "$0" stop && "$0" start ;;
+    status)
+        if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+            echo "WDTT Plus работает (PID $(cat "$PID_FILE"))"
+        else echo "WDTT Plus остановлен"; fi
+        ;;
+    *) echo "Usage: $0 start|stop|restart|status" >&2; exit 2 ;;
+esac

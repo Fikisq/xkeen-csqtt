@@ -213,7 +213,7 @@ export function ImportModal({ onGenerate, onAddToConfig }: Props) {
 
   const isValidUri = SUPPORTED_PROTOCOLS.some((p) => {
     if (state.currentCore !== 'mihomo' && (p === 'http://' || p === 'https://')) return false
-    return uri.toLowerCase().startsWith(p)
+    return uri.trim().toLowerCase().startsWith(p)
   })
 
   function close() {
@@ -312,7 +312,7 @@ export function ImportModal({ onGenerate, onAddToConfig }: Props) {
               <IconLink size={24} className="text-chart-2" /> Добавить подключение
             </DialogTitle>
             <DialogDescription>
-              Вставьте ссылку в формате protocol://{state.currentCore === 'mihomo' && ' или https://'}
+              Вставьте ссылку узла protocol://{state.currentCore === 'mihomo' && ' или URL подписки https://'}
             </DialogDescription>
           </DialogHeader>
 
@@ -617,7 +617,7 @@ export function ImportModal({ onGenerate, onAddToConfig }: Props) {
                   value={uri}
                   onChange={(e) => setUri(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && isValidUri && generate()}
-                  placeholder="vless://..."
+                  placeholder={state.currentCore === 'mihomo' ? 'vless://... или https://подписка' : 'vless://...'}
                   className={uri ? 'pr-7' : ''}
                 />
                 <InputGroupAddon align="inline-end">
@@ -639,7 +639,7 @@ export function ImportModal({ onGenerate, onAddToConfig }: Props) {
               </InputGroup>
 
               <Button onClick={generate} disabled={!isValidUri} className="w-full">
-                Сгенерировать
+                {/^https?:\/\//i.test(uri.trim()) ? 'Подготовить подписку' : 'Сгенерировать'}
               </Button>
             </div>
           </div>

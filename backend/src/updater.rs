@@ -298,7 +298,37 @@ async fn install_yq(client: &reqwest::Client, proxies: &[String], tmp_dir: &Path
     Ok(())
 }
 
+async fn ensure_xray_starter() -> Result<(), String> {
+    fs::create_dir_all(XRAY_CONF_DIR).await.map_err(|e| format!("Каталог Xray: {}", e))?;
+    let mut entries = fs::read_dir(XRAY_CONF_DIR).await.map_err(|e| format!("Каталог Xray: {}", e))?;
+    while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
+        if entry.path().extension().is_some_and(|ext| ext == "json") {
+            return Ok(());
+        }
+    }
+    let path = Path::new(XRAY_CONF_DIR).join("00_config.json");
+    let mut file = fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&path)
+        .await
+        .map_err(|e| format!("Создание базового Xray JSON: {}", e))?;
+    if let Err(e) = file.write_all(include_str!("xray-starter.json").as_bytes()).await {
+        _ = fs::remove_file(&path).await;
+        return Err(format!("Запись базового Xray JSON: {}", e));
+    }
+    if let Err(e) = file.sync_all().await {
+        _ = fs::remove_file(&path).await;
+        return Err(format!("Сохранение базового Xray JSON: {}", e));
+    }
+    log("INFO", "Создан базовый Xray JSON без прокси-узлов".into());
+    Ok(())
+}
+
 pub async fn post_update(State(state): State<AppState>, Json(req): Json<UpdateReq>) -> impl IntoResponse {
+    if req.core == "self" {
+        return response(false, Some("Автообновление этой версии панели отключено: релиз исходного XKeen UI заменит интеграцию CSQTT".into()));
+    }
     let Some(repo) = get_repo(&req.core) else {
         return response(false, Some("Неизвестное ядро".into()));
     };
@@ -497,6 +527,12 @@ pub async fn post_update(State(state): State<AppState>, Json(req): Json<UpdateRe
 
     if let Ok(Err(e)) | Err(e) = unpack.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string())) {
         return response(false, Some(format!("Ошибка распаковки: {}", e)));
+    }
+
+    if req.core == "xray" {
+        if let Err(e) = ensure_xray_starter().await {
+            return response(false, Some(e));
+        }
     }
 
     let target = format!("/opt/sbin/{}", req.core);

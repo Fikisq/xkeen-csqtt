@@ -1,0 +1,57 @@
+#!/bin/sh
+DIR="/opt/etc/csqtt"
+case "$1" in
+    start)
+        printf 'Starting CSQTT: '
+        rm -f "$DIR/stopped"
+        if [ -f "/var/run/csqtt.pid" ] && kill -0 "$(cat "/var/run/csqtt.pid")" 2>/dev/null; then
+            echo "уже запущен"; exit 0
+        fi
+        RUN_SCRIPT="$DIR/csqtt-run.sh"
+        if [ "$(cat "$DIR/client-version" 2>/dev/null)" = "2.1.9" ]; then
+            RUN_SCRIPT="$DIR/csqtt-run-219.sh"
+        fi
+        nohup "$RUN_SCRIPT" >>"$DIR/csqtt.log" 2>&1 &
+        echo $! > "/var/run/csqtt.pid"
+        echo "OK (PID $(cat "/var/run/csqtt.pid"))"
+        ;;
+    stop)
+        printf 'Stopping CSQTT: '
+        touch "$DIR/stopped"
+        if [ -f "/var/run/csqtt.pid" ]; then
+            PID=$(cat "/var/run/csqtt.pid")
+            kill -INT "$PID" 2>/dev/null
+            n=0
+            while kill -0 "$PID" 2>/dev/null && [ $n -lt 10 ]; do
+                sleep 1; n=$((n+1))
+            done
+            kill -9 "$PID" 2>/dev/null
+            rm -f "/var/run/csqtt.pid"
+        fi
+        if [ -f "$DIR/vk_api_calls" ]; then
+            "$DIR/csqtt-api-calls.sh" stop || { echo "звонки VK API не завершены"; exit 1; }
+        fi
+        KEEP_MANUAL_STAGE=${KEEP_MANUAL_STAGE:-0} /opt/bin/vk-manual-hashes.sh stop csqtt || { echo "ручные звонки VK не завершены"; exit 1; }
+        if [ -f "$DIR/csqtt-tun-fd.pid" ]; then
+            kill "$(cat "$DIR/csqtt-tun-fd.pid")" 2>/dev/null
+            rm -f "$DIR/csqtt-tun-fd.pid"
+        fi
+        echo "OK"
+        ;;
+    restart)
+        touch "$DIR/restarting"
+        KEEP_MANUAL_STAGE=1 "$0" stop || exit 1
+        sleep 1
+        "$0" start
+        rm -f "$DIR/restarting"
+        ;;
+    status)
+        if [ -f "/var/run/csqtt.pid" ] && kill -0 "$(cat "/var/run/csqtt.pid")" 2>/dev/null; then
+            echo "CSQTT работает (PID $(cat "/var/run/csqtt.pid"))"
+        else
+            echo "CSQTT остановлен"
+        fi
+        ;;
+    log) tail -n 100 "$DIR/csqtt.log" ;;
+    *) echo "Usage: $0 start|stop|restart|status|log" ;;
+esac

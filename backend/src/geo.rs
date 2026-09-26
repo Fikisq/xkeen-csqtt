@@ -25,6 +25,56 @@ struct GeoQueryResponse {
     categories: Vec<String>,
 }
 
+#[derive(Serialize)]
+struct GeoCategory {
+    name: String,
+    count: usize,
+}
+
+#[derive(Serialize)]
+struct GeoCategoryResponse {
+    categories: Vec<GeoCategory>,
+}
+
+pub async fn get_geosite_categories() -> impl IntoResponse {
+    let result = task::spawn_blocking(|| -> Result<Vec<GeoCategory>, String> {
+        let file = File::open(Path::new(XRAY_ASSET_DIR).join("geosite.dat"))
+            .map_err(|_| "Файл geosite.dat не установлен".to_string())?;
+        let data = unsafe { MmapOptions::new().map(&file) }.map_err(|e| e.to_string())?;
+        let mut buf = &data[..];
+        let mut categories = Vec::new();
+        while buf.has_remaining() {
+            let (tag, wt) = decode_key(&mut buf).map_err(|e| e.to_string())?;
+            if tag != 1 || wt != WireType::LengthDelimited {
+                skip_field(wt, tag, &mut buf, DecodeContext::default()).map_err(|e| e.to_string())?;
+                continue;
+            }
+            let mut entry = read_len_delim(&mut buf).ok_or("Неверный формат geosite.dat")?;
+            let (mut name, mut count) = (String::new(), 0);
+            while entry.has_remaining() {
+                let (field, wire) = decode_key(&mut entry).map_err(|e| e.to_string())?;
+                match (field, wire) {
+                    (1, WireType::LengthDelimited) => {
+                        name = String::from_utf8_lossy(read_len_delim(&mut entry).ok_or("Неверная категория")?).into_owned();
+                    }
+                    (2, WireType::LengthDelimited) => {
+                        read_len_delim(&mut entry).ok_or("Неверный домен")?;
+                        count += 1;
+                    }
+                    _ => skip_field(wire, field, &mut entry, DecodeContext::default()).map_err(|e| e.to_string())?,
+                }
+            }
+            if !name.is_empty() { categories.push(GeoCategory { name, count }); }
+        }
+        categories.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+        Ok(categories)
+    }).await.map_err(|e| e.to_string()).and_then(|result| result);
+    match result {
+        Ok(categories) => Json(ApiResponse { success: true, error: None, data: Some(GeoCategoryResponse { categories }) }),
+        Err(error) => Json(ApiResponse::<GeoCategoryResponse> { success: false, error: Some(error), data: None }),
+    }
+}
+
 fn read_len_delim<'a>(buf: &mut &'a [u8]) -> Option<&'a [u8]> {
     let len = decode_varint(buf).ok()? as usize;
     if buf.remaining() < len {

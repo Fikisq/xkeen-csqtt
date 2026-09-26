@@ -1,0 +1,83 @@
+diff --git a/go_client/dispatcher.go b/go_client/dispatcher.go
+index 7ae94ae..a56f710 100644
+--- a/go_client/dispatcher.go
++++ b/go_client/dispatcher.go
+@@ -53,7 +53,7 @@ const (
+ 	// интерпретирует reorder как потери → cwnd collapse → скорость single-flow
+ 	// падает до ~8 KB/s.
+ 	//
+-	// С chunk=16 пакеты реже перескакивают между путями с разной задержкой. Это
++	// С chunk=64 пакеты реже перескакивают между путями с разной задержкой. Это
+ 	// уменьшает reorder на активной многоканальной сессии, сохраняя равномерную
+ 	// загрузку всех workers.
+ 	// Reorder возможен только между chunk-границами, что покрывается WG replay
+@@ -61,7 +61,7 @@ const (
+ 	//
+ 	// Все workers по-прежнему получают одинаковую долю трафика за полный цикл;
+ 	// фактический выигрыш зависит от различия задержек между TURN-путями.
+-	chunkSize = 16
++	chunkSize = 64
+ )
+ 
+ type WorkerSlot struct {
+@@ -83,6 +83,7 @@ type Dispatcher struct {
+ 	mu                    sync.Mutex // Используется только для записи
+ 	rrIndex               int
+ 	rrCount               int
++	droppedPackets        atomic.Uint64
+ 	ReturnCh              chan []byte
+ 	ctx                   context.Context
+ 	cancel                context.CancelFunc
+@@ -398,6 +399,9 @@ func (d *Dispatcher) readLoop() {
+ 
+ 		if !sent {
+ 			// Все workers перегружены — сдвигаем указатель, пакет дропается
++			if dropped := d.droppedPackets.Add(1); dropped == 1 || dropped%100 == 0 {
++				log.Printf("[ДИСП] очередь всех воркеров заполнена, отброшено пакетов: %d", dropped)
++			}
+ 			d.rrIndex = (idx + 1) % nw
+ 			d.rrCount = 0
+ 			putPktBuf(pkt)
+diff --git a/go_client/socks5_server.go b/go_client/socks5_server.go
+index b65c604..15eed0c 100644
+--- a/go_client/socks5_server.go
++++ b/go_client/socks5_server.go
+@@ -9,6 +9,7 @@ import (
+ 	"errors"
+ 	"fmt"
+ 	"io"
++	"log"
+ 	"net"
+ 	"net/netip"
+ 	"strings"
+@@ -163,7 +164,9 @@ func runSocks5Server(
+ 	}
+ 
+ 	var clients sync.WaitGroup
+-	clientSlots := make(chan struct{}, 64)
++	// A browser speed test probes many servers concurrently. Keep enough
++	// capacity for those short connections alongside normal household traffic.
++	clientSlots := make(chan struct{}, 256)
+ 	defer clients.Wait()
+ 	for {
+ 		client, err := listener.Accept()
+@@ -176,6 +179,7 @@ func runSocks5Server(
+ 		select {
+ 		case clientSlots <- struct{}{}:
+ 		default:
++			log.Printf("[SOCKS5] предел одновременных клиентов достигнут (%d)", cap(clientSlots))
+ 			_ = client.Close()
+ 			continue
+ 		}
+@@ -186,7 +190,10 @@ func runSocks5Server(
+ 			defer client.Close()
+ 			stopClosingClient := context.AfterFunc(serverCtx, func() { _ = client.Close() })
+ 			defer stopClosingClient()
+-			_ = server.serveClient(serverCtx, client)
++			if err := server.serveClient(serverCtx, client); err != nil &&
++				!errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
++				log.Printf("[SOCKS5] соединение закрыто: %v", err)
++			}
+ 		}()
+ 	}
+ }

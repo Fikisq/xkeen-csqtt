@@ -3,11 +3,22 @@ mod auth;
 mod backuper;
 mod configs;
 mod controller;
+mod csqtt;
+mod manual_hashes;
+mod wdtt_plus;
 mod frontend_embedder;
 mod geo;
 mod logger;
+mod latency;
+mod mihomo_latency;
+mod mihomo_subscription_refresh;
+mod xray_subscription_refresh;
+mod xray_routes;
+mod device_bypass;
+mod node_metadata;
 mod ruleset_inspector;
 mod settings;
+mod subscription;
 mod types;
 mod updater;
 mod version;
@@ -430,6 +441,8 @@ async fn main() {
         rci_token,
     };
     version::start_update_checker(state.clone());
+    xray_subscription_refresh::start(state.clone());
+    mihomo_subscription_refresh::start(state.clone());
 
     if let Some(ref _token) = state.rci_token {
         log("INFO", "RCI токен успешно загружен".into());
@@ -461,6 +474,31 @@ async fn main() {
                 .delete(configs::delete_config)
                 .patch(configs::patch_config),
         )
+        .route("/api/xray-config", get(configs::get_xray_setup).put(configs::put_xray_setup))
+        .route("/api/subscription/preview", post(subscription::preview_subscription))
+        .route("/api/xray/subscription-refresh-check", get(xray_subscription_refresh::dry_run))
+        .route("/api/csqtt/status", get(csqtt::status))
+        .route("/api/csqtt/settings", get(csqtt::settings).put(csqtt::save_settings))
+        .route("/api/csqtt/manual-hashes", post(manual_hashes::csqtt))
+        .route("/api/csqtt/restart", post(csqtt::restart))
+        .route("/api/csqtt/control", post(csqtt::control))
+        .route("/api/csqtt/speedtest", post(csqtt::speedtest))
+        .route("/api/wdtt-plus/status", get(wdtt_plus::status))
+        .route("/api/wdtt-plus/settings", get(wdtt_plus::settings).put(wdtt_plus::save_settings))
+        .route("/api/wdtt-plus/manual-hashes", post(manual_hashes::wdtt_plus))
+        .route("/api/wdtt-plus/control", post(wdtt_plus::control))
+        .route("/api/wdtt-plus/attach-xray", post(wdtt_plus::attach_xray))
+        .route("/api/xray/latency", post(latency::test_latency))
+        .route("/api/xray/routes", post(xray_routes::apply_routes))
+        .route("/api/mihomo/global-direct", post(device_bypass::mihomo_global_direct))
+        .route("/api/mihomo/device-direct", post(device_bypass::mihomo_devices))
+        .route("/api/xray/sync-bypass", post(device_bypass::sync_xray_routing))
+        .route("/api/mihomo/node-metadata", get(node_metadata::get_node_metadata))
+        .route("/api/mihomo/node-ping", post(mihomo_latency::probe))
+        .route("/api/mihomo/node-mapping", get(mihomo_latency::node_mapping))
+        .route("/api/mihomo/subscription-refresh", post(mihomo_subscription_refresh::refresh_provider))
+        .route("/api/backup/download", get(backuper::download_backup))
+        .route("/api/backup/upload", post(backuper::upload_backup).layer(axum::extract::DefaultBodyLimit::max(16 * 1024 * 1024)))
         .route(
             "/api/backup",
             get(backuper::get_backups)
@@ -478,6 +516,7 @@ async fn main() {
         .route("/api/device-list", get(api_relay::get_device_list))
         .route("/api/update", post(updater::post_update))
         .route("/api/geo", get(geo::get_geo))
+        .route("/api/geo/categories", get(geo::get_geosite_categories))
         .route("/api/geo/site", get(geo::get_geosite))
         .route("/api/geo/ip", get(geo::get_geoip))
         .route("/api/auth/logout", post(auth::post_logout))

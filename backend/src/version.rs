@@ -47,10 +47,7 @@ pub async fn version_handler(State(state): State<AppState>) -> impl IntoResponse
         }
     };
 
-    let (ui, core_outdated) = (
-        *state.update_checker.ui_outdated.read().unwrap(),
-        *state.update_checker.core_outdated.read().unwrap(),
-    );
+    let core_outdated = *state.update_checker.core_outdated.read().unwrap();
 
     let current_core = state.core.read().unwrap().name.clone();
 
@@ -58,7 +55,6 @@ pub async fn version_handler(State(state): State<AppState>) -> impl IntoResponse
 
     let mut res = serde_json::Map::new();
 
-    let ui_tag = state.update_checker.ui_latest_tag.read().unwrap().clone();
     let core_tag = state.update_checker.core_latest_tag.read().unwrap().clone();
 
     let make_link = |repo: &str, tag: Option<&str>| -> Option<String> {
@@ -66,12 +62,10 @@ pub async fn version_handler(State(state): State<AppState>) -> impl IntoResponse
     };
 
     {
-        let link = get_repo("self").and_then(|r| make_link(r, ui_tag.as_deref()));
         res.insert("xkeen-ui".into(), json!({
             "version": VERSION.trim_start_matches('v'),
-            "outdated": ui,
-            "show_toast": check(ui, &state.update_checker.last_ui_toast),
-            "link": link,
+            "outdated": false,
+            "show_toast": false,
         }));
     }
 
@@ -114,28 +108,13 @@ pub fn start_update_checker(state: AppState) {
         loop {
             interval.tick().await;
 
-            let (check_ui, check_core, proxies) = {
+            let (check_core, proxies) = {
                 let s = state.settings.read().unwrap();
                 let need = |on, last: &std::sync::RwLock<Option<Instant>>, sec| {
                     on && last.read().unwrap().map_or(true, |t| t.elapsed().as_secs() > sec)
                 };
-                (
-                    need(s.updater.auto_check_ui, &state.update_checker.last_ui_check, 14400),
-                    need(s.updater.auto_check_core, &state.update_checker.last_core_check, 14400),
-                    s.updater.github_proxy.clone(),
-                )
+                (need(s.updater.auto_check_core, &state.update_checker.last_core_check, 14400), s.updater.github_proxy.clone())
             };
-
-            if check_ui {
-                let cur = VERSION.trim_start_matches('v');
-                if let Some((latest, tag)) =
-                    updater::fetch_latest_version(&state.http_client, "self", &proxies, Some(cur)).await
-                {
-                    *state.update_checker.ui_outdated.write().unwrap() = compare_versions(&latest, cur);
-                    *state.update_checker.ui_latest_tag.write().unwrap() = Some(tag);
-                    *state.update_checker.last_ui_check.write().unwrap() = Some(Instant::now());
-                }
-            }
 
             if check_core {
                 let core = state.core.read().unwrap().name.clone();

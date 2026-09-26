@@ -23,7 +23,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { apiCall } from '@/lib/api'
 import { useAppContext } from '@/lib/store'
 import { IconAlertTriangle, IconBox, IconBoxOff, IconChevronDown, IconPencil, IconPlus, IconRestore, IconTrash } from '@tabler/icons-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 
 type BackupContent = 'xkeen' | 'xkeen-ui' | 'xray' | 'mihomo'
 
@@ -86,6 +86,7 @@ const KEEP_LATEST_BACKUPS_KEY = 'backups:keepLatest'
 
 export function BackupsModal({ open, onOpenChange, onRefreshConfigs }: Props) {
   const { showToast } = useAppContext()
+  const uploadRef = useRef<HTMLInputElement>(null)
 
   const [backups, setBackups] = useState<BackupItem[]>([])
   const [isLoading, setIsLoading] = useState(false)
@@ -268,10 +269,26 @@ export function BackupsModal({ open, onOpenChange, onRefreshConfigs }: Props) {
               <IconBox size={27} className="text-chart-2" /> Бэкапы конфигураций
             </DialogTitle>
             <DialogDescription>
-              Сохранение конфигураций XKeen, XKeen-UI, Xray и Mihomo. Восстановление перезапишет текущие конфигурации.
+              «Создать бэкап» сохранит текущие файлы XKeen, XKeen UI, Xray и Mihomo в архив на роутере. Работу ядер это не изменит. Восстановление перезапишет выбранные конфигурации.
             </DialogDescription>
           </DialogHeader>
 
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="outline" disabled={pendingAction !== null} onClick={() => uploadRef.current?.click()}>Загрузить архив с компьютера</Button>
+            <span className="text-muted-foreground text-xs">Архив содержит настройки и секреты подключений. Храните его в надёжном месте.</span>
+            <input ref={uploadRef} type="file" accept=".tar" className="hidden" onChange={async (event) => {
+              const file = event.target.files?.[0]; event.target.value = ''; if (!file) return
+              setPendingAction('upload')
+              try {
+                if (file.size > 16 * 1024 * 1024) throw new Error('Архив больше 16 МБ')
+                const response = await fetch('/api/backup/upload', { method: 'POST', body: file })
+                const result = await response.json()
+                if (!response.ok || !result.success) throw new Error(result.error || 'Не удалось загрузить архив')
+                await loadBackups(true); showToast('Архив загружен. Для применения выберите «Восстановить»')
+              } catch (error) { showToast(error instanceof Error ? error.message : 'Ошибка загрузки', 'error') }
+              finally { setPendingAction(null) }
+            }} />
+          </div>
           <ScrollArea className="min-h-0 flex-1">
             <div className="px-1 py-1.5 pr-3">
               {isLoading ? (
@@ -356,7 +373,7 @@ export function BackupsModal({ open, onOpenChange, onRefreshConfigs }: Props) {
                           <CardAction>
                             <Badge variant="outline">{formatBytes(backup.size)}</Badge>
                           </CardAction>
-                          <CardDescription className="text-xs">{backup.mtime}</CardDescription>
+                          <CardDescription className="text-xs">Создан: {backup.mtime} · время панели</CardDescription>
                         </CardHeader>
 
                         <CardContent className="flex flex-wrap gap-1">
@@ -370,6 +387,15 @@ export function BackupsModal({ open, onOpenChange, onRefreshConfigs }: Props) {
                         </CardContent>
 
                         <CardFooter className="justify-end gap-1">
+                          <Button size="sm" variant="outline" disabled={pendingAction !== null} onClick={async () => {
+                            setPendingAction('download')
+                            try {
+                              const response = await fetch(`/api/backup/download?name=${encodeURIComponent(backup.name)}`)
+                              if (!response.ok) throw new Error('Не удалось скачать архив')
+                              const url = URL.createObjectURL(await response.blob()); const link = document.createElement('a'); link.href = url; link.download = backup.name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000)
+                            } catch (error) { showToast(error instanceof Error ? error.message : 'Ошибка скачивания', 'error') }
+                            finally { setPendingAction(null) }
+                          }}>Скачать</Button>
                           <ButtonGroup>
                             <Button
                               variant="outline"

@@ -6,13 +6,17 @@ import { ConfigPanel } from './components/configuration/ConfigPanel'
 import { LogPanel } from './components/log/LogPanel'
 import { StatusBar } from './components/status/StatusBar'
 import { Toast } from './components/ui/toast'
-import { apiCall, capitalize } from './lib/api'
+import { apiCall, capitalize, clashFetch } from './lib/api'
 import { LazyBoundary, lazyLoad, useLazyMount } from './lib/loader'
-import { fetchClashProxies, getAppState, syncClashApiPort, useAppActions, useModalContext, useSettings } from './lib/store'
+import { fetchClashProxies, getAppState, useAppActions, useModalContext, useSettings } from './lib/store'
 import { applyTheme, THEME_MEDIA_QUERY } from './lib/theme'
+import { linkProviderToVpn } from './lib/mihomoSubscription'
 import { DEFAULT_PING_TEST_TIMEOUT, DEFAULT_PING_TEST_URL, type Config, type ThemeMode } from './lib/types'
 import { parseClashApiCredentials } from './lib/utils'
 import { parse as parseJsonc } from 'jsonc-parser'
+import { mihomoToXray, xrayToMihomo } from './lib/coreRoutingTransfer'
+import { defaultMihomoChoices, mihomoRouteTags, readMihomoDevices } from './lib/mihomoDeviceRouting'
+import { readSelections } from './lib/mihomoRoutingBackup'
 
 const CommentsWarningModal = lazyLoad(() => import('./components/modals/CommentsWarning'), 'CommentsWarningModal')
 const CoreManageModal = lazyLoad(() => import('./components/modals/CoreManagement'), 'CoreManageModal')
@@ -21,6 +25,8 @@ const ImportModal = lazyLoad(() => import('./components/modals/AddOutbound'), 'I
 const TemplateModal = lazyLoad(() => import('./components/modals/Templates'), 'TemplateModal')
 const SettingsModal = lazyLoad(() => import('./components/modals/Settings'), 'SettingsModal')
 const GeoScanModal = lazyLoad(() => import('./components/modals/GeoScan'), 'GeoScanModal')
+const XraySubscriptionsModal = lazyLoad(() => import('./components/modals/XraySubscriptions'), 'XraySubscriptionsModal')
+const MihomoSubscriptionsModal = lazyLoad(() => import('./components/modals/MihomoSubscriptions'), 'MihomoSubscriptionsModal')
 
 function useThemeMode(theme: ThemeMode) {
   useEffect(() => {
@@ -37,20 +43,24 @@ function useThemeMode(theme: ThemeMode) {
 
 interface ModalManagerProps {
   onSwitchCore: (core: string) => void
+  onRefreshStatus: () => void
   onInstalled: () => void
   onGenerate: (uri: string) => { content: string; type: string } | null
   onAddToConfig: (content: string, type: string, position: 'start' | 'end') => void
   onImportTemplate: (url: string) => Promise<void>
   openModal: (modal: string) => void
+  onOpenSubscriptions: (core: string) => void
 }
 
 const ModalManager = memo(function ModalManager({
   onSwitchCore,
+  onRefreshStatus,
   onInstalled,
   onGenerate,
   onAddToConfig,
   onImportTemplate,
   openModal,
+  onOpenSubscriptions,
 }: ModalManagerProps) {
   const { modals, dispatch } = useModalContext()
 
@@ -73,6 +83,8 @@ const ModalManager = memo(function ModalManager({
         <LazyBoundary>
           <CoreManageModal
             onSwitchCore={onSwitchCore}
+            onOpenSubscriptions={onOpenSubscriptions}
+            onRefreshStatus={onRefreshStatus}
             onOpenUpdate={(core: string) => {
               dispatch({ type: 'SET_UPDATE_MODAL_CORE', core })
               openModal('showUpdateModal')
@@ -111,6 +123,10 @@ const ModalManager = memo(function ModalManager({
 
 function AppContent({ onLogout }: { onLogout: () => void }) {
   const { dispatch, showToast } = useAppActions()
+  const [xraySubscriptionsOpen, setXraySubscriptionsOpen] = useState(false)
+  const mountXraySubscriptions = useLazyMount(xraySubscriptionsOpen)
+  const [mihomoSubscriptionsOpen, setMihomoSubscriptionsOpen] = useState(false)
+  const mountMihomoSubscriptions = useLazyMount(mihomoSubscriptionsOpen)
   const editorRef = useRef<CodeMirrorRef | null>(null)
   const configActionsRef = useRef<{ switchTab: (index: number) => void; getActiveIndex: () => number }>({
     switchTab: () => { },
@@ -267,24 +283,92 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         showToast('Это ядро уже активно', 'error')
         return
       }
-      dispatch({ type: 'SHOW_MODAL', modal: 'showCoreManageModal', show: false })
-      dispatch({ type: 'SET_SERVICE_STATUS', status: 'pending', pendingText: 'Переключение...' })
-      const configs = await loadConfigs(core, true)
-      const mihomoYamlEmpty =
-        core === 'mihomo' && !configs.find((c) => c.file.endsWith('/config.yaml') || c.file === 'config.yaml')?.content.trim()
-      const result = await apiCall<any>('POST', 'control', { action: 'switchCore', core })
-      showToast(result.success ? `Ядро изменено на ${capitalize(core)}` : `Ошибка: ${result.error}`, result.success ? 'success' : 'error')
-      const data = await apiCall<any>('GET', 'control')
-      if (data.success) {
-        dispatch({
-          type: 'SET_CORE_INFO',
-          currentCore: data.currentCore,
-          coreVersions: getAppState().coreVersions,
-          availableCores: data.cores,
-        })
-        dispatch({ type: 'SET_SERVICE_STATUS', status: data.running ? 'running' : 'stopped' })
-        if (result.success && mihomoYamlEmpty) await loadConfigs(core)
-        else if (result.success) syncClashApiPort()
+      if (appState.configs.some(config => config.isDirty)) {
+        showToast('Сначала сохраните изменения в редакторе конфигурации', 'error')
+        return
+      }
+      const old = appState.currentCore
+      const file = core === 'mihomo' ? '/opt/etc/mihomo/config.yaml' : '/opt/etc/xray/configs/00_config.json'
+      const sourceFile = old === 'mihomo' ? '/opt/etc/mihomo/config.yaml' : '/opt/etc/xray/configs/00_config.json'
+      let original = ''
+      let destinationWritten = false
+      let switched = false
+      dispatch({ type: 'SET_SERVICE_STATUS', status: 'pending', pendingText: 'Перенос маршрутов...' })
+      try {
+        const [sourceResponse, targetResponse] = await Promise.all([
+          apiCall<{success: boolean; configs: Array<{file: string; content: string}>}>('GET', `configs?core=${old}`),
+          apiCall<{success: boolean; configs: Array<{file: string; content: string}>}>('GET', `configs?core=${core}`),
+        ])
+        const source = sourceResponse.configs?.find(item => item.file === sourceFile)?.content
+        original = targetResponse.configs?.find(item => item.file === file)?.content ?? ''
+        if (!sourceResponse.success || !targetResponse.success || !source || !original) throw new Error('Не удалось прочитать конфигурации обоих ядер')
+        const nodeMap = await apiCall<{success: boolean; xrayToMihomo: Record<string, string>; mihomoToXray: Record<string, string>}>('GET', 'mihomo/node-mapping')
+        if (!nodeMap.success) throw new Error('Не удалось сопоставить подключения Xray и Mihomo')
+        const transferred = old === 'xray' ? xrayToMihomo(source, original, nodeMap) : mihomoToXray(source, original, nodeMap)
+        if (transferred.content !== original) {
+          const backup = await apiCall<{success: boolean; error?: string}>('PUT', 'backup')
+          if (!backup.success) throw new Error(backup.error || 'Не удалось создать бэкап перед переносом')
+          const put = await apiCall<{success: boolean; error?: string}>('PUT', `configs?core=${core}&validate=${core}`, {file, content: transferred.content})
+          if (!put.success) throw new Error(put.error || 'Целевое ядро не приняло перенесённые маршруты')
+          destinationWritten = true
+        }
+        dispatch({ type: 'SET_SERVICE_STATUS', status: 'pending', pendingText: 'Переключение...' })
+        const result = await apiCall<{success: boolean; error?: string}>('POST', 'control', { action: 'switchCore', core })
+        if (!result.success) throw new Error(result.error || 'Не удалось переключить ядро')
+        switched = true
+        if (core === 'mihomo') {
+          const {port, secret, unix} = parseClashApiCredentials(transferred.content)
+          if (!port && !unix) throw new Error('В Mihomo не настроен API для применения выбора подключений')
+          const selected = readSelections(transferred.content)
+          const live = await clashFetch<{proxies: Record<string, {all?: string[]; now?: string}>}>(port ?? '', 'proxies', {secret, unix})
+          for (const [group, node] of Object.entries(selected)) {
+            if (!live.proxies[group]?.all?.includes(node)) throw new Error(`В группе Mihomo «${group}» нет подключения «${node}»`)
+            await clashFetch(port ?? '', `proxies/${encodeURIComponent(group)}`, {method: 'PUT', secret, unix, body: {name: node}, retry: false})
+          }
+          const defaults = defaultMihomoChoices(transferred.content)
+          const routes = mihomoRouteTags(transferred.content).filter(route => route !== 'VPN')
+          const direct = (initial: string): boolean => {
+            let name = initial
+            const seen = new Set<string>()
+            while (name && !seen.has(name)) {
+              if (name === 'DIRECT' || /без\s*(?:vpn|впн)/i.test(name)) return true
+              seen.add(name)
+              name = selected[name] ?? live.proxies[name]?.now ?? ''
+            }
+            return false
+          }
+          const profiles = readMihomoDevices(transferred.content)
+          const ips = profiles.filter(profile => direct(profile.choices.VPN) && routes.every(route => direct(profile.choices[route] === defaults[route] ? defaults[route] : profile.choices[route]))).map(profile => profile.ip)
+          const bypass = await apiCall<{success: boolean; error?: string}>('POST', 'mihomo/device-direct', {ips})
+          if (!bypass.success) throw new Error(bypass.error || 'Не удалось перенести локальные исключения Mihomo')
+          const selective = profiles.some(profile => !direct(profile.choices.VPN) || routes.some(route => !direct(profile.choices[route] === defaults[route] ? defaults[route] : profile.choices[route])))
+          const global = await apiCall<{success: boolean; error?: string}>('POST', 'mihomo/global-direct', {enabled: direct(defaults.VPN) && !selective && routes.every(route => direct(defaults[route]))})
+          if (!global.success) throw new Error(global.error || 'Не удалось применить общий режим Mihomo')
+        } else {
+          const bypass = await apiCall<{success: boolean; error?: string}>('POST', 'xray/sync-bypass')
+          if (!bypass.success) throw new Error(bypass.error || 'Не удалось перенести локальные исключения Xray')
+        }
+        dispatch({ type: 'SHOW_MODAL', modal: 'showCoreManageModal', show: false })
+        showToast(`Ядро изменено на ${capitalize(core)}. Перенесено IP: ${transferred.devices.length}, новых маршрутов: ${transferred.routes.length}`)
+        const data = await apiCall<any>('GET', 'control')
+        if (data.success) {
+          dispatch({ type: 'SET_CONFIGS_LOADING', loading: true })
+          dispatch({ type: 'SET_CONFIGS', configs: [] })
+          dispatch({ type: 'SET_DASHBOARD_PORT', port: null, secret: null, unix: null } as any)
+          dispatch({ type: 'SET_CORE_INFO', currentCore: data.currentCore, coreVersions: getAppState().coreVersions, availableCores: data.cores })
+          dispatch({ type: 'SET_SERVICE_STATUS', status: data.running ? 'running' : 'stopped' })
+          await loadConfigs(core)
+        }
+      } catch (error) {
+        if (switched) {
+          const reverted = await apiCall<{success: boolean}>('POST', 'control', {action: 'switchCore', core: old}).catch(() => null)
+          if (!reverted?.success) showToast('Не удалось вернуть прежнее ядро. Проверьте статус XKeen', 'error')
+        }
+        if (destinationWritten) await apiCall('PUT', `configs?core=${core}&validate=${core}`, {file, content: original}).catch(() => null)
+        showToast(error instanceof Error ? error.message : 'Не удалось перенести маршруты', 'error')
+        const data = await apiCall<any>('GET', 'control').catch(() => null)
+        if (data?.success) dispatch({type: 'SET_CORE_INFO', currentCore: data.currentCore, coreVersions: getAppState().coreVersions, availableCores: data.cores})
+        dispatch({ type: 'SET_SERVICE_STATUS', status: data?.running ? 'running' : 'stopped' })
       }
     },
     [dispatch, showToast, loadConfigs]
@@ -360,6 +444,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         const scrollToLine = (line: number) => setTimeout(() => editorWrapper.revealLine(Math.max(1, line)), 0)
         const insertAtOffset = (offset: number, text: string, scrollLine?: number) => {
           editorWrapper.replaceRange(offset, offset, text)
+          if (core === 'mihomo' && type === 'proxy-provider') {
+            const withVpn = linkProviderToVpn(editorWrapper.getValue(), generated)
+            if (withVpn !== editorWrapper.getValue()) editorWrapper.replaceAll(withVpn)
+          }
           scrollToLine(scrollLine ?? editorWrapper.offsetToLineColumn(offset).lineNumber)
         }
 
@@ -449,6 +537,8 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             editorRef={editorRef}
             configActionsRef={configActionsRef}
             onOpenImport={() => openModal('showImportModal')}
+            onOpenXraySubscriptions={() => setXraySubscriptionsOpen(true)}
+            onOpenMihomoSubscriptions={() => setMihomoSubscriptionsOpen(true)}
             onOpenTemplate={() => openModal('showTemplateModal')}
             onOpenGeoScan={() => openModal('showGeoScanModal')}
             onOpenBackups={() => openModal('showBackupsModal')}
@@ -460,12 +550,16 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       <Toast />
       <ModalManager
         onSwitchCore={switchCore}
+        onRefreshStatus={() => { void checkStatus() }}
         onInstalled={onInstalled}
         onGenerate={generateConfig}
         onAddToConfig={addToConfig}
         onImportTemplate={importTemplate}
         openModal={openModal}
+        onOpenSubscriptions={(core) => core === 'xray' ? setXraySubscriptionsOpen(true) : setMihomoSubscriptionsOpen(true)}
       />
+      {mountXraySubscriptions && <LazyBoundary><XraySubscriptionsModal open={xraySubscriptionsOpen} onOpenChange={setXraySubscriptionsOpen} onApplied={() => loadConfigs(undefined, false, true)} /></LazyBoundary>}
+      {mountMihomoSubscriptions && <LazyBoundary><MihomoSubscriptionsModal open={mihomoSubscriptionsOpen} onOpenChange={setMihomoSubscriptionsOpen} onApplied={() => loadConfigs(undefined, false, true)} /></LazyBoundary>}
     </div>
   )
 }

@@ -1,0 +1,12 @@
+#!/bin/sh
+# Hysteria2/QUIC: raise the maximum socket buffers before XKeen starts.
+# Original router values: rmem_max=2097152, wmem_max=524288.
+case "$1" in
+    start|restart)
+        /opt/sbin/sysctl -w net.core.rmem_max=16777216 net.core.wmem_max=16777216 >/dev/null 2>&1 || {
+            printf '%s\n' 'Failed to set XKeen UDP buffer limits' >&2
+            exit 1
+        }
+        ;;
+esac
+exit 0

@@ -25,6 +25,8 @@ interface Props {
   clashApiSecret: string | null
   clashApiUnix?: string | null
   onOpenChange: (open: boolean) => void
+  onAddSubscription?: () => void
+  onConnectProviders?: () => Promise<void>
 }
 
 interface ProxySubscriptionInfo {
@@ -157,7 +159,7 @@ function LoadingTable({ kind }: { kind: ProvidersModalKind }) {
   )
 }
 
-export function ProvidersModal({ open, kind, clashApiPort, clashApiSecret, clashApiUnix, onOpenChange }: Props) {
+export function ProvidersModal({ open, kind, clashApiPort, clashApiSecret, clashApiUnix, onOpenChange, onAddSubscription, onConnectProviders }: Props) {
   const { showToast } = useAppActions()
   const [loading, setLoading] = useState(true)
   const [reloading, setReloading] = useState(false)
@@ -367,6 +369,8 @@ export function ProvidersModal({ open, kind, clashApiPort, clashApiSecret, clash
             </DialogHeader>
 
             <div className="flex shrink-0 items-center gap-2">
+              {kind === 'proxies' && onAddSubscription && <Button size="sm" variant="outline" className="shrink-0" onClick={() => { onOpenChange(false); setTimeout(onAddSubscription, 0) }}>Добавить подписку</Button>}
+              {kind === 'proxies' && onConnectProviders && <Button size="sm" variant="outline" className="shrink-0" onClick={() => { onOpenChange(false); void onConnectProviders() }}>Узлы в группах</Button>}
               <InputGroup>
                 <InputGroupInput value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Фильтр" />
                 <InputGroupAddon>

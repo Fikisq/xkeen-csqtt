@@ -6,10 +6,8 @@ use nix::sys::resource::{Resource, setrlimit};
 use nix::sys::signal::{Signal, kill};
 use nix::unistd::{Gid, Pid, setgid, setsid};
 use serde::Deserialize;
-use std::fs::Permissions;
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use tokio::fs::{self, set_permissions};
+use tokio::fs;
 use tokio::process::Command;
 
 #[derive(Deserialize)]
@@ -85,11 +83,14 @@ pub async fn run_init_command(state: &AppState, args: &[&str]) -> Result<(), Str
     } else {
         Command::new(&path).args(args).status().await
     };
-    if let Err(e) = result {
-        *state.init_file.write().unwrap() = None;
-        return Err(format!("{}: {}", path, e));
+    match result {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => Err(format!("{} завершился с ошибкой: {}", path, status)),
+        Err(e) => {
+            *state.init_file.write().unwrap() = None;
+            Err(format!("{}: {}", path, e))
+        }
     }
-    Ok(())
 }
 
 fn get_core_info(name: &str) -> CoreInfo {
@@ -245,7 +246,7 @@ pub async fn get_control(State(state): State<AppState>) -> impl IntoResponse {
 
 async fn check_core_config(core: &str) -> Result<(), String> {
     if core == "xray" {
-        fs::create_dir_all(XRAY_CONF_DIR).await.ok();
+        fs::create_dir_all(XRAY_CONF_DIR).await.map_err(|e| e.to_string())?;
         let has_json = std::fs::read_dir(XRAY_CONF_DIR)
             .map(|dir| {
                 dir.flatten()
@@ -256,6 +257,41 @@ async fn check_core_config(core: &str) -> Result<(), String> {
             return Err(
                 "Не найдены конфигурационные файлы. Настройте их в /opt/etc/xray/configs перед запуском".into(),
             );
+        }
+
+        let mut has_proxy_outbound = false;
+        let mut has_outbound_array = false;
+        if let Ok(entries) = std::fs::read_dir(XRAY_CONF_DIR) {
+            for entry in entries.flatten() {
+                if entry.path().extension().is_none_or(|ext| ext != "json") { continue; }
+                if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(outbounds) = json.get("outbounds").and_then(|value| value.as_array()) {
+                            has_outbound_array = true;
+                            has_proxy_outbound |= outbounds.iter().any(|outbound| {
+                                outbound.get("protocol").and_then(|value| value.as_str())
+                                    .is_some_and(|protocol| !["freedom", "blackhole", "dns"].contains(&protocol))
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        if has_outbound_array && !has_proxy_outbound {
+            return Err("В Xray пока нет прокси-узла. Импортируйте подписку перед переключением".into());
+        }
+
+        let output = Command::new("/opt/sbin/xray")
+            .args(["-test", "-confdir", XRAY_CONF_DIR])
+            .env("XRAY_LOCATION_ASSET", XRAY_ASSET_DIR)
+            .output()
+            .await
+            .map_err(|e| format!("Не удалось проверить конфигурацию Xray: {}", e))?;
+        if !output.status.success() {
+            let mut details = String::from_utf8_lossy(&output.stdout).into_owned();
+            details.push_str(&String::from_utf8_lossy(&output.stderr));
+            log("ERROR", format!("Проверка конфигурации Xray: {}", details.trim()));
+            return Err("Конфигурация Xray не прошла проверку. Смотрите журнал панели".into());
         }
     }
     Ok(())
@@ -273,6 +309,23 @@ pub async fn post_control(State(state): State<AppState>, Json(req): Json<Control
                 });
             }
 
+            if !["mihomo", "xray"].contains(&req.core.as_str()) {
+                return Json(ApiResponse {
+                    success: false,
+                    error: Some("Неизвестное ядро".into()),
+                    data: None,
+                });
+            }
+
+            if let Err(e) = check_core_config(&req.core).await {
+                log("ERROR", e.clone());
+                return Json(ApiResponse {
+                    success: false,
+                    error: Some(e),
+                    data: None,
+                });
+            }
+
             let init_file = match resolve_init_file(&state).await {
                 Ok(p) => p,
                 Err(e) => {
@@ -283,37 +336,61 @@ pub async fn post_control(State(state): State<AppState>, Json(req): Json<Control
                     });
                 }
             };
-            _ = Command::new(&init_file).arg("stop").status().await;
-
-            if let Ok(content) = fs::read_to_string(&init_file).await {
-                let new_content = content.replace(
-                    &format!("name_client=\"{}\"", old),
-                    &format!("name_client=\"{}\"", req.core),
-                );
-                _ = fs::write(&init_file, new_content).await;
-                _ = set_permissions(&init_file, Permissions::from_mode(0o755)).await;
-            }
-
-            *state.core.write().unwrap() = get_core_info(&req.core);
-
-            if let Err(e) = check_core_config(&req.core).await {
-                log("ERROR", e);
+            let content = match fs::read_to_string(&init_file).await {
+                Ok(content) => content,
+                Err(e) => {
+                    return Json(ApiResponse {
+                        success: false,
+                        error: Some(format!("Не удалось прочитать init-скрипт: {}", e)),
+                        data: None,
+                    });
+                }
+            };
+            let old_marker = format!("name_client=\"{}\"", old);
+            if !content.contains(&old_marker) {
                 return Json(ApiResponse {
                     success: false,
-                    error: Some(format!(
-                        "Не удалось запустить {}{}",
-                        &req.core[..1].to_uppercase(),
-                        &req.core[1..]
-                    )),
+                    error: Some("Не удалось найти текущее ядро в init-скрипте".into()),
                     data: None,
                 });
             }
+            let new_content = content.replace(&old_marker, &format!("name_client=\"{}\"", req.core));
+
+            if let Err(e) = run_init_command(&state, &["stop"]).await {
+                return Json(ApiResponse {
+                    success: false,
+                    error: Some(e),
+                    data: None,
+                });
+            }
+
+            if let Err(e) = fs::write(&init_file, new_content).await {
+                if let Err(restore_error) = fs::write(&init_file, &content).await {
+                    log("ERROR", format!("Не удалось восстановить init-скрипт: {}", restore_error));
+                } else if let Err(start_error) = run_init_command(&state, &["start", "on"]).await {
+                    log("ERROR", format!("Не удалось запустить прежнее ядро: {}", start_error));
+                }
+                return Json(ApiResponse {
+                    success: false,
+                    error: Some(format!("Не удалось изменить init-скрипт: {}", e)),
+                    data: None,
+                });
+            }
+
+            *state.core.write().unwrap() = get_core_info(&req.core);
 
             if req.core != "xray" {
                 _ = fs::write(error_log_path(), b"").await;
             }
 
             if let Err(e) = run_init_command(&state, &["start", "on"]).await {
+                let restore_result = fs::write(&init_file, content).await;
+                *state.core.write().unwrap() = get_core_info(&old);
+                if let Err(restore_error) = restore_result {
+                    log("ERROR", format!("Не удалось восстановить init-скрипт: {}", restore_error));
+                } else if let Err(start_error) = run_init_command(&state, &["start", "on"]).await {
+                    log("ERROR", format!("Не удалось запустить прежнее ядро: {}", start_error));
+                }
                 return Json(ApiResponse {
                     success: false,
                     error: Some(e),
