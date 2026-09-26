@@ -23,6 +23,13 @@ LIGHTTPD_CONF="$LIGHTTPD_DIR/conf.d/90-xkeenui.conf"
 
 BETA=false
 LOCAL=false
+BIN_STAGED=
+SUM_FILE=
+cleanup_download() {
+  [ -z "$BIN_STAGED" ] || rm -f "$BIN_STAGED"
+  [ -z "$SUM_FILE" ] || rm -f "$SUM_FILE"
+}
+trap cleanup_download EXIT
 [ "$1" = "beta" ] && BETA=true
 
 spinner() {
@@ -50,40 +57,60 @@ get_arch() {
 }
 
 download_files() {
-  local base_url="https://github.com/zxc-rv/XKeen-UI/releases"
-  local download_url="$base_url/latest/download"
+  local release_repo="Fikisq/xkeen-csqtt"
+  local base_url="https://github.com/$release_repo/releases"
+  local download_url=
   local bin_name="xkeen-ui-$ARCH"
 
-  if [ "$BETA" = true ]; then
-    local beta_tag="/tmp/xkeen_beta"
-    trap "rm -f $beta_tag" EXIT
-    (curl -s https://api.github.com/repos/zxc-rv/XKeen-UI/releases | \
-  jq -re '.[0] | select(.prerelease == true) | .tag_name' > $beta_tag) &
-    if ! spinner $! "Поиск бета-релиза..."; then
-      printf "${RED_BOLD}\n Нет актуального бета-релиза${NCN}"
-      $XKEENUI_INIT start &>/dev/null || :
-      exit 1
-    fi
-    beta_tag=$(cat $beta_tag)
-    download_url="$base_url/download/$beta_tag"
-  fi
-
+  BIN_STAGED=$(mktemp /opt/tmp/xkeen-ui.XXXXXX) || exit 1
   if [ "$LOCAL" = true ] && [ -f "/opt/tmp/$bin_name" ]; then
-    ( set -e; mv "/opt/tmp/$bin_name" $XKEENUI_BIN && chmod +x $XKEENUI_BIN ) &
+    ( set -e; cp "/opt/tmp/$bin_name" "$BIN_STAGED" && chmod +x "$BIN_STAGED" ) &
     if ! spinner $! "Локальная установка бинарника..."; then
-      printf "${RED_BOLD}\n Не удалось переместить бинарник.${NCN}"
+      printf "${RED_BOLD}\n Не удалось подготовить бинарник.${NCN}"
       exit 1
     fi
   else
-    ( set -e; curl -Lsfo $XKEENUI_BIN $download_url/$bin_name && chmod +x $XKEENUI_BIN ) &
+    local release_tag
+    if [ "$BETA" = true ]; then
+      release_tag=$(curl -fsSL "https://api.github.com/repos/$release_repo/releases" | \
+        jq -re '[.[] | select(.prerelease == true)][0].tag_name') || {
+        printf "${RED_BOLD}\n Нет актуального бета-релиза форка.${NCN}"
+        exit 1
+      }
+    else
+      release_tag=$(curl -fsSL "https://api.github.com/repos/$release_repo/releases" | \
+        jq -re '.[0].tag_name') || {
+        printf "${RED_BOLD}\n Нет опубликованного релиза форка.${NCN}"
+        exit 1
+      }
+    fi
+    download_url="$base_url/download/$release_tag"
+    SUM_FILE=$(mktemp /opt/tmp/xkeen-sha256.XXXXXX) || exit 1
+    ( set -e; curl -fLsS -o "$BIN_STAGED" "$download_url/$bin_name" &&
+      curl -fLsS -o "$SUM_FILE" "$download_url/SHA256SUMS" ) &
     if ! spinner $! "Загрузка бинарника..."; then
-      printf "${RED_BOLD}\n Не удалось загрузить бинарник.${NCN}"
+      printf "${RED_BOLD}\n Релиз форка или его контрольная сумма недоступны.${NCN}"
       exit 1
     fi
+    local expected actual
+    expected=$(awk -v name="$bin_name" '$2 == name { print $1; exit }' "$SUM_FILE")
+    actual=$(sha256sum "$BIN_STAGED" | awk '{print $1}')
+    if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+      printf "${RED_BOLD}\n Контрольная сумма бинарника не совпадает.${NCN}"
+      exit 1
+    fi
+    chmod +x "$BIN_STAGED"
   fi
 }
 
+install_prepared() {
+  mv "$BIN_STAGED" "$XKEENUI_BIN" && chmod +x "$XKEENUI_BIN" || exit 1
+  BIN_STAGED=
+}
+
 install_xkeenui() {
+  [ -f "/opt/tmp/xkeen-ui-$ARCH" ] && LOCAL=true
+  download_files
   if [[ -d $STATIC_DIR || -f $XKEENUI_BIN || -f $XKEENUI_INIT || -f $LIGHTTPD_CONF ]]; then
     printf "${YELLOW}\n Обнаружены файлы XKeen UI, запуск переустановки...\n${NC}"
     uninstall_xkeenui
@@ -91,9 +118,7 @@ install_xkeenui() {
 
   printf "${INFO} Начинаем установку...${NCN}"
 
-  [ -f "/opt/tmp/xkeen-ui-$ARCH" ] && LOCAL=true
-
-  download_files; create_xkeenui_init
+  install_prepared; create_xkeenui_init
 
   sync & spinner $! "Запись данных..."
 
@@ -108,6 +133,8 @@ install_xkeenui() {
 
 update_xkeenui() {
   [ -f "$XKEENUI_BIN" ] || { printf "${ERROR} Ошибка: XKeen UI не установлен!${NCN}"; exit 1; }
+  [ -f "/opt/tmp/xkeen-ui-$ARCH" ] && LOCAL=true
+  download_files
 
   printf "${INFO} Начинаем обновление...${NCN}"
 
@@ -129,7 +156,7 @@ update_xkeenui() {
     sed -i 's|^PROCS=/opt/sbin/xkeen-ui$|PROCS=xkeen-ui|' /opt/etc/init.d/S99xkeen-ui
   fi
 
-  legacy_installation_check; download_files
+  legacy_installation_check; install_prepared
 
   sync & spinner $! "Запись данных..."
 

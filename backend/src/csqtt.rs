@@ -5,13 +5,29 @@ use serde_json::{Value, json};
 use std::path::Path;
 use std::io::{Read, Seek, SeekFrom};
 use serde::Deserialize;
-use std::sync::OnceLock;
+use std::sync::{OnceLock, atomic::{AtomicU64, Ordering}};
 use tokio::sync::Semaphore;
+use tokio::io::AsyncWriteExt;
 use std::time::Duration;
 
 const CONFIG: &str = "/opt/etc/csqtt/csqtt.conf";
 const VK_TOKEN: &str = "/opt/etc/csqtt/vk_token";
 const SPEEDTEST: &str = "/opt/bin/csqtt-speedtest";
+
+async fn write_private(path: &str, value: &[u8]) -> std::io::Result<()> {
+    static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+    let temp = format!("{path}.tmp.{}.{}", std::process::id(), NEXT_TEMP.fetch_add(1, Ordering::Relaxed));
+    let result = async {
+        let mut file = tokio::fs::OpenOptions::new().write(true).create_new(true)
+            .mode(0o600).open(&temp).await?;
+        file.write_all(value).await?;
+        file.sync_all().await?;
+        drop(file);
+        tokio::fs::rename(&temp, path).await
+    }.await;
+    if result.is_err() { let _ = tokio::fs::remove_file(&temp).await; }
+    result
+}
 
 pub async fn speedtest() -> Json<Value> {
     static TEST_GATE: OnceLock<Semaphore> = OnceLock::new();
@@ -94,11 +110,16 @@ pub struct SettingsRequest {
 }
 
 pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<SettingsRequest>) -> Json<Value> {
+    static SAVE_GATE: OnceLock<Semaphore> = OnceLock::new();
+    let gate = SAVE_GATE.get_or_init(|| Semaphore::new(1));
+    let Ok(_permit) = gate.try_acquire() else {
+        return Json(json!({ "success": false, "error": "Сохранение CSQTT уже выполняется" }));
+    };
     if !(1..=6).contains(&request.hashes) || !(9..=126).contains(&request.workers) || request.workers % 9 != 0 {
         return Json(json!({ "success": false, "error": "Допустимо 1–6 хешей и 9–126 потоков с шагом 9" }));
     }
     let hash_mode = request.hash_mode.as_deref().unwrap_or("auto_js");
-    let obfs = request.obfs.as_deref().unwrap_or("video");
+    let obfs = request.obfs.as_deref().unwrap_or("audio");
     let turn_transport = request.turn_transport.as_deref().unwrap_or("udp");
     if !matches!(hash_mode, "manual" | "auto_api" | "auto_js")
         || !matches!(obfs, "audio" | "video")
@@ -163,38 +184,22 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
         updated.push_str(&format!("VK_HASHES={}\n", shell_quote(&manual_hashes)));
     }
     let backup = format!("{CONFIG}.codex-prev");
-    if tokio::fs::write(&backup, &content).await.is_err()
-        || tokio::fs::set_permissions(&backup, std::os::unix::fs::PermissionsExt::from_mode(0o600)).await.is_err() {
+    if write_private(&backup, content.as_bytes()).await.is_err() {
         return Json(json!({ "success": false, "error": "Не удалось создать резервную копию CSQTT" }));
     }
-    let temp = format!("{CONFIG}.tmp");
-    let result = async {
-        tokio::fs::write(&temp, updated).await?;
-        tokio::fs::set_permissions(&temp, std::os::unix::fs::PermissionsExt::from_mode(0o600)).await?;
-        tokio::fs::rename(&temp, CONFIG).await
-    }.await;
-    if let Err(error) = result {
-        _ = tokio::fs::remove_file(&temp).await;
+    if let Err(error) = write_private(CONFIG, updated.as_bytes()).await {
         return Json(json!({ "success": false, "error": format!("Не удалось сохранить CSQTT: {error}") }));
     }
     if !token.is_empty() {
         let token_backup = format!("{VK_TOKEN}.codex-prev");
         if let Ok(previous) = tokio::fs::read(VK_TOKEN).await {
-            if tokio::fs::write(&token_backup, previous).await.is_err()
-                || tokio::fs::set_permissions(&token_backup, std::os::unix::fs::PermissionsExt::from_mode(0o600)).await.is_err() {
-                _ = tokio::fs::write(CONFIG, &content).await;
+            if write_private(&token_backup, &previous).await.is_err() {
+                _ = write_private(CONFIG, content.as_bytes()).await;
                 return Json(json!({ "success": false, "error": "Не удалось сохранить резервную копию VK-токена" }));
             }
         }
-        let token_temp = format!("{VK_TOKEN}.tmp");
-        let save_token = async {
-            tokio::fs::write(&token_temp, token).await?;
-            tokio::fs::set_permissions(&token_temp, std::os::unix::fs::PermissionsExt::from_mode(0o600)).await?;
-            tokio::fs::rename(&token_temp, VK_TOKEN).await
-        }.await;
-        if save_token.is_err() {
-            _ = tokio::fs::remove_file(&token_temp).await;
-            _ = tokio::fs::write(CONFIG, &content).await;
+        if write_private(VK_TOKEN, token.as_bytes()).await.is_err() {
+            _ = write_private(CONFIG, content.as_bytes()).await;
             return Json(json!({ "success": false, "error": "Не удалось сохранить VK-токен" }));
         }
     }
@@ -211,6 +216,11 @@ pub struct ControlRequest {
 }
 
 pub async fn control(Json(request): Json<ControlRequest>) -> Json<Value> {
+    static CONTROL_GATE: OnceLock<Semaphore> = OnceLock::new();
+    let gate = CONTROL_GATE.get_or_init(|| Semaphore::new(1));
+    let Ok(_permit) = gate.try_acquire() else {
+        return Json(json!({ "success": false, "error": "Управление CSQTT уже выполняется" }));
+    };
     if !matches!(request.action.as_str(), "start" | "stop" | "restart") {
         return Json(json!({ "success": false, "error": "Недопустимое действие CSQTT" }));
     }
@@ -229,10 +239,11 @@ pub async fn control(Json(request): Json<ControlRequest>) -> Json<Value> {
             }
         }
     }
-    match tokio::process::Command::new("/opt/etc/init.d/S99csqtt")
-        .arg(&request.action)
-        .output().await {
-        Ok(result) if result.status.success() => {
+    let result = tokio::time::timeout(Duration::from_secs(420),
+        tokio::process::Command::new("/opt/etc/init.d/S99csqtt")
+            .arg(&request.action).kill_on_drop(true).output()).await;
+    match result {
+        Ok(Ok(result)) if result.status.success() => {
             if request.action != "stop" {
                 let attempts = if hash_mode == "auto_api" { 2 } else { 8 };
                 for _ in 0..attempts {
@@ -248,8 +259,9 @@ pub async fn control(Json(request): Json<ControlRequest>) -> Json<Value> {
             }
             Json(json!({ "success": true }))
         },
-        Ok(result) => Json(json!({ "success": false, "error": String::from_utf8_lossy(&result.stderr).trim() })),
-        Err(error) => Json(json!({ "success": false, "error": format!("Ошибка управления CSQTT: {error}") })),
+        Ok(Ok(result)) => Json(json!({ "success": false, "error": String::from_utf8_lossy(&result.stderr).trim() })),
+        Ok(Err(error)) => Json(json!({ "success": false, "error": format!("Ошибка управления CSQTT: {error}") })),
+        Err(_) => Json(json!({ "success": false, "error": "Управление CSQTT превысило 7 минут; проверьте состояние сервиса" })),
     }
 }
 

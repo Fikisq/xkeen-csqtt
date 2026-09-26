@@ -118,8 +118,15 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
+      - name: Write release checksums
+        run: |
+          for file in artifacts/xkeen-ui-*/*; do
+            printf '%s  %s\n' "$(sha256sum "$file" | cut -d ' ' -f 1)" "$(basename "$file")"
+          done > SHA256SUMS
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.version }}
           prerelease: true
-          files: artifacts/xkeen-ui-*/*
+          files: |
+            artifacts/xkeen-ui-*/*
+            SHA256SUMS

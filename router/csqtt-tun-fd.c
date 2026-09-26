@@ -11,6 +11,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <time.h>
@@ -53,6 +54,11 @@ int main(int argc, char **argv) {
     fseek(log, 0, SEEK_END);
     int sock = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (sock < 0) { perror("socket"); return 1; }
+    struct timeval io_timeout = {.tv_sec = 15, .tv_usec = 0};
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &io_timeout, sizeof(io_timeout)) != 0 ||
+        setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &io_timeout, sizeof(io_timeout)) != 0) {
+        perror("set CSQTT TUN socket timeout"); return 1;
+    }
     struct sockaddr_un addr = {.sun_family = AF_UNIX};
     size_t name_len = strlen(argv[2]);
     memcpy(addr.sun_path + 1, argv[2], name_len);
@@ -72,7 +78,7 @@ int main(int argc, char **argv) {
     cmsg->cmsg_type = SCM_RIGHTS;
     cmsg->cmsg_len = CMSG_LEN(sizeof(fd));
     memcpy(CMSG_DATA(cmsg), &fd, sizeof(fd));
-    if (sendmsg(sock, &msg, 0) != 1 || recv(sock, &marker, 1, 0) != 1) {
+    if (sendmsg(sock, &msg, MSG_NOSIGNAL) != 1 || recv(sock, &marker, 1, 0) != 1) {
         perror("pass TUN FD"); return 1;
     }
     close(sock);

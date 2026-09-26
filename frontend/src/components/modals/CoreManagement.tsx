@@ -65,7 +65,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
   const [csqttClientVersion, setCsqttClientVersion] = useState('2.0')
   const [csqttWorkers, setCsqttWorkers] = useState('81')
   const [csqttHashMode, setCsqttHashMode] = useState('auto_js')
-  const [csqttObfs, setCsqttObfs] = useState('video')
+  const [csqttObfs, setCsqttObfs] = useState('audio')
   const [csqttTurnTransport, setCsqttTurnTransport] = useState('udp')
   const [csqttPeer, setCsqttPeer] = useState('')
   const [csqttPassword, setCsqttPassword] = useState('')
@@ -80,7 +80,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
   const [savingCsqtt, setSavingCsqtt] = useState(false)
   const [generatingCsqtt, setGeneratingCsqtt] = useState(false)
   const [csqttRestartRequired, setCsqttRestartRequired] = useState(false)
-  const [csqttSavedValues, setCsqttSavedValues] = useState({ hashes: 4, workers: 81, peer: '', hashMode: 'auto_js', obfs: 'video', turnTransport: 'udp' })
+  const [csqttSavedValues, setCsqttSavedValues] = useState({ hashes: 4, workers: 81, peer: '', hashMode: 'auto_js', obfs: 'audio', turnTransport: 'udp' })
   const validCsqttNumbers = Number.isInteger(Number(csqttHashes)) && Number(csqttHashes) >= 1 && Number(csqttHashes) <= 6
     && Number.isInteger(Number(csqttWorkers)) && Number(csqttWorkers) >= 9 && Number(csqttWorkers) <= 126 && Number(csqttWorkers) % 9 === 0
 
@@ -111,7 +111,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
       setCsqttWorkers(String(result.workers))
       setCsqttPeer(result.peer ?? '')
       setCsqttHashMode(result.hashMode ?? 'auto_js')
-      setCsqttObfs(result.obfs ?? 'video')
+      setCsqttObfs(result.obfs ?? 'audio')
       setCsqttTurnTransport(result.turnTransport ?? 'udp')
       setCsqttPassword('')
       setCsqttVkToken('')
@@ -121,7 +121,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
       setCsqttLinkParsed(false)
       setCsqttHasPassword(!!result.hasPassword)
       setCsqttHasVkToken(!!result.hasVkToken)
-      setCsqttSavedValues({ hashes: result.hashes, workers: result.workers, peer: result.peer ?? '', hashMode: result.hashMode ?? 'auto_js', obfs: result.obfs ?? 'video', turnTransport: result.turnTransport ?? 'udp' })
+      setCsqttSavedValues({ hashes: result.hashes, workers: result.workers, peer: result.peer ?? '', hashMode: result.hashMode ?? 'auto_js', obfs: result.obfs ?? 'audio', turnTransport: result.turnTransport ?? 'udp' })
       setEditingCsqtt(true)
     } catch (error) { setCsqttError(error instanceof Error ? error.message : 'Ошибка CSQTT') }
   }

@@ -1,7 +1,8 @@
 use axum::{extract::State, response::Json};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::{io::{Read, Seek, SeekFrom}, os::unix::fs::PermissionsExt, path::Path};
+use std::{io::{Read, Seek, SeekFrom}, path::Path, sync::{OnceLock, atomic::{AtomicU64, Ordering}}, time::Duration};
+use tokio::{io::AsyncWriteExt, sync::Semaphore};
 
 use crate::types::AppState;
 
@@ -27,10 +28,18 @@ fn secret_exists(path: &str) -> bool {
 }
 
 async fn write_private(path: &str, value: &str) -> std::io::Result<()> {
-    let temp = format!("{path}.tmp");
-    tokio::fs::write(&temp, value).await?;
-    tokio::fs::set_permissions(&temp, std::fs::Permissions::from_mode(0o600)).await?;
-    tokio::fs::rename(temp, path).await
+    static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+    let temp = format!("{path}.tmp.{}.{}", std::process::id(), NEXT_TEMP.fetch_add(1, Ordering::Relaxed));
+    let result = async {
+        let mut file = tokio::fs::OpenOptions::new().write(true).create_new(true)
+            .mode(0o600).open(&temp).await?;
+        file.write_all(value.as_bytes()).await?;
+        file.sync_all().await?;
+        drop(file);
+        tokio::fs::rename(&temp, path).await
+    }.await;
+    if result.is_err() { let _ = tokio::fs::remove_file(&temp).await; }
+    result
 }
 
 pub async fn settings() -> Json<Value> {
@@ -213,6 +222,11 @@ pub async fn status() -> Json<Value> {
 pub struct ControlRequest { action: String }
 
 pub async fn control(Json(request): Json<ControlRequest>) -> Json<Value> {
+    static CONTROL_GATE: OnceLock<Semaphore> = OnceLock::new();
+    let gate = CONTROL_GATE.get_or_init(|| Semaphore::new(1));
+    let Ok(_permit) = gate.try_acquire() else {
+        return Json(json!({"success": false, "error": "Управление WDTT Plus уже выполняется"}));
+    };
     if !matches!(request.action.as_str(), "start" | "stop" | "restart") {
         return Json(json!({"success": false, "error": "Недопустимое действие WDTT Plus"}));
     }
@@ -230,10 +244,14 @@ pub async fn control(Json(request): Json<ControlRequest>) -> Json<Value> {
             return Json(json!({"success": false, "error": "Сохраните сервер, пароль и VK-токен перед запуском WDTT Plus"}));
         }
     }
-    match tokio::process::Command::new(SERVICE).arg(&request.action).output().await {
-        Ok(result) if result.status.success() => Json(json!({"success": true})),
-        Ok(result) => Json(json!({"success": false, "error": String::from_utf8_lossy(&result.stderr).trim()})),
-        Err(error) => Json(json!({"success": false, "error": format!("Ошибка WDTT Plus: {error}")})),
+    let result = tokio::time::timeout(Duration::from_secs(420),
+        tokio::process::Command::new(SERVICE).arg(&request.action)
+            .kill_on_drop(true).output()).await;
+    match result {
+        Ok(Ok(result)) if result.status.success() => Json(json!({"success": true})),
+        Ok(Ok(result)) => Json(json!({"success": false, "error": String::from_utf8_lossy(&result.stderr).trim()})),
+        Ok(Err(error)) => Json(json!({"success": false, "error": format!("Ошибка WDTT Plus: {error}")})),
+        Err(_) => Json(json!({"success": false, "error": "Управление WDTT Plus превысило 7 минут; проверьте состояние сервиса"})),
     }
 }
 

@@ -1,9 +1,17 @@
 #!/bin/sh
 DIR=/opt/etc/wdtt-plus
 PID_FILE=/var/run/wdtt-plus.pid
+owns_pid() {
+    case "$1" in ''|*[!0-9]*) return 1 ;; esac
+    [ -r "/proc/$1/cmdline" ] || return 1
+    case "$(tr '\000' ' ' < "/proc/$1/cmdline")" in
+        *"$DIR/wdtt-plus-client"*|*"$DIR/wdtt-plus-run.sh"*) return 0 ;;
+    esac
+    return 1
+}
 case "${1:-}" in
     start)
-        if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+        if [ -f "$PID_FILE" ] && owns_pid "$(cat "$PID_FILE")"; then
             echo "WDTT Plus уже запущен"; exit 0
         fi
         [ -x "$DIR/wdtt-plus-client" ] && [ -s "$DIR/wdtt-plus.conf" ] &&
@@ -28,12 +36,14 @@ case "${1:-}" in
         fi
         if [ -f "$PID_FILE" ]; then
             pid=$(cat "$PID_FILE")
-            kill -INT "$pid" 2>/dev/null
-            n=0
-            while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 10 ]; do
-                sleep 1; n=$((n+1))
-            done
-            kill -9 "$pid" 2>/dev/null
+            if owns_pid "$pid"; then
+                kill -INT "$pid" 2>/dev/null
+                n=0
+                while owns_pid "$pid" && [ "$n" -lt 10 ]; do
+                    sleep 1; n=$((n+1))
+                done
+                owns_pid "$pid" && kill -9 "$pid" 2>/dev/null
+            fi
             rm -f "$PID_FILE"
         fi
         if [ -f "$DIR/vk_api_calls" ]; then
@@ -48,7 +58,7 @@ case "${1:-}" in
         ;;
     restart) KEEP_MANUAL_STAGE=1 "$0" stop && "$0" start ;;
     status)
-        if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+        if [ -f "$PID_FILE" ] && owns_pid "$(cat "$PID_FILE")"; then
             echo "WDTT Plus работает (PID $(cat "$PID_FILE"))"
         else echo "WDTT Plus остановлен"; fi
         ;;
