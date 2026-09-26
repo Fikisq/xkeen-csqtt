@@ -8,9 +8,17 @@ RESTARTS=/var/run/wdtt-plus-restarts
 failures=0
 ready=0
 started_at=$(date +%s)
+owns_client_pid() {
+    case "$1" in ''|*[!0-9]*) return 1 ;; esac
+    [ -r "/proc/$1/cmdline" ] || return 1
+    case "$(tr '\000' ' ' < "/proc/$1/cmdline")" in
+        *"$DIR/wdtt-plus-client"*|*"$DIR/wdtt-plus-run.sh"*) return 0 ;;
+    esac
+    return 1
+}
 
 sleep 10
-while [ -s "$CLIENT_PID" ] && kill -0 "$(cat "$CLIENT_PID")" 2>/dev/null; do
+while [ -s "$CLIENT_PID" ] && owns_client_pid "$(cat "$CLIENT_PID")"; do
     [ ! -e "$DIR/stopped" ] || break
     if [ -f "$DIR/wdtt-plus.log" ] && [ "$(wc -c < "$DIR/wdtt-plus.log")" -ge 2097152 ]; then
         if tail -c 1048576 "$DIR/wdtt-plus.log" > "$DIR/wdtt-plus.log.1.tmp"; then

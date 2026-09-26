@@ -8,6 +8,14 @@ owns_pid() {
     esac
     return 1
 }
+owns_tun_helper_pid() {
+    case "$1" in ''|*[!0-9]*) return 1 ;; esac
+    [ -r "/proc/$1/cmdline" ] || return 1
+    case "$(tr '\000' ' ' < "/proc/$1/cmdline")" in
+        *"$DIR/csqtt-tun-fd"*) return 0 ;;
+    esac
+    return 1
+}
 case "$1" in
     start)
         printf 'Starting CSQTT: '
@@ -43,7 +51,8 @@ case "$1" in
         fi
         KEEP_MANUAL_STAGE=${KEEP_MANUAL_STAGE:-0} /opt/bin/vk-manual-hashes.sh stop csqtt || { echo "ручные звонки VK не завершены"; exit 1; }
         if [ -f "$DIR/csqtt-tun-fd.pid" ]; then
-            kill "$(cat "$DIR/csqtt-tun-fd.pid")" 2>/dev/null
+            HELPER_PID=$(cat "$DIR/csqtt-tun-fd.pid")
+            owns_tun_helper_pid "$HELPER_PID" && kill "$HELPER_PID" 2>/dev/null
             rm -f "$DIR/csqtt-tun-fd.pid"
         fi
         echo "OK"

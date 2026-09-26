@@ -268,7 +268,14 @@ pub async fn control(Json(request): Json<ControlRequest>) -> Json<Value> {
 fn starter_running() -> bool {
     let pid = std::fs::read_to_string("/var/run/csqtt.pid").ok()
         .and_then(|text| text.trim().parse::<u32>().ok());
-    pid.is_some_and(|pid| Path::new(&format!("/proc/{pid}")).exists())
+    pid.is_some_and(|pid| {
+        std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|command| {
+            command.split(|byte| *byte == 0).any(|arg| {
+                arg.ends_with(b"/csqtt-client") || arg.ends_with(b"/csqtt-run.sh")
+                    || arg.ends_with(b"/csqtt-run-219.sh")
+            })
+        })
+    })
 }
 
 fn client_running() -> bool {

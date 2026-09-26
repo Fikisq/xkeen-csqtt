@@ -96,6 +96,11 @@ pub struct SettingsRequest {
 }
 
 pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<SettingsRequest>) -> Json<Value> {
+    static SAVE_GATE: OnceLock<Semaphore> = OnceLock::new();
+    let gate = SAVE_GATE.get_or_init(|| Semaphore::new(1));
+    let Ok(_permit) = gate.try_acquire() else {
+        return Json(json!({"success": false, "error": "Сохранение WDTT Plus уже выполняется"}));
+    };
     let server = request.server.trim();
     if server.is_empty() || server.len() > 253
         || !server.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '[' | ']' | ':'))
@@ -189,7 +194,13 @@ fn service_pid() -> Option<u32> {
 }
 
 fn running() -> bool {
-    service_pid().is_some_and(|pid| Path::new(&format!("/proc/{pid}")).exists())
+    service_pid().is_some_and(|pid| {
+        std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|command| {
+            command.split(|byte| *byte == 0).any(|arg| {
+                arg.ends_with(b"/wdtt-plus-client") || arg.ends_with(b"/wdtt-plus-run.sh")
+            })
+        })
+    })
 }
 
 fn health_age_seconds() -> Option<u64> {
