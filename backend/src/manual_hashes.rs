@@ -8,7 +8,6 @@ use tokio::sync::Semaphore;
 pub struct GenerateRequest { count: u32 }
 
 static CSQTT_GATE: OnceLock<Semaphore> = OnceLock::new();
-static WDTT_GATE: OnceLock<Semaphore> = OnceLock::new();
 
 async fn generate(service: &'static str, count: u32, max: u32, gate: &OnceLock<Semaphore>) -> ResponseJson<Value> {
     if !(1..=max).contains(&count) {
@@ -38,8 +37,4 @@ async fn generate(service: &'static str, count: u32, max: u32, gate: &OnceLock<S
 
 pub async fn csqtt(Json(request): Json<GenerateRequest>) -> ResponseJson<Value> {
     generate("csqtt", request.count, 6, &CSQTT_GATE).await
-}
-
-pub async fn wdtt_plus(Json(request): Json<GenerateRequest>) -> ResponseJson<Value> {
-    generate("wdtt-plus", request.count, 4, &WDTT_GATE).await
 }

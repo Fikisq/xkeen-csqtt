@@ -92,6 +92,7 @@ expire_stage() {
 
 case "${1:-}" in
     generate)
+        [ "$service" = csqtt ] || { echo 'Создание звонков WDTT Plus отключено' >&2; exit 1; }
         count=${3:-}
         case "$count" in ''|*[!0-9]*) exit 2 ;; esac
         [ "$count" -ge 1 ] && [ "$count" -le 6 ] || exit 2

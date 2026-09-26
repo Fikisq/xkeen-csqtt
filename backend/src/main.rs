@@ -485,7 +485,6 @@ async fn main() {
         .route("/api/csqtt/speedtest", post(csqtt::speedtest))
         .route("/api/wdtt-plus/status", get(wdtt_plus::status))
         .route("/api/wdtt-plus/settings", get(wdtt_plus::settings).put(wdtt_plus::save_settings))
-        .route("/api/wdtt-plus/manual-hashes", post(manual_hashes::wdtt_plus))
         .route("/api/wdtt-plus/control", post(wdtt_plus::control))
         .route("/api/wdtt-plus/attach-xray", post(wdtt_plus::attach_xray))
         .route("/api/xray/latency", post(latency::test_latency))

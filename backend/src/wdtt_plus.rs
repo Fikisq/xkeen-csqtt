@@ -9,7 +9,6 @@ use crate::types::AppState;
 const DIR: &str = "/opt/etc/wdtt-plus";
 const CONFIG: &str = "/opt/etc/wdtt-plus/wdtt-plus.conf";
 const PASSWORD: &str = "/opt/etc/wdtt-plus/password";
-const TOKEN: &str = "/opt/etc/wdtt-plus/vk_token";
 const SERVICE: &str = "/opt/etc/init.d/S99wdtt-plus";
 
 fn value(content: &str, key: &str) -> Option<String> {
@@ -52,13 +51,10 @@ pub async fn settings() -> Json<Value> {
         "dtlsPort": dtls_port.parse::<u16>().ok(),
         "wgPort": value(&content, "WG_PORT").and_then(|v| v.parse::<u16>().ok()),
         "workers": value(&content, "WORKERS").and_then(|v| v.parse::<u32>().ok()).unwrap_or(27),
-        "tokenSource": value(&content, "VK_TOKEN_SOURCE").unwrap_or_else(|| "own".into()),
-        "hashMode": value(&content, "VK_HASH_MODE").unwrap_or_else(|| "auto".into()),
+        "hashMode": value(&content, "VK_HASH_MODE").unwrap_or_else(|| "manual".into()),
         "hashesCount": value(&content, "VK_HASHES_COUNT").and_then(|v| v.parse::<u32>().ok()).unwrap_or(4),
         "hasManualHashes": value(&content, "VK_HASHES").is_some_and(|v| !v.is_empty()),
         "hasPassword": secret_exists(PASSWORD),
-        "hasOwnToken": secret_exists(TOKEN),
-        "hasCsqttToken": secret_exists("/opt/etc/csqtt/vk_token"),
         "rtNetwork": value(&content, "RT_NETWORK").as_deref() == Some("1"),
         "turnSni": value(&content, "TURN_SNI").unwrap_or_default(),
         "rtMasque": value(&content, "RT_MASQUE").as_deref() == Some("1"),
@@ -74,8 +70,6 @@ pub struct SettingsRequest {
     #[serde(rename = "wgPort")]
     wg_port: u16,
     workers: u32,
-    #[serde(rename = "tokenSource")]
-    token_source: String,
     #[serde(rename = "hashMode")]
     hash_mode: Option<String>,
     #[serde(rename = "hashesCount")]
@@ -110,13 +104,10 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
     if !(9..=108).contains(&request.workers) || request.workers % 9 != 0 {
         return Json(json!({"success": false, "error": "Потоки WDTT Plus: от 9 до 108, шаг 9"}));
     }
-    if !matches!(request.token_source.as_str(), "own" | "csqtt") {
-        return Json(json!({"success": false, "error": "Недопустимый источник VK-токена"}));
-    }
-    let hash_mode = request.hash_mode.as_deref().unwrap_or("auto");
+    let hash_mode = request.hash_mode.as_deref().unwrap_or("manual");
     let hashes_count = request.hashes_count.unwrap_or(4);
-    if !matches!(hash_mode, "auto" | "manual") || !(1..=4).contains(&hashes_count) {
-        return Json(json!({"success": false, "error": "Недопустимый режим или число хешей WDTT Plus"}));
+    if hash_mode != "manual" || !(1..=4).contains(&hashes_count) {
+        return Json(json!({"success": false, "error": "Автоматическое создание звонков WDTT Plus отключено; укажите ручные хеши"}));
     }
     let existing = tokio::fs::read_to_string(CONFIG).await.unwrap_or_default();
     let input_hashes = request.manual_hashes.as_deref().unwrap_or("").trim();
@@ -128,7 +119,7 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
         return Json(json!({"success": false, "error": "Укажите до 4 ссылок или хешей VK"}));
     }
     let manual_hashes = if parsed.is_empty() { value(&existing, "VK_HASHES").unwrap_or_default() } else { parsed.join(",") };
-    if hash_mode == "manual" && manual_hashes.split(',').count() != hashes_count as usize {
+    if manual_hashes.split(',').count() != hashes_count as usize {
         return Json(json!({"success": false, "error": "Число ручных хешей должно совпадать с выбранным количеством"}));
     }
     let password = request.password.as_deref().unwrap_or("");
@@ -136,8 +127,8 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
         return Json(json!({"success": false, "error": "Недопустимый пароль WDTT Plus"}));
     }
     let token = request.vk_token.as_deref().unwrap_or("").trim();
-    if token.len() > 4096 || (!token.is_empty() && !token.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))) {
-        return Json(json!({"success": false, "error": "Вставьте только значение VK access_token"}));
+    if !token.is_empty() {
+        return Json(json!({"success": false, "error": "WDTT Plus больше не принимает VK-токен"}));
     }
     let rt_network = request.rt_network.unwrap_or(false);
     let normalized_sni = request.turn_sni.as_deref().unwrap_or("").trim().to_ascii_lowercase();
@@ -164,7 +155,7 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
         quote(&format!("{server}:{}", request.dtls_port)),
         quote(&request.wg_port.to_string()),
         quote(&request.workers.to_string()),
-        quote(&request.token_source),
+        quote(&value(&existing, "VK_TOKEN_SOURCE").unwrap_or_else(|| "own".into())),
         quote(hash_mode),
         quote(&hashes_count.to_string()),
         quote(&manual_hashes),
@@ -179,11 +170,6 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
     if !password.is_empty() {
         if let Err(error) = write_private(PASSWORD, password).await {
             return Json(json!({"success": false, "error": format!("Не удалось сохранить пароль WDTT Plus: {error}")}));
-        }
-    }
-    if !token.is_empty() {
-        if let Err(error) = write_private(TOKEN, token).await {
-            return Json(json!({"success": false, "error": format!("Не удалось сохранить VK-токен: {error}")}));
         }
     }
     Json(json!({"success": true, "restartRequired": true}))
@@ -238,13 +224,13 @@ pub async fn control(Json(request): Json<ControlRequest>) -> Json<Value> {
     }
     if request.action != "stop" {
         let content = tokio::fs::read_to_string(CONFIG).await.unwrap_or_default();
-        let source = value(&content, "VK_TOKEN_SOURCE").unwrap_or_else(|| "own".into());
-        let token_path = if source == "csqtt" { "/opt/etc/csqtt/vk_token" } else { TOKEN };
-        let hash_mode = value(&content, "VK_HASH_MODE").unwrap_or_else(|| "auto".into());
+        let hash_mode = value(&content, "VK_HASH_MODE").unwrap_or_else(|| "manual".into());
         let has_hashes = value(&content, "VK_HASHES").is_some_and(|v| !v.is_empty());
-        if !secret_exists(PASSWORD) || (hash_mode == "auto" && !secret_exists(token_path))
-            || (hash_mode == "manual" && !has_hashes) || value(&content, "PEER").is_none() {
-            return Json(json!({"success": false, "error": "Сохраните сервер, пароль и VK-токен перед запуском WDTT Plus"}));
+        if hash_mode != "manual" || !has_hashes {
+            return Json(json!({"success": false, "error": "Автоматическое создание звонков отключено; сохраните ручные хеши WDTT Plus"}));
+        }
+        if !secret_exists(PASSWORD) || value(&content, "PEER").is_none() {
+            return Json(json!({"success": false, "error": "Сохраните сервер и пароль WDTT Plus"}));
         }
     }
     let result = tokio::time::timeout(Duration::from_secs(420),

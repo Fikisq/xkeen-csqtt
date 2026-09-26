@@ -1,6 +1,7 @@
 #!/bin/sh
-# Create and finish only the VK calls owned by the router WDTT Plus service.
+# Finish only legacy VK calls previously created by the router WDTT Plus service.
 set -eu
+[ "${1:-}" != start ] || { echo "Автоматическое создание звонков WDTT Plus отключено" >&2; exit 1; }
 DIR=/opt/etc/wdtt-plus
 . "$DIR/wdtt-plus.conf"
 CALLS_FILE="$DIR/vk_api_calls"
@@ -74,61 +75,5 @@ release_calls() {
 
 case "${1:-}" in
     stop) release_calls ;;
-    start)
-        release_calls
-        case "$WORKERS" in ''|*[!0-9]*) echo "неверное число потоков" >&2; exit 1 ;; esac
-        required=$(( (WORKERS + 26) / 27 ))
-        count=$(( (WORKERS + 8) / 9 + 1 ))
-        [ "$count" -gt 4 ] && count=4
-        [ "$required" -ge 1 ] && [ "$required" -le 4 ] || { echo "число звонков VK вне диапазона" >&2; exit 1; }
-        umask 077
-        : > "$CALLS_FILE"
-        hashes=''
-        index=0
-        created=0
-        while [ "$index" -lt "$count" ]; do
-            attempt=0
-            call_id=''
-            hash=''
-            code=0
-            while [ "$attempt" -lt 3 ]; do
-                attempt=$((attempt + 1))
-                if response=$(vk_request calls.start); then
-                    call_id=$(printf '%s' "$response" | /opt/bin/jq -r '.response.call_id // empty')
-                    hash=$(printf '%s' "$response" | /opt/bin/jq -r '.response.ok_join_link // .response.join_link // empty')
-                    code=$(printf '%s' "$response" | /opt/bin/jq -r '.error.error_code // 0' 2>/dev/null || echo 0)
-                    [ -n "$call_id" ] && [ -n "$hash" ] && break
-                    case "$code" in 4|5|18|27|28) break ;; esac
-                fi
-                [ "$attempt" -lt 3 ] && sleep 1
-            done
-            hash=${hash%%\?*}
-            hash=${hash%/}
-            hash=${hash##*/}
-            index=$((index + 1))
-            if [ -z "$call_id" ] || [ -z "$hash" ]; then
-                [ -n "$call_id" ] && printf '%s\n' "$call_id" >> "$CALLS_FILE"
-                case "$code" in
-                    4|5|18|27|28)
-                        release_calls
-                        echo "VK отклонил токен или аккаунт (код $code)" >&2
-                        exit 1
-                        ;;
-                esac
-                if [ "$created" -ge "$required" ]; then
-                    echo "резервный звонок VK недоступен (код $code); продолжаю с $created звонками" >&2
-                    break
-                fi
-                release_calls
-                echo "VK API не создал обязательный звонок после $attempt попыток (код $code)" >&2
-                exit 1
-            fi
-            printf '%s\n' "$call_id" >> "$CALLS_FILE"
-            created=$((created + 1))
-            if [ -n "$hashes" ]; then hashes="$hashes,$hash"; else hashes="$hash"; fi
-            [ "$index" -lt "$count" ] && sleep 1
-        done
-        printf '%s\n' "$hashes"
-        ;;
-    *) echo "Usage: $0 start|stop" >&2; exit 2 ;;
+    *) echo "Usage: $0 stop" >&2; exit 2 ;;
 esac

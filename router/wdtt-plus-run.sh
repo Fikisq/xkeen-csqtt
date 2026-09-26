@@ -8,10 +8,10 @@ PASSWORD_FILE="$DIR/password"
 [ -s "$PASSWORD_FILE" ] || { echo "пароль WDTT Plus не сохранён" >&2; exit 1; }
 [ -s "$DIR/device_id" ] || { echo "device_id WDTT Plus не создан" >&2; exit 1; }
 DEVICE_ID=$(cat "$DIR/device_id")
-case "${VK_HASH_MODE:-auto}" in
+case "${VK_HASH_MODE:-manual}" in
     auto)
-        /opt/bin/vk-manual-hashes.sh release wdtt-plus || exit 1
-        HASHES=$("$DIR/wdtt-plus-calls.sh" start)
+        echo "Автоматическое создание звонков WDTT Plus отключено; укажите ручные хеши" >&2
+        exit 1
         ;;
     manual)
         HASHES=${VK_HASHES:-}
