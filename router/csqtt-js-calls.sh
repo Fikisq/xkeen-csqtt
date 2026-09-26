@@ -24,7 +24,7 @@ while IFS= read -r call_id; do
                 --connect-timeout 8 --max-time 20 --request POST \
                 --data-urlencode 'call_id='"$call_id" \
                 'https://api.vk.ru/method/calls.forceFinish?v=5.285&client_id=6287487'); then
-            if printf '%s' "$response" | /opt/bin/jq -e '.error == null' >/dev/null 2>&1; then
+            if printf '%s' "$response" | /opt/bin/jq -e '.error == null and .response != null' >/dev/null 2>&1; then
                 closed=1
                 break
             fi

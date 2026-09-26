@@ -40,7 +40,7 @@ finish_file() {
         while [ "$attempt" -lt 3 ]; do
             attempt=$((attempt + 1))
             if response=$(vk_request calls.forceFinish --data-urlencode "call_id=$call_id"); then
-                if printf '%s' "$response" | /opt/bin/jq -e '.error == null' >/dev/null 2>&1; then
+                if printf '%s' "$response" | /opt/bin/jq -e '.error == null and .response != null' >/dev/null 2>&1; then
                     closed=1
                     break
                 fi

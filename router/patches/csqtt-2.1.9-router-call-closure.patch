@@ -82,7 +82,7 @@ index debc34e..b344933 100644
          }
      }
 diff --git a/rust-client/vk_js_calls.rs b/rust-client/vk_js_calls.rs
-index 13d31a0..63bfa2d 100644
+index 13d31a0..28d0c8c 100644
 --- a/rust-client/vk_js_calls.rs
 +++ b/rust-client/vk_js_calls.rs
 @@ -11,7 +11,7 @@ use primp::{
@@ -153,7 +153,18 @@ index 13d31a0..63bfa2d 100644
              let mut finished = 0usize;
              let mut tasks = tokio::task::JoinSet::new();
              for conversation_id in conversation_ids {
-@@ -384,6 +401,13 @@ impl ActiveCalls {
+@@ -369,6 +386,10 @@ impl ActiveCalls {
+                         )
+                         .await?;
+                         check_api_error(&value)?;
++                        value
++                            .get("response")
++                            .filter(|response| !response.is_null())
++                            .context("calls.forceFinish: нет подтверждения закрытия")?;
+                         Ok(value)
+                     })
+                     .await
+@@ -384,6 +405,13 @@ impl ActiveCalls {
          })
          .await
          .unwrap_or(0);
