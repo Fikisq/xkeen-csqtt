@@ -1,17 +1,100 @@
-# XKeen UI with CSQTT and WDTT Plus
+# XKeen UI CSQTT
 
-This repository contains a Keenetic/Entware panel built from a Rust/axum backend and a React/Vite frontend. The `router/` directory contains service wrappers for the separate CSQTT and WDTT Plus clients. The clients are not built by this repository.
+Панель управления для роутеров Keenetic с Entware: единый бинарник (Rust/axum + встроенный React-интерфейс) для управления ядрами Xray и Mihomo из состава [XKeen](https://github.com/jameszeroX/XKeen), плюс интеграция туннельных клиентов **CSQTT 2.1.9** и **WDTT Plus**. Бинарники самих клиентов этот репозиторий не собирает.
 
-## Repository branches
+## Состав проекта
 
-`main` is maintained by the repository owner. Work in progress is shared on `codex`; changes are promoted to `main` by the owner.
+- `backend/` — Rust/axum-бэкенд, встраивает собранный фронтенд (rust-embed);
+- `frontend/` — React 19 + Vite + TypeScript, сборка через Bun;
+- `router/` — скрипты запуска и обслуживания CSQTT и WDTT Plus на роутере;
+- `setup.sh` — интерактивный установщик панели (установка / обновление / удаление);
+- `.github/workflows/` — CI: сборка релизов, публикация Outbound Generator на Pages, синхронизация Wiki;
+- `wiki/` — документация, синхронизируется в GitHub Wiki;
+- `diagnostics/` — ручные диагностические скрипты, в установку панели не входят.
 
-## Build
+## Требования
 
-The frontend uses Bun (`frontend/bun.lock`). The backend is in `backend/` and embeds the frontend output. `.github/workflows/build-rust.yml` describes the cross builds for ARM64, MIPS and MIPSEL. A release binary must be built and published before the network installer can install this fork.
+- Keenetic с Entware (opkg); архитектуры `aarch64` / `mips` / `mipsel` определяются автоматически через `opkg print-architecture`;
+- установленный XKeen — панель управляет ядром через его init-скрипты (`S99xkeen`/`S24xray`) и скрипт перехвата `S05xkeen`;
+- `curl` и `tar`; `jq` и `yq` панель доустанавливает сама при обновлении ядер.
 
-## Installation and configuration
+Для функций туннелей дополнительно (без них панель работает, а разделы CSQTT/WDTT показывают статус «не установлен»):
 
-`setup.sh` is the panel installer. CSQTT and WDTT Plus need their own client binaries and credentials; see the scripts under `router/` for their runtime paths. Do not commit credentials, device configuration, live logs, or infrastructure notes. The `diagnostics/` directory contains manual diagnostic scripts and is not part of the normal router installation.
+- CSQTT — бинарник клиента `/opt/etc/csqtt/csqtt-client` (версия 2.1.9);
+- WDTT Plus — бинарник клиента `/opt/etc/wdtt-plus/wdtt-plus-client` (версия v18).
 
-CSQTT 2.5.0 has not been integrated into the router scripts. They currently target the CSQTT 2.1.9 native client. Do not substitute the Android APK for a router binary.
+## Быстрый старт
+
+Скачайте установщик на роутер и запустите:
+
+```sh
+mkdir -p /opt/tmp
+curl -fsSL https://raw.githubusercontent.com/Fikisq/xkeen-csqtt/codex/setup.sh -o /opt/tmp/setup.sh
+sh /opt/tmp/setup.sh        # меню: установка / обновление / удаление
+sh /opt/tmp/setup.sh beta   # бета-релиз
+```
+
+Скрипт определяет архитектуру, скачивает бинарник из GitHub-релизов `Fikisq/xkeen-csqtt`, проверяет его по `SHA256SUMS` и кладёт в `/opt/sbin/xkeen-ui`; init-скрипт — `/opt/etc/init.d/S99xkeen-ui` (порт по умолчанию **1000**, меняется в `ARGS="-p <PORT>"`). Панель: `http://<IP-роутера>:1000`.
+
+> Внимание: `setup.sh` в ветке `main` репозитория redline-keen/XKeen-UI-CSQTT и встроенная команда `xkeen-ui setup` запускают установщик **апстрима** zxc-rv/XKeen-UI и поставят не эту сборку. Используйте команду выше или скопируйте `setup.sh` из рабочей копии этого репозитория на роутер (`scp setup.sh root@<IP-роутера>:/opt/tmp/`).
+
+## Первая настройка
+
+1. **Вход.** Авторизация по умолчанию выключена. Включается в «Настройки → Авторизация»: пароль хешируется Argon2, 5 неверных попыток блокируют IP на 60 секунд. Сброс из консоли роутера: `xkeen-ui reset-password`.
+2. **Ядро.** «Управление ядром» — выбор Xray или Mihomo. Перед переключением целевой конфиг валидируется (`xray -test` / `mihomo -t`); при ошибке переключение откатывается.
+3. **Подписки.** «Xray Subscriptions» / «Mihomo Subscriptions» — вставьте HTTPS-ссылку (см. раздел ниже).
+4. **Маршрут устройства.** Для выбранного устройства: полный обход туннеля («Без VPN») или исключение из перехвата — правила хранятся в `/opt/etc/xkeen/*.lst` и применяются к цепочкам `xkeen` iptables/ip6tables.
+
+| Компонент | За что отвечает | Где настраивается |
+|---|---|---|
+| Xray | активное ядро, JSON-конфигурация | панель → «Конфигурация»; `/opt/etc/xray/configs/*.json` |
+| Mihomo | альтернативное ядро, YAML-конфигурация | панель → «Конфигурация»; `/opt/etc/mihomo/config.yaml` |
+| CSQTT | клиент 2.1.9: TUN `csqtt0`, SOCKS5 на `127.0.0.1:$LISTEN` | панель → «Управление ядром» → CSQTT; `/opt/etc/csqtt/` |
+| WDTT Plus | клиент v18: SOCKS5 `127.0.0.1:1088` (+UDP) | панель → «Управление ядром» → WDTT Plus; `/opt/etc/wdtt-plus/` |
+| Маршрутизация | GUI-правила Xray (применяются к живому ядру через `xray api`), обход устройств, «Без VPN» | панель → Routing / карточки сервисов |
+| Подписки | периодическое обновление узлов | панель → Xray/Mihomo Subscriptions |
+
+## Подписки
+
+### Xray
+
+- Панель скачивает подписку только по **HTTPS с доменным именем** (не IP, не `.local`/`.internal`), лимит 256 КБ; распознаются строки `vless://`, `vmess://`, `trojan://`, `ss://`, `hysteria2://`/`hy2://` либо base64-список, 1–64 узла. Домен, который резолвится в локальную сеть, допускается только при включённой опции «разрешить локальную сеть» в момент добавления.
+- Ссылки **преобразуются** в Xray outbounds с тегами `sub-…` и дописываются в `/opt/etc/xray/configs/00_config.json` (сырой текст подписки в конфиг не копируется). Если конфига нет — создаётся стартовый с правилами `VPN` и карточками сервисов (Youtube, Discord, Games, AI, Github).
+- URL подписки хранится в `/opt/etc/xkeen/xray-subscription-url` (флаг доступа к LAN — рядом) и попадает в бэкапы панели.
+- Сохранение валидируется `xray -test`; невалидный JSON не применяется.
+- Раз в час автообновление: текущий конфиг сохраняется в `/opt/etc/xkeen/xray-subscription-before-auto.json`, узлы заменяются, активное ядро перезапускается мягко; при ошибке — откат. Правила, ссылающиеся на удалённые теги `sub-*`, перепривязываются на первый доступный узел.
+
+### Mihomo
+
+- Подписка добавляется как `proxy-provider` в `/opt/etc/mihomo/config.yaml`: `type: http`, `path: ./proxy_providers/<имя>.yaml`, обновление раз в 3600 с, health-check раз в 300 с. Имя — латиница/цифры/`-`/`_`.
+- Выбираемые группы автоматически получают `use: [<имя>]`; при наличии группы `CSQTT` она добавляется в список `proxies`.
+- Кеш провайдера пишет бэкенд: `/opt/etc/mihomo/proxy_providers/<имя>.yaml` (предыдущая версия — `<имя>.yaml.auto-backup`), перед применением конфиг валидируется `mihomo -t`, при ошибке кеш откатывается.
+- Раз в час кеши обновляются автоматически, **но пока Mihomo является активным ядром, фоновое обновление пропускается**; ручное обновление кнопкой работает всегда.
+
+### При переключении ядра
+
+Подписки у ядер независимы: Xray-URL живут в `/opt/etc/xkeen/`, провайдеры Mihomo — в его `config.yaml`. Переключение Xray ↔ Mihomo **не переносит** узлы автоматически (имена и протоколы могут различаться); конфиг целевого ядра валидируется до применения, при ошибке — откат.
+
+## Управление сервисами и типичные неполадки
+
+Управление: панель либо init-скрипты — `/opt/etc/init.d/S99xkeen-ui start|stop|restart`, ядро — через `/api/control` (XKeen init-скрипт). Бэкапы конфигураций — `/opt/backups/*.tar`, создание/восстановление через панель.
+
+| Проблема | Что проверить |
+|---|---|
+| Панель не открывается | `/opt/etc/init.d/S99xkeen-ui status`, порт в `ARGS` (`-p 1000`), лог `/opt/var/log/xkeen-ui.log` |
+| Ядро не запускается | сообщение ошибки в панели (вывод init-скрипта), валидность конфига, логи Xray `/opt/var/log/xray/*.log` |
+| Подписка не загрузилась | только HTTPS+домен (не IP/`.local`), лимит 256 КБ, ≤64 узлов (Xray); DNS роутера резолвит домен; домен в LAN — включите «разрешить локальную сеть» |
+| Маршрут не применился | правило не ссылается на отсутствующий outbound; обход устройств и «Без VPN» требуют поддержки со стороны скрипта `S05xkeen` (панель это проверяет и сообщает об ошибке) |
+| CSQTT/WDTT Plus не поднимаются | статусы в панели; логи `/opt/etc/csqtt/csqtt.log`, `/opt/etc/wdtt-plus/wdtt-plus.log`; наличие бинарников клиентов и токена VK |
+
+## Версии туннельных клиентов
+
+- Интеграция CSQTT рассчитана на нативный клиент **2.1.9** (файл `/opt/etc/csqtt/client-version` выбирает `router/csqtt-run-219.sh`). **CSQTT 2.5.0 скриптами не поддерживается**; Android-APK не является бинарником для роутера.
+- WDTT Plus — клиент **v18** с патчем `router/wdtt-plus-client-v18.patch` (chunkSize 64, лимит SOCKS-клиентов 256).
+
+## Разработчику
+
+- Сборка: `cd frontend && bun install && bun run build`, затем `cd backend && cargo build --release` (dist фронтенда встраивается в бинарник).
+- Кросс-сборка (aarch64 — stable, mips/mipsel — nightly + cross) описана в `.github/workflows/build-rust.yml`: ручной запуск (workflow_dispatch) с версией публикует prerelease-релиз с бинарниками `arm64-v8a` / `mips32` / `mips32le` и `SHA256SUMS`.
+- `outboundGenerator.yml` публикует Outbound Generator (`outboundGenerator.html`) на GitHub Pages; `wiki.yml` синхронизирует `wiki/` в GitHub Wiki (пуш в `main`, требуется инициализированная Wiki).
+- Ветки: `main` принадлежит владельцу репозитория, разработка ведётся в `codex` (см. `AGENTS.md`); коммитьте только там.
