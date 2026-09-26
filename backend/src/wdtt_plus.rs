@@ -1,7 +1,7 @@
 use axum::{extract::State, response::Json};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::{io::{Read, Seek, SeekFrom}, path::Path, sync::{OnceLock, atomic::{AtomicU64, Ordering}}, time::Duration};
+use std::{path::Path, sync::{OnceLock, atomic::{AtomicU64, Ordering}}, time::Duration};
 use tokio::{io::AsyncWriteExt, sync::Semaphore};
 
 use crate::types::AppState;
@@ -212,16 +212,8 @@ fn health_age_seconds() -> Option<u64> {
 pub async fn status() -> Json<Value> {
     let installed = Path::new("/opt/etc/wdtt-plus/wdtt-plus-client").is_file() && Path::new(SERVICE).is_file();
     let running = running();
-    let log = std::fs::File::open("/opt/etc/wdtt-plus/wdtt-plus.log").ok().and_then(|mut file| {
-        let len = file.metadata().ok()?.len();
-        file.seek(SeekFrom::Start(len.saturating_sub(65536))).ok()?;
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes).ok()?;
-        Some(String::from_utf8_lossy(&bytes).into_owned())
-    }).unwrap_or_default();
-    let recent = log.rsplit("WDTT_PLUS_START").next().unwrap_or("");
     let health_age = health_age_seconds();
-    let ready = running && recent.contains("PROXY_READY|socks5|") && health_age.is_some_and(|age| age <= 90);
+    let ready = running && health_age.is_some_and(|age| age <= 90);
     let attached = std::fs::read_to_string("/opt/etc/xray/configs/00_config.json").ok()
         .and_then(|content| serde_json::from_str::<Value>(&content).ok())
         .and_then(|config| config.get("outbounds")?.as_array().cloned())
