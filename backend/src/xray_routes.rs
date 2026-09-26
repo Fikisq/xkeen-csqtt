@@ -1,4 +1,5 @@
 use crate::configs::{validate_core, xray_files_with_replacement};
+use crate::controller;
 use crate::device_bypass;
 use crate::types::AppState;
 use axum::{extract::State, Json};
@@ -28,15 +29,15 @@ async fn replace_live_rules(config: &Value) -> Result<(), String> {
     let routing = config.get("routing").ok_or("В JSON нет маршрутизации")?;
     let input = serde_json::to_vec(&json!({ "routing": routing })).map_err(|e| e.to_string())?;
     let mut command = Command::new("/opt/sbin/xray");
-    command.args(["api", "adrules", "-s", API_LISTEN, "stdin:"])
+    command.args(["api", "adrules", "-s", API_LISTEN, "-t", "12", "stdin:"])
         .env("XRAY_LOCATION_ASSET", "/opt/etc/xray/dat")
         .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     let mut child = command.spawn().map_err(|e| format!("Не удалось вызвать API Xray: {e}"))?;
     let Some(mut stdin) = child.stdin.take() else { return Err("Не удалось передать правила Xray".into()) };
     stdin.write_all(&input).await.map_err(|e| format!("Не удалось передать правила Xray: {e}"))?;
     drop(stdin);
-    let output = tokio::time::timeout(Duration::from_secs(10), child.wait_with_output()).await
-        .map_err(|_| "API Xray не ответил за 10 секунд".to_string())?
+    let output = tokio::time::timeout(Duration::from_secs(18), child.wait_with_output()).await
+        .map_err(|_| "API Xray не ответил за 18 секунд".to_string())?
         .map_err(|e| format!("Ошибка API Xray: {e}"))?;
     if output.status.success() { return Ok(()) }
     let error = String::from_utf8_lossy(&output.stderr);
@@ -82,7 +83,14 @@ pub async fn apply_routes(State(state): State<AppState>, Json(request): Json<App
         return Json(json!({ "success": false, "error": format!("Проверка Xray не пройдена: {}", error.chars().take(200).collect::<String>()) }));
     }
     if let Err(error) = replace_live_rules(&new_config).await {
-        return Json(json!({ "success": false, "error": error }));
+        // AddRule can time out after Xray has accepted some rules. Restart from
+        // the still-saved config so the live rules cannot diverge from disk.
+        let recovery = controller::run_init_command(&state, &["restart", "on"]).await;
+        let detail = match recovery {
+            Ok(()) => format!("{error}. Прежняя маршрутизация восстановлена; повторите сохранение"),
+            Err(recovery_error) => format!("{error}. Восстановление Xray не удалось: {recovery_error}"),
+        };
+        return Json(json!({ "success": false, "error": detail }));
     }
     let previous_bypass = match device_bypass::apply_for_config(&new_config).await {
         Ok(previous) => previous,
