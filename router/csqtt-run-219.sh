@@ -37,12 +37,16 @@ case "${VK_HASH_MODE:-auto_js}" in
         ;;
     auto_js)
         /opt/bin/vk-manual-hashes.sh release csqtt || exit 1
+        export CSQTT_VK_CALLS_FILE="$DIR/vk_js_calls"
         set -- "$@" --vk-hash-mode auto_js --vk-auth-mode auto_js
         TOKEN=$(cat "$DIR/vk_token" 2>/dev/null) || { echo "нет vk_token"; exit 1; }
         BOOTSTRAP=$(printf '{"token":"%s"}' "$TOKEN" | base64 | tr -d '\n')
         FIFO="$DIR/bootstrap.fifo"
         [ -p "$FIFO" ] || mkfifo "$FIFO" || { echo "не удалось создать fifo"; exit 1; }
-        printf 'VK_JS_BOOTSTRAP:%s\n' "$BOOTSTRAP" > "$FIFO" &
+        # Keep a writer open after exec so the client's control reader does not
+        # see EOF before the service can send FINISH_VK_CALLS and STOP.
+        exec 3<> "$FIFO"
+        printf 'VK_JS_BOOTSTRAP:%s\n' "$BOOTSTRAP" >&3
         ;;
     *) echo "неизвестный режим VK"; exit 1 ;;
 esac

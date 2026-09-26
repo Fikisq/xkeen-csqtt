@@ -1,0 +1,169 @@
+diff --git a/rust-client/main.rs b/rust-client/main.rs
+index 735b804..0847332 100644
+--- a/rust-client/main.rs
++++ b/rust-client/main.rs
+@@ -208,6 +208,9 @@ async fn run(arguments: Arguments) -> Result<()> {
+         .take(MAX_VK_HASHES)
+         .collect();
+     if hashes.is_empty() {
++        if let Some(active) = js_calls.take() {
++            active.finish().await;
++        }
+         bail!("[КЛИЕНТ] Нет хешей VK");
+     }
+     let workers = normalize_worker_count_for_hashes(
+@@ -259,7 +262,11 @@ async fn run(arguments: Arguments) -> Result<()> {
+         Ok(value) => value,
+         Err(error) => {
+             if let Some(active) = js_calls.take() {
+-                active.leave_creator().await;
++                if std::env::var_os("CSQTT_VK_CALLS_FILE").is_some() {
++                    active.finish().await;
++                } else {
++                    active.leave_creator().await;
++                }
+             }
+             return Err(error);
+         }
+@@ -383,7 +390,9 @@ async fn run(arguments: Arguments) -> Result<()> {
+         let _ = task.await;
+     }
+     if let Some(active) = js_calls.take() {
+-        if finish_js_calls.load(Ordering::Acquire) {
++        if finish_js_calls.load(Ordering::Acquire)
++            || std::env::var_os("CSQTT_VK_CALLS_FILE").is_some()
++        {
+             active.finish().await;
+         } else {
+             active.leave_creator().await;
+diff --git a/rust-client/udp_batch.rs b/rust-client/udp_batch.rs
+index debc34e..b344933 100644
+--- a/rust-client/udp_batch.rs
++++ b/rust-client/udp_batch.rs
+@@ -550,7 +550,7 @@ mod platform {
+         }
+         #[cfg(target_os = "linux")]
+         {
+-            unsafe { libc::recvmmsg(fd, messages, count, flags, timeout) }
++            unsafe { libc::recvmmsg(fd, messages, count, flags as _, timeout) }
+         }
+     }
+ 
+@@ -574,7 +574,7 @@ mod platform {
+         }
+         #[cfg(target_os = "linux")]
+         {
+-            unsafe { libc::sendmmsg(fd, messages, count, flags) }
++            unsafe { libc::sendmmsg(fd, messages, count, flags as _) }
+         }
+     }
+ 
+@@ -639,16 +639,13 @@ mod platform {
+     }
+ 
+     fn mmsg_header(iovec: *mut libc::iovec) -> libc::mmsghdr {
++        // musl's libc::msghdr has private padding fields, so initialize the
++        // whole C structure before assigning its public fields.
++        let mut header: libc::msghdr = unsafe { std::mem::zeroed() };
++        header.msg_iov = iovec;
++        header.msg_iovlen = 1;
+         libc::mmsghdr {
+-            msg_hdr: libc::msghdr {
+-                msg_name: ptr::null_mut(),
+-                msg_namelen: 0,
+-                msg_iov: iovec,
+-                msg_iovlen: 1,
+-                msg_control: ptr::null_mut(),
+-                msg_controllen: 0,
+-                msg_flags: 0,
+-            },
++            msg_hdr: header,
+             msg_len: 0,
+         }
+     }
+diff --git a/rust-client/vk_js_calls.rs b/rust-client/vk_js_calls.rs
+index 13d31a0..63bfa2d 100644
+--- a/rust-client/vk_js_calls.rs
++++ b/rust-client/vk_js_calls.rs
+@@ -11,7 +11,7 @@ use primp::{
+ use serde::Deserialize;
+ use serde_json::Value;
+ use sha2::{Digest, Sha256};
+-use std::{collections::HashSet, sync::Arc, time::Duration};
++use std::{collections::HashSet, io::Write, path::PathBuf, sync::Arc, time::Duration};
+ use tokio::sync::Mutex;
+ use url::{Url, form_urlencoded};
+ use uuid::Uuid;
+@@ -35,6 +35,7 @@ pub struct ActiveCalls {
+     access_token: String,
+     session_key: String,
+     conversation_ids: Vec<String>,
++    call_file: Option<PathBuf>,
+ }
+ 
+ pub struct CredentialBroker {
+@@ -103,6 +104,16 @@ pub async fn start(
+     crate::log_error!("[VK JS] Сессия Calls подтверждена");
+ 
+     let conversation_id = Uuid::new_v4().to_string();
++    let call_file = std::env::var_os("CSQTT_VK_CALLS_FILE").map(PathBuf::from);
++    if let Some(path) = &call_file {
++        let mut file = std::fs::OpenOptions::new()
++            .write(true)
++            .create_new(true)
++            .open(path)
++            .context("не удалось сохранить ID звонка VK до его создания")?;
++        writeln!(file, "{conversation_id}").context("не удалось записать ID звонка VK")?;
++        file.sync_all().context("не удалось сохранить ID звонка VK на диск")?;
++    }
+     let payload = serde_json::json!({
+         "is_video": true,
+         "with_join_link": true,
+@@ -150,6 +161,7 @@ pub async fn start(
+         access_token: access_token.clone(),
+         session_key,
+         conversation_ids: vec![conversation_id.clone()],
++        call_file,
+     };
+     let credential_broker = Arc::new(CredentialBroker {
+         client: active.client.clone(),
+@@ -168,7 +180,11 @@ pub async fn start(
+         }
+         Err(error) => {
+             crate::log_error!("[VK JS] Звонок не создан: {error}");
+-            let _ = tokio::time::timeout(Duration::from_secs(8), active.leave_creator()).await;
++            if active.call_file.is_some() {
++                active.finish().await;
++            } else {
++                let _ = tokio::time::timeout(Duration::from_secs(8), active.leave_creator()).await;
++            }
+             Err(error).context("vchat.startConversation")
+         }
+     }
+@@ -345,10 +361,11 @@ impl ActiveCalls {
+ 
+     pub async fn finish(self) {
+         let total = self.conversation_ids.len();
++        let call_file = self.call_file;
+         let client = self.client;
+         let access_token = self.access_token;
+         let conversation_ids = self.conversation_ids;
+-        let finished = tokio::time::timeout(Duration::from_secs(2), async move {
++        let finished = tokio::time::timeout(Duration::from_secs(60), async move {
+             let mut finished = 0usize;
+             let mut tasks = tokio::task::JoinSet::new();
+             for conversation_id in conversation_ids {
+@@ -384,6 +401,13 @@ impl ActiveCalls {
+         })
+         .await
+         .unwrap_or(0);
++        if finished == total {
++            if let Some(path) = call_file {
++                if let Err(error) = std::fs::remove_file(&path) {
++                    crate::log_error!("[VK JS] Не удалось удалить ID закрытого звонка: {error}");
++                }
++            }
++        }
+         crate::log_error!("[VK JS] Звонки завершены {finished}/{total}");
+     }
+ }

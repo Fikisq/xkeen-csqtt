@@ -19,10 +19,14 @@ owns_tun_helper_pid() {
 case "$1" in
     start)
         printf 'Starting CSQTT: '
-        rm -f "$DIR/stopped"
         if [ -f "/var/run/csqtt.pid" ] && owns_pid "$(cat "/var/run/csqtt.pid")"; then
             echo "уже запущен"; exit 0
         fi
+        if [ -s "$DIR/vk_api_calls" ] || [ -s "$DIR/vk_api_calls.stale" ]; then
+            "$DIR/csqtt-api-calls.sh" stop || { echo "прежние звонки Auto API не закрыты" >&2; exit 1; }
+        fi
+        "$DIR/csqtt-js-calls.sh" || { echo "прежний звонок Auto VK не закрыт" >&2; exit 1; }
+        rm -f "$DIR/stopped"
         RUN_SCRIPT="$DIR/csqtt-run.sh"
         if [ "$(cat "$DIR/client-version" 2>/dev/null)" = "2.1.9" ]; then
             RUN_SCRIPT="$DIR/csqtt-run-219.sh"
@@ -37,7 +41,25 @@ case "$1" in
         if [ -f "/var/run/csqtt.pid" ]; then
             PID=$(cat "/var/run/csqtt.pid")
             if owns_pid "$PID"; then
-                kill -INT "$PID" 2>/dev/null
+                if [ "$(readlink "/proc/$PID/fd/0" 2>/dev/null)" = "$DIR/bootstrap.fifo" ]; then
+                    # Auto VK's client explicitly finishes its calls only after
+                    # this control command. STOP lets it drain before a signal.
+                    (printf 'FINISH_VK_CALLS\nSTOP\n' > "$DIR/bootstrap.fifo") &
+                    WRITER=$!
+                    w=0
+                    while kill -0 "$WRITER" 2>/dev/null && [ "$w" -lt 3 ]; do
+                        sleep 1; w=$((w+1))
+                    done
+                    kill -0 "$WRITER" 2>/dev/null && kill "$WRITER" 2>/dev/null
+                    wait "$WRITER" 2>/dev/null || true
+                else
+                    kill -INT "$PID" 2>/dev/null
+                fi
+                n=0
+                while owns_pid "$PID" && [ $n -lt 75 ]; do
+                    sleep 1; n=$((n+1))
+                done
+                owns_pid "$PID" && kill -INT "$PID" 2>/dev/null
                 n=0
                 while owns_pid "$PID" && [ $n -lt 10 ]; do
                     sleep 1; n=$((n+1))
@@ -46,15 +68,18 @@ case "$1" in
             fi
             rm -f "/var/run/csqtt.pid"
         fi
-        if [ -f "$DIR/vk_api_calls" ]; then
-            "$DIR/csqtt-api-calls.sh" stop || { echo "звонки VK API не завершены"; exit 1; }
+        cleanup_failed=0
+        "$DIR/csqtt-js-calls.sh" || { echo "звонок Auto VK не завершён" >&2; cleanup_failed=1; }
+        if [ -f "$DIR/vk_api_calls" ] || [ -f "$DIR/vk_api_calls.stale" ]; then
+            "$DIR/csqtt-api-calls.sh" stop || { echo "звонки Auto API не завершены" >&2; cleanup_failed=1; }
         fi
-        KEEP_MANUAL_STAGE=${KEEP_MANUAL_STAGE:-0} /opt/bin/vk-manual-hashes.sh stop csqtt || { echo "ручные звонки VK не завершены"; exit 1; }
+        KEEP_MANUAL_STAGE=${KEEP_MANUAL_STAGE:-0} /opt/bin/vk-manual-hashes.sh stop csqtt || { echo "ручные звонки VK не завершены" >&2; cleanup_failed=1; }
         if [ -f "$DIR/csqtt-tun-fd.pid" ]; then
             HELPER_PID=$(cat "$DIR/csqtt-tun-fd.pid")
             owns_tun_helper_pid "$HELPER_PID" && kill "$HELPER_PID" 2>/dev/null
             rm -f "$DIR/csqtt-tun-fd.pid"
         fi
+        [ "$cleanup_failed" -eq 0 ] || exit 1
         echo "OK"
         ;;
     restart)

@@ -99,6 +99,7 @@ case "${1:-}" in
         [ "$service" = csqtt ] || [ "$count" -le 4 ] || exit 2
         finish_file "$stage" || park "$stage"
         finish_file "$stale" || true
+        [ ! -s "$stale.ids" ] || { echo 'Прежние ручные звонки VK не закрыты' >&2; exit 1; }
         source=$(token_path) && [ -s "$source" ] || { echo 'VK-токен не сохранён' >&2; exit 1; }
         cp "$source" "$stage.token"
         chmod 600 "$stage.token"
@@ -134,6 +135,11 @@ case "${1:-}" in
     activate)
         expected=${3:-}
         expire_stage || true
+        finish_file "$stale" || true
+        if [ "$service" = csqtt ] && [ -s "$stale.ids" ]; then
+            echo 'Прежние ручные звонки VK не закрыты' >&2
+            exit 1
+        fi
         if [ ! -f "$stage.hashes" ] || [ "$(cat "$stage.hashes")" != "$expected" ]; then
             if [ -f "$active.hashes" ] && [ "$(cat "$active.hashes")" != "$expected" ]; then
                 finish_file "$active"
@@ -141,6 +147,11 @@ case "${1:-}" in
             exit 0
         fi
         finish_file "$active" || park "$active"
+        finish_file "$stale" || true
+        if [ "$service" = csqtt ] && [ -s "$stale.ids" ]; then
+            echo 'Прежние ручные звонки VK не закрыты' >&2
+            exit 1
+        fi
         mv "$stage.ids" "$active.ids"
         mv "$stage.token" "$active.token"
         mv "$stage.hashes" "$active.hashes"
@@ -153,11 +164,19 @@ case "${1:-}" in
             expire_stage || park "$stage"
         fi
         finish_file "$stale" || true
+        if [ "$service" = csqtt ] && [ -s "$stale.ids" ]; then
+            echo 'Ручные звонки VK не закрыты' >&2
+            exit 1
+        fi
         ;;
     release)
         finish_file "$active" || park "$active"
         finish_file "$stage" || park "$stage"
         finish_file "$stale" || true
+        if [ "$service" = csqtt ] && [ -s "$stale.ids" ]; then
+            echo 'Ручные звонки VK не закрыты; новые звонки создавать нельзя' >&2
+            exit 1
+        fi
         ;;
     expire) expire_stage || true ;;
     *) exit 2 ;;

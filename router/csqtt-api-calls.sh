@@ -3,12 +3,16 @@
 set -eu
 DIR=$(dirname "$0")
 CALLS_FILE="$DIR/vk_api_calls"
-TOKEN=$(cat "$DIR/vk_token" 2>/dev/null) || { echo "VK token не найден" >&2; exit 1; }
-printf '%s' "$TOKEN" | grep -Eq '^[A-Za-z0-9._-]+$' || { echo "Неверный формат VK token" >&2; exit 1; }
+TOKEN=''
+load_token() {
+    TOKEN=$(cat "$DIR/vk_token" 2>/dev/null) || { echo "VK token не найден" >&2; return 1; }
+    printf '%s' "$TOKEN" | grep -Eq '^[A-Za-z0-9._-]+$' || { echo "Неверный формат VK token" >&2; return 1; }
+}
 
 vk_request() {
     method=$1
     shift
+    [ -n "$TOKEN" ] || load_token || return 1
     printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" |
         /opt/bin/curl --config - --silent --show-error --fail-with-body \
             --connect-timeout 8 --max-time 20 --request POST \
@@ -56,20 +60,22 @@ finish_file() {
     return 0
 }
 
-# Never let an unfinishable call block the service: park it and retry later.
+# Retain failed IDs, but never create another call while any remain open.
 finish_calls() {
     if ! finish_file "$CALLS_FILE"; then
         cat "$CALLS_FILE" >> "$CALLS_FILE.stale"
         rm -f "$CALLS_FILE"
-        echo "Часть прежних звонков VK не закрылась; отложены в vk_api_calls.stale" >&2
     fi
-    finish_file "$CALLS_FILE.stale" || true
+    if ! finish_file "$CALLS_FILE.stale"; then
+        echo "Звонки VK не закрыты; новые звонки CSQTT создавать нельзя" >&2
+        return 1
+    fi
 }
 
 case "${1:-}" in
     stop) finish_calls ;;
     start)
-        finish_calls
+        finish_calls || exit 1
         . "$DIR/csqtt.conf"
         case "$WORKERS" in ''|*[!0-9]*) echo "Неверное число потоков" >&2; exit 1 ;; esac
         count=$(( (WORKERS + 26) / 27 ))
