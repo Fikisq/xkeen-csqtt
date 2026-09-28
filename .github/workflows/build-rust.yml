@@ -29,14 +29,7 @@ jobs:
           - target: aarch64-unknown-linux-musl
             name: arm64-v8a
             toolchain: stable
-          - target: mipsel-unknown-linux-musl
-            name: mips32le
-            toolchain: nightly
-            rustflags: "-C target-feature=+crt-static -L /usr/local/mipsel-linux-muslsf/lib -L /usr/local/lib/gcc/mipsel-linux-muslsf/9.2.0"
-          - target: mips-unknown-linux-musl
-            name: mips32
-            toolchain: nightly
-            rustflags: "-C target-feature=+crt-static -L /usr/local/mips-linux-muslsf/lib -L /usr/local/lib/gcc/mips-linux-muslsf/9.2.0"
+          # MIPS builds are temporarily excluded until cross compilation succeeds.
           # - target: mipsel-unknown-linux-gnu
           #   name: mips32le-gnu
           #   toolchain: nightly
