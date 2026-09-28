@@ -20,6 +20,7 @@ const MAX_ATTEMPTS: u32 = 5;
 const LOCKOUT_SECS: u64 = 60;
 
 static BRUTE_CACHE: LazyLock<Mutex<HashMap<String, (u32, Instant)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+static VISIT_CACHE: LazyLock<Mutex<HashMap<String, Instant>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Deserialize)]
 pub struct PasswordReq {
@@ -30,16 +31,6 @@ pub struct PasswordReq {
 
 fn now_ts() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
-}
-
-fn get_client_ip(headers: &HeaderMap, addr: SocketAddr) -> String {
-    headers
-        .get("x-real-ip")
-        .or_else(|| headers.get("x-forwarded-for"))
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.split(',').next().unwrap_or("").trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| addr.ip().to_string())
 }
 
 fn get_session_cookie<'a>(headers: &'a HeaderMap) -> Option<&'a str> {
@@ -97,8 +88,16 @@ fn clear_cookie_header() -> HeaderMap {
     headers
 }
 
-pub async fn get_login_info(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
+pub async fn get_login_info(State(state): State<AppState>, ConnectInfo(addr): ConnectInfo<SocketAddr>, headers: HeaderMap) -> impl IntoResponse {
     let s = state.settings.read().unwrap();
+    if !s.auth.enabled {
+        let mut cache = VISIT_CACHE.lock().unwrap();
+        cache.retain(|_, at| at.elapsed() < Duration::from_secs(3600));
+        if !cache.contains_key(&addr.ip().to_string()) {
+            cache.insert(addr.ip().to_string(), Instant::now());
+            crate::access_journal::record("Веб-панель", "открыта без авторизации", addr.ip());
+        }
+    }
     let authenticated =
         get_session_cookie(&headers).map_or(false, |cookie| is_session_valid(&s.auth.session_ids, cookie));
     Json(serde_json::json!({
@@ -109,7 +108,7 @@ pub async fn get_login_info(State(state): State<AppState>, headers: HeaderMap) -
 }
 
 pub async fn post_setup(
-    State(state): State<AppState>, headers: HeaderMap, Json(req): Json<PasswordReq>,
+    State(state): State<AppState>, ConnectInfo(addr): ConnectInfo<SocketAddr>, headers: HeaderMap, Json(req): Json<PasswordReq>,
 ) -> impl IntoResponse {
     if state.settings.read().unwrap().auth.password_hash.is_some() {
         return (
@@ -136,6 +135,7 @@ pub async fn post_setup(
         auth.session_ids.push(session_val);
     })
     .await;
+    crate::access_journal::record("Веб-панель", "пароль задан", addr.ip());
 
     (
         set_cookie_header(&headers, session_id, 0),
@@ -152,7 +152,7 @@ pub async fn post_login(
     State(state): State<AppState>, ConnectInfo(addr): ConnectInfo<SocketAddr>, headers: HeaderMap,
     Json(req): Json<PasswordReq>,
 ) -> Response {
-    let ip = get_client_ip(&headers, addr);
+    let ip = addr.ip().to_string();
     {
         let mut cache = BRUTE_CACHE.lock().unwrap();
         cache.retain(|_, (_, t)| t.elapsed() < Duration::from_secs(LOCKOUT_SECS * 2));
@@ -161,6 +161,7 @@ pub async fn post_login(
             entry.0 = 0;
         }
         if entry.0 >= MAX_ATTEMPTS {
+            crate::access_journal::record("Веб-панель", "вход заблокирован", addr.ip());
             println!("{} [WARN] Authorization blocked [{}]", crate::logger::ts(), ip);
             return (
                 StatusCode::TOO_MANY_REQUESTS,
@@ -198,6 +199,7 @@ pub async fn post_login(
         .unwrap_or(false);
 
     if !is_valid {
+        crate::access_journal::record("Веб-панель", "неудачный вход", addr.ip());
         let mut cache = BRUTE_CACHE.lock().unwrap();
         let entry = cache.entry(ip.clone()).or_insert((0, Instant::now()));
         entry.0 += 1;
@@ -221,6 +223,7 @@ pub async fn post_login(
     }
 
     BRUTE_CACHE.lock().unwrap().remove(&ip);
+    crate::access_journal::record("Веб-панель", "успешный вход", addr.ip());
     println!("{} [INFO] Successful auth {}", crate::logger::ts(), ip);
 
     let max_age = if req.remember { 2592000 } else { 0 };

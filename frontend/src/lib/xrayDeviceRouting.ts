@@ -1,9 +1,11 @@
 export const ROUTE_TAGS = ['VPN', 'Youtube', 'Discord', 'Games', 'AI', 'Github', 'RU'] as const
+export const RU_IP_TAG = 'RU_IP'
+export const ROSCOMVPN_DIRECT_IP = 'ext:roscomvpn-geoip-202609260832.dat:direct'
 export type RouteTag = string
 
 export function routeTags(rules: RoutingRule[]): string[] {
   return rules.map((rule) => baseRuleTag(rule))
-    .filter((tag) => ROUTE_TAGS.includes(tag as typeof ROUTE_TAGS[number]) || tag.startsWith('custom:'))
+    .filter((tag) => tag === RU_IP_TAG || ROUTE_TAGS.includes(tag as typeof ROUTE_TAGS[number]) || tag.startsWith('custom:'))
     .filter((tag, index, all) => all.indexOf(tag) === index)
 }
 
@@ -19,6 +21,7 @@ export interface RoutingRule {
   balancerTag?: string
   sourceIP?: string[]
   domain?: string[]
+  ip?: string[]
   network?: string
   [key: string]: unknown
 }
@@ -32,7 +35,7 @@ export function deviceRuleTag(ip: string, route: RouteTag): string {
   return `device:${ip}:${route}`
 }
 
-export function baseRuleTag(rule: RoutingRule): string { return (rule.ruleTag ?? '').replace(/\|selector$/, '') }
+export function baseRuleTag(rule: RoutingRule): string { return (rule.ruleTag ?? '').replace(/\|(selector|nfqws2)$/, '') }
 export function usesSelector(rule: RoutingRule): boolean { return rule.ruleTag?.endsWith('|selector') ?? false }
 
 // Each device owns a complete block, before all general service rules.
@@ -40,7 +43,8 @@ export function normalizeDevicePriority(rules: RoutingRule[]): RoutingRule[] {
   const deviceIp = (rule: RoutingRule) => /^device:([^:]+):/.exec(baseRuleTag(rule))?.[1]
   const vpnTag = (ip: string) => deviceRuleTag(ip, 'VPN')
   const locked = (rule?: RoutingRule) => ['direct', 'csqtt', 'wdtt-plus'].includes(rule?.outboundTag ?? '')
-  const unmanaged = rules.filter((rule) => !deviceIp(rule) && !routeTags(rules).includes(baseRuleTag(rule)))
+  const managed = new Set([...routeTags(rules), RU_IP_TAG])
+  const unmanaged = rules.filter((rule) => !deviceIp(rule) && !managed.has(baseRuleTag(rule)))
   const devices = [...new Set(rules.map(deviceIp).filter((ip): ip is string => !!ip))]
   const blocks = devices.flatMap((ip) => {
     const own = rules.filter((rule) => deviceIp(rule) === ip)
@@ -48,7 +52,7 @@ export function normalizeDevicePriority(rules: RoutingRule[]): RoutingRule[] {
     const services = own.filter((rule) => rule !== vpn)
     return vpn ? locked(vpn) ? [vpn, ...services] : [...services, vpn] : services
   })
-  const general = rules.filter((rule) => !deviceIp(rule) && routeTags(rules).includes(baseRuleTag(rule)))
+  const general = rules.filter((rule) => !deviceIp(rule) && managed.has(baseRuleTag(rule)))
   const vpn = general.find((rule) => baseRuleTag(rule) === 'VPN')
   const services = general.filter((rule) => rule !== vpn)
   return [...unmanaged, ...blocks, ...(vpn ? locked(vpn) ? [vpn, ...services] : [...services, vpn] : services)]
@@ -108,12 +112,65 @@ export function addCustomRoute(rules: RoutingRule[], name: string, domains: stri
   return updated
 }
 
+function validIpResource(value: string): boolean {
+  if (value === ROSCOMVPN_DIRECT_IP) return true
+  const pieces = value.split('/')
+  if (pieces.length > 2) return false
+  const [address, prefix] = pieces
+  const parts = address.split('.')
+  return parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255)
+    && (prefix === undefined || /^\d{1,2}$/.test(prefix) && Number(prefix) <= 32)
+}
+
+export function normalizeRouteResources(kind: 'domain' | 'ip', values: string[]): string[] {
+  const resources = [...new Set(values.map((value) => value.trim()).filter(Boolean))]
+  if (!resources.length || resources.length > 30) throw new Error('Укажите от 1 до 30 ресурсов')
+  if (kind === 'domain') {
+    if (resources.some((value) => !/^(?:domain:|full:|geosite:)?[a-z0-9*._-]+$/i.test(value))) throw new Error('Некорректный домен или категория GeoSite')
+    return resources.map((value) => /^(?:domain:|full:|geosite:)/i.test(value) ? value : `domain:${value}`)
+  }
+  if (resources.some((value) => !validIpResource(value))) throw new Error('Введите IPv4, CIDR или доступный IP-список RoscomVPN')
+  return resources
+}
+
+export function addCustomIpRoute(rules: RoutingRule[], name: string, ips: string[]): RoutingRule[] {
+  const title = name.trim()
+  if (!title || title.length > 40 || /[<>\r\n]/.test(title)) throw new Error('Название маршрута: от 1 до 40 символов')
+  const tag = `custom:${encodeURIComponent(title)}`
+  if (routeTags(rules).includes(tag)) throw new Error('Маршрут с таким названием уже есть')
+  const normalized = normalizeRouteResources('ip', ips)
+  const vpn = rules.find((rule) => baseRuleTag(rule) === 'VPN')
+  const target = destination(vpn)
+  if (!target.outboundTag && !target.balancerTag) throw new Error('Сначала настройте общий Селектор')
+  const firstGlobal = rules.findIndex((rule) => routeTags(rules).includes(baseRuleTag(rule)))
+  let updated = [...rules.slice(0, firstGlobal < 0 ? rules.length : firstGlobal), { type: 'field', ruleTag: `${tag}|selector`, ip: normalized, ...target }, ...rules.slice(firstGlobal < 0 ? rules.length : firstGlobal)]
+  for (const ip of readDeviceIps(rules)) {
+    const direct = rules.some((rule) => baseRuleTag(rule) === deviceRuleTag(ip, 'VPN') && rule.outboundTag === 'direct')
+    updated = updateDeviceRules(updated, ip, tag, direct ? 'direct' : '@selector')
+  }
+  return updated
+}
+
+export function replaceRouteResources(rules: RoutingRule[], tag: string, values: string[]): RoutingRule[] {
+  if (tag === 'VPN') throw new Error('Общий Селектор не содержит ресурсов')
+  const global = rules.find((rule) => baseRuleTag(rule) === tag)
+  if (!global) throw new Error('Маршрут не найден')
+  const kind = Array.isArray(global.ip) && !Array.isArray(global.domain) ? 'ip' : 'domain'
+  const resources = normalizeRouteResources(kind, values)
+  return rules.map((rule) => {
+    const name = baseRuleTag(rule)
+    if (name !== tag && !(name.startsWith('device:') && name.endsWith(`:${tag}`))) return rule
+    return kind === 'ip' ? { ...rule, ip: resources } : { ...rule, domain: resources }
+  })
+}
+
 export function mergeRouteDomains(rules: RoutingRule[], tag: string, domains: string[]): RoutingRule[] {
   const global = rules.find((rule) => baseRuleTag(rule) === tag)
   if (!global || tag === 'VPN') throw new Error('Маршрут не найден')
   if (!domains.length || domains.length > 30 || domains.some((domain) => !/^(?:domain:|full:|geosite:)?[a-z0-9*._-]+$/i.test(domain))) throw new Error('Введите до 30 доменов, по одному в строке')
   const normalized = domains.map((domain) => /^(?:domain:|full:|geosite:)/i.test(domain) ? domain : `domain:${domain}`)
   const merged = [...new Set([...(global.domain ?? []), ...normalized])]
+  if (merged.length > 30) throw new Error('В одном маршруте может быть не больше 30 доменных ресурсов')
   return rules.map((rule) => baseRuleTag(rule) === tag || baseRuleTag(rule).endsWith(`:${tag}`) ? { ...rule, domain: merged } : rule)
 }
 
@@ -148,7 +205,7 @@ export function updateGlobalRules(rules: RoutingRule[], route: RouteTag, selecti
   if (route === 'VPN') {
     updated = updated.map((rule) => {
       const tag = baseRuleTag(rule)
-      if (usesSelector(rule) && routeTags(rules).includes(tag)) return { ...rule, outboundTag: undefined, balancerTag: undefined, ...target }
+      if (usesSelector(rule) && (routeTags(rules).includes(tag) || tag === RU_IP_TAG)) return { ...rule, outboundTag: undefined, balancerTag: undefined, ...target }
       if (tag.startsWith('device:') && tag.endsWith(':VPN') && usesSelector(rule)) return { ...rule, outboundTag: undefined, balancerTag: undefined, ...target }
       return rule
     })
@@ -192,7 +249,7 @@ export function updateDeviceRules(rules: RoutingRule[], ip: string, route: Route
   if (route === 'VPN' && !readDeviceIps(rules).includes(ip)) {
     let seeded = rules
     for (const category of routeTags(rules).filter((tag) => tag !== 'VPN')) {
-      if (rules.some((rule) => baseRuleTag(rule) === category)) seeded = updateDeviceRules(seeded, ip, category, category === 'RU' ? 'direct' : '@selector')
+      if (rules.some((rule) => baseRuleTag(rule) === category)) seeded = updateDeviceRules(seeded, ip, category, category === 'RU' || category === RU_IP_TAG ? 'direct' : '@selector')
     }
     return updateDeviceRules(seeded, ip, 'VPN', outboundTag)
   }
@@ -206,16 +263,19 @@ export function updateDeviceRules(rules: RoutingRule[], ip: string, route: Route
   const existingIndex = rules.findIndex((rule) => baseRuleTag(rule) === tag)
   if (route !== 'VPN' && outboundTag === '') return rules.filter((rule) => baseRuleTag(rule) !== tag)
   if (!outboundTag) throw new Error('Выберите подключение')
+  const nfqws2 = outboundTag === '@nfqws2'
+  if (nfqws2 && (route !== 'VPN' || ip !== '192.168.0.130')) throw new Error('Пробный nfqws2 доступен только для общего маршрута 192.168.0.130')
+  const actualOutbound = nfqws2 ? 'direct' : outboundTag
   const linked = outboundTag === '@selector'
   const deviceVpn = rules.find((rule) => baseRuleTag(rule) === deviceRuleTag(ip, 'VPN'))
   const selectedRule = route === 'VPN' ? rules.find((rule) => baseRuleTag(rule) === 'VPN') : deviceVpn ?? rules.find((rule) => baseRuleTag(rule) === 'VPN')
-  const target = choice(selectedRule, outboundTag, linked)
+  const target = choice(selectedRule, actualOutbound, linked)
   if (!target.outboundTag && !target.balancerTag) throw new Error('Общий Селектор не настроен')
   const nextRule: RoutingRule = {
     type: 'field',
-    ruleTag: tag + (linked ? '|selector' : ''),
+    ruleTag: tag + (linked ? '|selector' : nfqws2 ? '|nfqws2' : ''),
     sourceIP: [ip],
-    ...(route === 'VPN' ? { network: 'tcp,udp' } : { domain: global.domain }),
+    ...(route === 'VPN' ? { network: 'tcp,udp' } : Array.isArray(global.ip) && !Array.isArray(global.domain) ? { ip: global.ip } : { domain: global.domain }),
     ...target,
   }
   const firstGlobal = rules.findIndex((rule) => routeTags(rules).includes(baseRuleTag(rule)))
@@ -229,7 +289,7 @@ export function updateDeviceRules(rules: RoutingRule[], ip: string, route: Route
       return [...rules.slice(0, insertAt), nextRule, ...rules.slice(insertAt)]
     })()
   if (route !== 'VPN') return updated
-  if (outboundTag === 'direct') {
+  if (actualOutbound === 'direct') {
     // Device-wide direct must override every service route, including existing custom routes.
     updated = updated.map((rule) => baseRuleTag(rule).startsWith(devicePrefix) && baseRuleTag(rule) !== tag
       ? { ...rule, ruleTag: baseRuleTag(rule), outboundTag: 'direct', balancerTag: undefined }
@@ -240,7 +300,7 @@ export function updateDeviceRules(rules: RoutingRule[], ip: string, route: Route
   if (previousDeviceVpn?.outboundTag === 'direct') {
     updated = updated.map((rule) => {
       const name = baseRuleTag(rule)
-      return name.startsWith(devicePrefix) && name !== tag && name !== `${devicePrefix}RU`
+      return name.startsWith(devicePrefix) && name !== tag && name !== `${devicePrefix}RU` && name !== `${devicePrefix}${RU_IP_TAG}`
         ? { ...rule, ruleTag: `${name}|selector`, outboundTag: undefined, balancerTag: undefined, ...target }
         : rule
     })

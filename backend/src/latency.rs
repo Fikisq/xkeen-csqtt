@@ -111,6 +111,8 @@ pub async fn test_latency(Json(request): Json<LatencyRequest>) -> Json<Value> {
         curl_latency(&["--ipv4", "--socks5-hostname", "127.0.0.1:1088"]).await
     } else if request.tag == "direct" {
         curl_latency(&["--noproxy", "*"]).await
+    } else if request.tag == "nfqws-direct" {
+        crate::nfqws2::latency_probe().await
     } else {
         let content = match tokio::fs::read_to_string(XRAY_CONFIG).await {
             Ok(content) => content,

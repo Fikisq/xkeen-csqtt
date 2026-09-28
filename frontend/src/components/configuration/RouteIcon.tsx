@@ -11,7 +11,7 @@ import { customRouteName } from '@/lib/xrayDeviceRouting'
 
 export const ROUTE_LABELS: Record<RouteTag, string> = {
   VPN: 'Селектор', Youtube: 'YouTube', Discord: 'Discord',
-  Games: 'Игры', AI: 'Нейронки', Github: 'GitHub', RU: 'Российские сайты',
+  Games: 'Игры', AI: 'Нейронки', Github: 'GitHub', RU: 'Российские сайты | домены', RU_IP: 'Российские сайты | IP',
 }
 
 export function routeLabel(route: RouteTag): string { return ROUTE_LABELS[route] ?? customRouteName(route) }
@@ -26,6 +26,7 @@ export function RouteIcon({ route }: { route: RouteTag }) {
     case 'AI': return <IconSparkles {...props} className="text-fuchsia-400" />
     case 'Github': return <IconBrandGithub {...props} className="text-foreground" />
     case 'RU': return <IconWorld {...props} className="text-blue-400" />
+    case 'RU_IP': return <IconWorld {...props} className="text-blue-400" />
     default: return <IconWorld {...props} className="text-sky-400" />
   }
 }

@@ -14,6 +14,7 @@ import { Fragment, memo, useCallback, useState } from 'react'
 import { apiCall } from '../../lib/api'
 import { useAppContext, useModalContext } from '../../lib/store'
 import type { AppSettings, ProxySortOrder, ThemeMode } from '../../lib/types'
+import { AccessJournal } from './AccessJournal'
 
 type BooleanSettingKey = {
   [K in keyof AppSettings]: AppSettings[K] extends boolean ? K : never
@@ -481,6 +482,7 @@ export function SettingsModal() {
               <TabsTrigger value="gui">Режим GUI</TabsTrigger>
               <TabsTrigger value="clash-api">Clash API</TabsTrigger>
               <TabsTrigger value="updates">Обновления</TabsTrigger>
+              <TabsTrigger value="access">Входы</TabsTrigger>
             </TabsList>
           </div>
 
@@ -536,6 +538,10 @@ export function SettingsModal() {
                     </Select>
                   </Field>
                 </FieldGroup>
+              </TabsContent>
+
+              <TabsContent value="access">
+                <AccessJournal />
               </TabsContent>
 
               <TabsContent value="gui">

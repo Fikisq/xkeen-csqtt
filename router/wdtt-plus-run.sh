@@ -41,6 +41,7 @@ if [ "${RT_NETWORK:-0}" = 1 ]; then
         set -- "$@" --turn-sni "$TURN_SNI"
     fi
     if [ "${RT_MASQUE:-0}" = 1 ] && [ "${RT_MASQUE_ACCEPT_TOS:-0}" = 1 ]; then
+        [ -s "$DIR/rt-masque-v1.json" ] || { echo 'Конфигурация MASQUE отсутствует' >&2; exit 1; }
         set -- "$@" --rt-masque=true \
             --rt-masque-config "$DIR/rt-masque-v1.json" \
             --rt-masque-accept-tos=true

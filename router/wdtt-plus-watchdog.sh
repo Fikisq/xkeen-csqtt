@@ -45,7 +45,7 @@ while [ -s "$CLIENT_PID" ] && owns_client_pid "$(cat "$CLIENT_PID")"; do
         echo "WDTT Plus: HTTP через SOCKS5 не отвечает ($failures/3)" >> "$DIR/wdtt-plus.log"
         if [ "$failures" -ge 3 ]; then
             now=$(date +%s)
-            first=$(cat "$RESTARTS" 2>/dev/null || echo 0)
+            first=$(awk '{print $1}' "$RESTARTS" 2>/dev/null)
             case "$first" in ''|*[!0-9]*) first=0 ;; esac
             if [ "$((now - first))" -ge 3600 ]; then
                 printf '%s %s\n' "$now" 0 > "$RESTARTS"

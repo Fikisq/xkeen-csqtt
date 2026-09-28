@@ -119,7 +119,7 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
         return Json(json!({"success": false, "error": "Укажите до 4 ссылок или хешей VK"}));
     }
     let manual_hashes = if parsed.is_empty() { value(&existing, "VK_HASHES").unwrap_or_default() } else { parsed.join(",") };
-    if manual_hashes.split(',').count() != hashes_count as usize {
+    if manual_hashes.is_empty() || manual_hashes.split(',').count() != hashes_count as usize {
         return Json(json!({"success": false, "error": "Число ручных хешей должно совпадать с выбранным количеством"}));
     }
     let password = request.password.as_deref().unwrap_or("");
@@ -146,6 +146,9 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
     }
     if rt_masque && (!rt_network || !rt_masque_accept_tos) {
         return Json(json!({"success": false, "error": "Для MASQUE включите Сеть РТ и подтвердите условия Cloudflare WARP"}));
+    }
+    if rt_masque && !tokio::fs::metadata(format!("{DIR}/rt-masque-v1.json")).await.is_ok_and(|meta| meta.len() > 0) {
+        return Json(json!({"success": false, "error": "Конфигурация MASQUE отсутствует; не включайте резерв до её установки"}));
     }
     if let Err(error) = tokio::fs::create_dir_all(DIR).await {
         return Json(json!({"success": false, "error": format!("Не удалось создать каталог WDTT Plus: {error}")}));
