@@ -42,7 +42,7 @@ pub fn get_repo(core: &str) -> Option<&'static str> {
     match core {
         "xray" => Some("XTLS/Xray-core"),
         "mihomo" => Some("MetaCubeX/mihomo"),
-        "self" => Some("zxc-rv/XKeen-UI"),
+        "self" => Some("Fikisq/xkeen-csqtt"),
         _ => None,
     }
 }
@@ -96,7 +96,7 @@ pub async fn fetch_latest_version(
             }
         }
 
-        if let Some(r) = rels.into_iter().find(|r| !r.prerelease) {
+        if let Some(r) = rels.into_iter().find(|r| core == "self" || !r.prerelease) {
             let tag = r.tag_name.clone();
             return Some((tag.trim_start_matches('v').to_string(), tag));
         }
