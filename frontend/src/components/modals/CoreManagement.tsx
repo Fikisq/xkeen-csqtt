@@ -41,6 +41,7 @@ interface WdttStatus {
 
 interface NfqwsStatus {
   installed: boolean
+  globalReady: boolean
   running: boolean
   mode: 'global' | 'canary'
   device: string
@@ -231,6 +232,44 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
       showToast(action === 'start' ? 'nfqws2 запущен' : 'nfqws2 остановлен; очередь пропускает трафик')
     } catch (error) { setNfqwsError(error instanceof Error ? error.message : 'Ошибка nfqws2') }
     finally { setControlPending(false) }
+  }
+
+  async function attachNfqwsToXray() {
+    if (!window.confirm('Подключить nfqws2 к маршрутизации Xray? Xray перезапустится, поэтому действующие VPN-соединения кратковременно прервутся.')) return
+    setControlPending(true)
+    setNfqwsError('')
+    try {
+      const result = await apiCall<{ success: boolean; error?: string }>('POST', 'nfqws2/attach-xray', {})
+      if (!result.success) throw new Error(result.error || 'Не удалось подключить nfqws2 к Xray')
+      showToast('nfqws2 подключён к Xray; теперь его можно выбрать в маршрутах')
+      window.location.reload()
+    } catch (error) { setNfqwsError(error instanceof Error ? error.message : 'Ошибка подключения nfqws2') }
+    finally { setControlPending(false) }
+  }
+
+  async function manageAddon(addon: 'csqtt' | 'wdtt-plus' | 'nfqws2', action: 'install' | 'remove') {
+    const name = addon === 'csqtt' ? 'CSQTT' : addon === 'wdtt-plus' ? 'WDTT Plus' : 'nfqws2 · zapret2'
+    const message = action === 'remove'
+      ? `Удалить ${name}? Панель сначала проверит пакет для обратной установки в GitHub. Действующий маршрут через компонент нужно переключить заранее. Если GitHub станет недоступен, скачать клиент обратно не получится. При изменении Xray соединения кратковременно прервутся.`
+      : `Скачать и установить ${name} из релиза GitHub? Сохранённые настройки будут использованы. При возвращении узла Xray соединения кратковременно прервутся.`
+    if (!window.confirm(message)) return
+    setControlPending(true)
+    setCsqttError('')
+    setWdttError('')
+    setNfqwsError('')
+    try {
+      const result = await apiCall<{ success: boolean; restarted?: boolean; error?: string }>('POST', `addons/${action}`, { addon, confirm: true })
+      if (!result.success) throw new Error(result.error || `Не удалось ${action === 'remove' ? 'удалить' : 'установить'} ${name}`)
+      await Promise.all([refreshCsqttStatus(), refreshWdttStatus(), refreshNfqwsStatus()])
+      showToast(`${name} ${action === 'remove' ? 'удалён' : 'установлен'}${result.restarted ? '; Xray перезапущен' : ''}`)
+      if (result.restarted) window.location.reload()
+      else onRefreshStatus()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `Ошибка управления ${name}`
+      if (addon === 'csqtt') setCsqttError(message)
+      else if (addon === 'wdtt-plus') setWdttError(message)
+      else setNfqwsError(message)
+    } finally { setControlPending(false) }
   }
 
   async function controlWdtt(action: 'start' | 'stop' | 'restart') {
@@ -447,6 +486,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
                 <Button variant="outline" size="sm" disabled={controlPending} onClick={() => void controlCsqtt('stop')}>Остановить</Button>
               </> : <Button variant="outline" size="sm" disabled={controlPending} onClick={() => void controlCsqtt('start')}>Запустить</Button>)}
               <Button variant="outline" size="sm" disabled={controlPending} onClick={() => void refreshCsqttStatus()}>Обновить статус</Button>
+              {csqttStatus && <Button variant="outline" size="sm" disabled={controlPending} onClick={() => void manageAddon('csqtt', csqttStatus.installed ? 'remove' : 'install')}>{csqttStatus.installed ? 'Удалить' : 'Установить'}</Button>}
             </div>
           </div>
           {csqttError && <p role="alert" className="text-sm text-red-500">{csqttError}</p>}
@@ -467,6 +507,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
               </> : <Button variant="outline" size="sm" disabled={controlPending} onClick={() => void controlWdtt('start')}>Запустить</Button>)}
               {wdttStatus?.ready && !wdttStatus.attached && <Button variant="outline" size="sm" disabled={controlPending} onClick={() => void attachWdttToXray()}>Добавить в Xray</Button>}
               <Button variant="outline" size="sm" disabled={controlPending} onClick={() => void refreshWdttStatus()}>Обновить статус</Button>
+              {wdttStatus && <Button variant="outline" size="sm" disabled={controlPending} onClick={() => void manageAddon('wdtt-plus', wdttStatus.installed ? 'remove' : 'install')}>{wdttStatus.installed ? 'Удалить' : 'Установить'}</Button>}
             </div>
           </div>
           {wdttError && <p role="alert" className="text-sm text-red-500">{wdttError}</p>}
@@ -481,8 +522,10 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
             </div>
             <div className="ml-auto flex flex-wrap gap-2">
               {nfqwsStatus?.installed && <Button size="sm" variant="outline" onClick={() => setEditingNfqws(true)}>Настроить</Button>}
+              {nfqwsStatus?.installed && !nfqwsStatus.globalReady && <Button size="sm" variant="outline" disabled={controlPending} onClick={() => void attachNfqwsToXray()}>Подключить к Xray</Button>}
               {nfqwsStatus?.installed && <Button size="sm" variant="outline" disabled={controlPending} onClick={() => void controlNfqws(nfqwsStatus.running ? 'stop' : 'start')}>{nfqwsStatus.running ? 'Остановить' : 'Запустить'}</Button>}
               <Button size="sm" variant="outline" disabled={controlPending} onClick={() => void refreshNfqwsStatus()}>Обновить статус</Button>
+              {nfqwsStatus && <Button size="sm" variant="outline" disabled={controlPending} onClick={() => void manageAddon('nfqws2', nfqwsStatus.installed ? 'remove' : 'install')}>{nfqwsStatus.installed ? 'Удалить' : 'Установить'}</Button>}
             </div>
           </div>
           {nfqwsError && <p role="alert" className="text-sm text-red-500">{nfqwsError}</p>}

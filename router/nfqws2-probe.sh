@@ -7,7 +7,7 @@ ENGINE="$ROOT/engine"
 PROBE="$ROOT/probe"
 PID="$ROOT/probe.pid"
 IPT=/opt/sbin/iptables
-WAN=eth2.2
+WAN=${NFQWS_WAN:-$(ip -4 route show default | awk 'NR == 1 { for (i = 1; i <= NF; i++) if ($i == "dev") { print $(i + 1); exit } }')}
 MARK=833
 QUEUE=331
 COMMENT=xkeen_nfqws2_probe

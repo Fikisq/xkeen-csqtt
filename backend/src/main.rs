@@ -1,5 +1,6 @@
 mod api_relay;
 mod access_journal;
+mod addon_manager;
 mod auth;
 mod backuper;
 mod configs;
@@ -527,6 +528,9 @@ async fn main() {
         .route("/api/nfqws2/control", post(nfqws2::control))
         .route("/api/nfqws2/settings", get(nfqws2::get_settings).post(nfqws2::save_settings))
         .route("/api/nfqws2/check", post(nfqws2::check_strategy))
+        .route("/api/nfqws2/attach-xray", post(nfqws2::attach_xray))
+        .route("/api/addons/remove", post(addon_manager::remove))
+        .route("/api/addons/install", post(addon_manager::install))
         .route("/api/auth/reset", post(auth::post_auth_reset))
         .route("/clash/{*path}", any(api_relay::proxy_http))
         .route("/clash-ws/{*path}", get(api_relay::proxy_ws))

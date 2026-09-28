@@ -31,6 +31,7 @@ reqwest = { version = "0.12", default-features = false, features = [
   "stream",
   "blocking",
 ] }
+sha2 = "0.10"
 rust-embed = { version = "8", features = ["axum"] }
 rustix = { version = "1.1", features = ["fs"] }
 serde = { version = "1", features = ["derive"] }

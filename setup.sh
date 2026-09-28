@@ -25,9 +25,13 @@ BETA=false
 LOCAL=false
 BIN_STAGED=
 SUM_FILE=
+NFQWS_STAGED=
+NFQWS_STAGED_OWNED=false
+NFQWS_ROOT="/opt/etc/xkeen/nfqws2-stage"
 cleanup_download() {
   [ -z "$BIN_STAGED" ] || rm -f "$BIN_STAGED"
   [ -z "$SUM_FILE" ] || rm -f "$SUM_FILE"
+  [ "$NFQWS_STAGED_OWNED" != true ] || rm -f "$NFQWS_STAGED"
 }
 trap cleanup_download EXIT
 [ "$1" = "beta" ] && BETA=true
@@ -100,7 +104,71 @@ download_files() {
       exit 1
     fi
     chmod +x "$BIN_STAGED"
+    if [ "$ARCH" = arm64-v8a ]; then
+      local nfqws_name="xkeen-nfqws2-arm64-v8a.tar.gz"
+      NFQWS_STAGED=$(mktemp /opt/tmp/xkeen-nfqws2.XXXXXX) || exit 1
+      NFQWS_STAGED_OWNED=true
+      curl -fLsS -o "$NFQWS_STAGED" "$download_url/$nfqws_name" || {
+        printf "${RED_BOLD}\n Компонент nfqws2 отсутствует в релизе.${NCN}"
+        exit 1
+      }
+      expected=$(awk -v name="$nfqws_name" '$2 == name { print $1; exit }' "$SUM_FILE")
+      actual=$(sha256sum "$NFQWS_STAGED" | awk '{print $1}')
+      if [ -z "$expected" ] || [ "$expected" != "$actual" ]; then
+        printf "${RED_BOLD}\n Контрольная сумма nfqws2 не совпадает.${NCN}"
+        exit 1
+      fi
+    fi
   fi
+  if [ "$ARCH" = arm64-v8a ] && [ -z "$NFQWS_STAGED" ] && [ -f /opt/tmp/xkeen-nfqws2-arm64-v8a.tar.gz ]; then
+    NFQWS_STAGED=/opt/tmp/xkeen-nfqws2-arm64-v8a.tar.gz
+  fi
+}
+
+install_nfqws2() {
+  [ "$ARCH" = arm64-v8a ] || {
+    printf "${YELLOW}\n nfqws2 включён в установщик пока только для ARM64.${NC}\n"
+    return 0
+  }
+  # A working local installation is user data: do not replace its engine or strategy.
+  if [ -x "$NFQWS_ROOT/engine" ] && [ -x "$NFQWS_ROOT/canary.sh" ]; then
+    if [ ! -x "$NFQWS_ROOT/activate.sh" ] && [ -n "$NFQWS_STAGED" ]; then
+      local helpers
+      helpers=$(mktemp -d /opt/tmp/xkeen-nfqws2-helpers.XXXXXX) || exit 1
+      if tar -xzf "$NFQWS_STAGED" -C "$helpers" ./activate.sh && [ -s "$helpers/activate.sh" ]; then
+        cp "$helpers/activate.sh" "$NFQWS_ROOT/activate.sh" && chmod 755 "$NFQWS_ROOT/activate.sh"
+      fi
+      rm -rf "$helpers"
+    fi
+    printf "${INFO} Существующая установка nfqws2 сохранена.${NC}\n"
+    return 0
+  fi
+  [ -n "$NFQWS_STAGED" ] || {
+    printf "${YELLOW}\n Архив nfqws2 не найден; панель установлена без этого компонента.${NC}\n"
+    return 0
+  }
+  local unpacked
+  unpacked=$(mktemp -d /opt/tmp/xkeen-nfqws2-unpack.XXXXXX) || exit 1
+  if ! tar -xzf "$NFQWS_STAGED" -C "$unpacked" ||
+     [ ! -s "$unpacked/engine" ] || [ ! -s "$unpacked/probe" ] ||
+     [ ! -s "$unpacked/canary.sh" ] || [ ! -s "$unpacked/probe-check.sh" ] || [ ! -s "$unpacked/activate.sh" ] ||
+     [ ! -s "$unpacked/nfqws2/lua/zapret-lib.lua.gz" ] ||
+     [ ! -s "$unpacked/nfqws2/lua/zapret-antidpi.lua.gz" ] ||
+     [ ! -s "$unpacked/nfqws2/blobs/quic_initial.bin" ] ||
+     [ ! -s "$unpacked/nfqws2/blobs/tls_clienthello.bin" ]; then
+    rm -rf "$unpacked"
+    printf "${RED_BOLD}\n Архив nfqws2 повреждён или неполон.${NCN}"
+    exit 1
+  fi
+  mkdir -p "$NFQWS_ROOT/nfqws2/lua" "$NFQWS_ROOT/nfqws2/blobs"
+  cp "$unpacked/engine" "$unpacked/probe" "$unpacked/canary.sh" "$unpacked/probe-check.sh" "$unpacked/activate.sh" "$NFQWS_ROOT/" || exit 1
+  cp "$unpacked/nfqws2/lua/"*.gz "$NFQWS_ROOT/nfqws2/lua/" || exit 1
+  cp "$unpacked/nfqws2/blobs/"*.bin "$NFQWS_ROOT/nfqws2/blobs/" || exit 1
+  chmod 755 "$NFQWS_ROOT/engine" "$NFQWS_ROOT/probe" "$NFQWS_ROOT/canary.sh" "$NFQWS_ROOT/probe-check.sh" "$NFQWS_ROOT/activate.sh"
+  cp "$unpacked/S98nfqws2-xkeen" /opt/etc/init.d/S98nfqws2-xkeen || exit 1
+  chmod 755 /opt/etc/init.d/S98nfqws2-xkeen
+  rm -rf "$unpacked"
+  printf "${SUCCESS} nfqws2 установлен. Маршруты не переключались.${NC}\n"
 }
 
 install_prepared() {
@@ -111,6 +179,7 @@ install_prepared() {
 install_xkeenui() {
   [ -f "/opt/tmp/xkeen-ui-$ARCH" ] && LOCAL=true
   download_files
+  install_nfqws2
   if [[ -d $STATIC_DIR || -f $XKEENUI_BIN || -f $XKEENUI_INIT || -f $LIGHTTPD_CONF ]]; then
     printf "${YELLOW}\n Обнаружены файлы XKeen UI, запуск переустановки...\n${NC}"
     uninstall_xkeenui
@@ -135,6 +204,7 @@ update_xkeenui() {
   [ -f "$XKEENUI_BIN" ] || { printf "${ERROR} Ошибка: XKeen UI не установлен!${NCN}"; exit 1; }
   [ -f "/opt/tmp/xkeen-ui-$ARCH" ] && LOCAL=true
   download_files
+  install_nfqws2
 
   printf "${INFO} Начинаем обновление...${NCN}"
 
