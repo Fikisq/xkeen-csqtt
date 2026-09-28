@@ -155,7 +155,13 @@ pub async fn sync_xray_routing(State(state): State<AppState>) -> Json<Value> {
         Err(error) => return Json(json!({"success": false, "error": error.to_string()})),
     };
     match apply_for_config(&config).await {
-        Ok(_) => Json(json!({"success": true})),
+        Ok(previous) => match crate::nfqws2::sync_for_config(&config).await {
+            Ok(()) => Json(json!({"success": true})),
+            Err(error) => {
+                restore(&previous).await;
+                Json(json!({"success": false, "error": error}))
+            }
+        },
         Err(error) => Json(json!({"success": false, "error": error})),
     }
 }
@@ -166,7 +172,8 @@ fn direct_device_ips(config: &Value) -> Result<BTreeSet<Ipv4Addr>, String> {
         .ok_or("В JSON нет правил маршрутизации")?;
     for rule in rules {
         let Some(tag) = rule.get("ruleTag").and_then(Value::as_str) else { continue };
-        let Some(ip) = tag.trim_end_matches("|selector").strip_prefix("device:").and_then(|tag| tag.strip_suffix(":VPN")) else { continue };
+        let Some(ip) = tag.trim_end_matches("|selector").trim_end_matches("|nfqws2")
+            .strip_prefix("device:").and_then(|tag| tag.strip_suffix(":VPN")) else { continue };
         if rule.get("outboundTag").and_then(Value::as_str) != Some("direct") { continue }
         let parsed = ip.parse::<Ipv4Addr>().map_err(|_| format!("Некорректный IP устройства: {ip}"))?;
         ips.insert(parsed);

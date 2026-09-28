@@ -1,6 +1,7 @@
 use crate::configs::{validate_core, xray_files_with_replacement};
 use crate::controller;
 use crate::device_bypass;
+use crate::nfqws2;
 use crate::types::AppState;
 use axum::{extract::State, Json};
 use serde::Deserialize;
@@ -14,9 +15,9 @@ static ROUTE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[derive(Deserialize)]
 pub struct ApplyRoutesRequest {
-    file: String,
-    previous_content: String,
-    content: String,
+    pub(crate) file: String,
+    pub(crate) previous_content: String,
+    pub(crate) content: String,
 }
 
 fn routing_api_enabled(config: &Value) -> bool {
@@ -99,6 +100,11 @@ pub async fn apply_routes(State(state): State<AppState>, Json(request): Json<App
             return Json(json!({ "success": false, "error": error }));
         }
     };
+    if let Err(error) = nfqws2::sync_transition(&old_config, &new_config).await {
+        device_bypass::restore(&previous_bypass).await;
+        _ = replace_live_rules(&old_config).await;
+        return Json(json!({ "success": false, "error": error }));
+    }
     let temporary = format!("{CONFIG_FILE}.{}.tmp", uuid::Uuid::new_v4());
     let write_result = async {
         tokio::fs::write(&temporary, &request.content).await.map_err(|e| e.to_string())?;
@@ -108,6 +114,7 @@ pub async fn apply_routes(State(state): State<AppState>, Json(request): Json<App
     }.await;
     if let Err(error) = write_result {
         _ = tokio::fs::remove_file(&temporary).await;
+        _ = nfqws2::sync_transition(&new_config, &old_config).await;
         device_bypass::restore(&previous_bypass).await;
         _ = replace_live_rules(&old_config).await;
         return Json(json!({ "success": false, "error": format!("Не удалось сохранить JSON: {error}") }));

@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Field, FieldContent, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { Separator } from '@/components/ui/separator'
+import { Switch } from '@/components/ui/switch'
 import { apiCall } from '../../lib/api'
 import { useAppContext } from '../../lib/store'
 
@@ -19,6 +22,8 @@ interface Settings {
   rtMasqueAcceptTos?: boolean
   error?: string
 }
+
+const selectClass = 'bg-input-background border-border mt-1 h-9 w-full rounded-md border px-2 text-sm'
 
 export function WdttPlusSettings({ onBack, onRefresh }: { onBack: () => void; onRefresh: () => void }) {
   const { showToast } = useAppContext()
@@ -100,18 +105,43 @@ export function WdttPlusSettings({ onBack, onRefresh }: { onBack: () => void; on
   return <div className="space-y-3">
     <p className="text-muted-foreground text-xs">Клиент WDTT Plus v18 открывает локальный SOCKS5 с UDP для Xray. Панель не создаёт звонки VK: вставьте уже полученные ссылки или хеши.</p>
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-      <label className="text-sm font-medium">Сервер<Input value={server} onChange={(event) => setServer(event.target.value)} placeholder="31.77.146.181" /></label>
-      <label className="text-sm font-medium">DTLS-порт сервера<Input inputMode="numeric" value={dtlsPort} onChange={(event) => setDtlsPort(event.target.value)} /></label>
-      <label className="text-sm font-medium">Порт WireGuard на сервере<Input inputMode="numeric" value={wgPort} onChange={(event) => setWgPort(event.target.value)} /></label>
-      <label className="text-sm font-medium">Потоки<select className="bg-input-background border-border mt-1 h-9 w-full rounded-md border px-2 text-sm" value={workers} onChange={(event) => setWorkers(event.target.value)}>{Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={(i + 1) * 9}>{(i + 1) * 9}</option>)}</select></label>
-      <label className="text-sm font-medium">Пароль туннеля · {hasPassword ? 'сохранён' : 'не сохранён'}<Input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={hasPassword ? 'Пусто = оставить прежний' : 'Введите пароль'} /></label>
+      <label className="text-sm font-medium">Сервер<Input className="mt-1" value={server} onChange={(event) => setServer(event.target.value)} placeholder="31.77.146.181" /></label>
+      <label className="text-sm font-medium">DTLS-порт сервера<Input className="mt-1" inputMode="numeric" value={dtlsPort} onChange={(event) => setDtlsPort(event.target.value)} /></label>
+      <label className="text-sm font-medium">Порт WireGuard на сервере<Input className="mt-1" inputMode="numeric" value={wgPort} onChange={(event) => setWgPort(event.target.value)} /></label>
+      <label className="text-sm font-medium">Потоки<select className={selectClass} value={workers} onChange={(event) => setWorkers(event.target.value)}>{Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={(i + 1) * 9}>{(i + 1) * 9}</option>)}</select></label>
+      <label className="text-sm font-medium">Пароль туннеля · {hasPassword ? 'сохранён' : 'не сохранён'}<Input className="mt-1" type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={hasPassword ? 'Пусто = оставить прежний' : 'Введите пароль'} /></label>
     </div>
-    <div className="space-y-2"><label className="block text-sm font-medium">Количество хешей<select className="bg-input-background border-border mt-1 h-9 w-full rounded-md border px-2 text-sm" value={hashesCount} onChange={(event) => setHashesCount(event.target.value)}>{[1, 2, 3, 4].map((count) => <option key={count} value={count}>{count}</option>)}</select></label><label className="block text-sm font-medium">Ссылки или хеши VK · {hasManualHashes ? 'сохранены' : 'не сохранены'}<Input type="password" autoComplete="off" value={manualHashes} onChange={(event) => setManualHashes(event.target.value)} placeholder="Через запятую" /></label><p className="text-muted-foreground text-xs">Эти ссылки всё равно относятся к звонкам VK. Получайте их вне панели только от аккаунта, которым готовы пользоваться.</p></div>
-    <div className="border-border space-y-2 rounded-md border p-3 text-sm">
-      <label className="flex items-center gap-2 font-medium"><input type="checkbox" checked={rtNetwork} onChange={(event) => setRtNetwork(event.target.checked)} />Сеть РТ: сначала TURN/TLS и TURN/TCP, затем UDP</label>
-      {rtNetwork && <><label className="block font-medium">SNI белого списка для TURN/TLS<Input value={turnSni} onChange={(event) => setTurnSni(event.target.value)} placeholder="Необязательно · example.com" /></label>
-        <label className="flex items-center gap-2"><input type="checkbox" checked={rtMasque} onChange={(event) => setRtMasque(event.target.checked)} />Резерв MASQUE через Cloudflare WARP</label>
-        {rtMasque && <label className="flex items-start gap-2 text-xs"><input type="checkbox" checked={rtMasqueAcceptTos} onChange={(event) => setRtMasqueAcceptTos(event.target.checked)} />Подтверждаю условия Cloudflare WARP для регистрации MASQUE при первом запуске.</label>}</>}
+    <Separator />
+    <div className="space-y-3">
+      <label className="block text-sm font-medium">Количество хешей<select className={selectClass} value={hashesCount} onChange={(event) => setHashesCount(event.target.value)}>{[1, 2, 3, 4].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
+      <label className="block text-sm font-medium">Ссылки или хеши VK · {hasManualHashes ? 'сохранены' : 'не сохранены'}<Input className="mt-1" type="password" autoComplete="off" value={manualHashes} onChange={(event) => setManualHashes(event.target.value)} placeholder="Через запятую" /></label>
+      <p className="text-muted-foreground text-xs">Эти ссылки всё равно относятся к звонкам VK. Получайте их вне панели только от аккаунта, которым готовы пользоваться.</p>
+    </div>
+    <Separator />
+    <div className="border-border space-y-3 rounded-md border p-3 text-sm">
+      <Field orientation="horizontal">
+        <FieldContent>
+          <FieldLabel htmlFor="wdtt-rt-network">Сеть РТ: сначала TURN/TLS и TURN/TCP, затем UDP</FieldLabel>
+          <FieldDescription className="text-xs">Настройки TURN ниже применяются только при включённом режиме.</FieldDescription>
+        </FieldContent>
+        <Switch id="wdtt-rt-network" size="sm" checked={rtNetwork} onCheckedChange={setRtNetwork} aria-label="Сеть РТ" />
+      </Field>
+      {rtNetwork && <>
+        <label className="block font-medium">SNI белого списка для TURN/TLS<Input className="mt-1" value={turnSni} onChange={(event) => setTurnSni(event.target.value)} placeholder="Необязательно · example.com" /></label>
+        <Field orientation="horizontal">
+          <FieldContent>
+            <FieldLabel htmlFor="wdtt-rt-masque">Резерв MASQUE через Cloudflare WARP</FieldLabel>
+            <FieldDescription className="text-xs">Необязательный запасной канал, если TURN недоступен.</FieldDescription>
+          </FieldContent>
+          <Switch id="wdtt-rt-masque" size="sm" checked={rtMasque} onCheckedChange={setRtMasque} aria-label="Резерв MASQUE через Cloudflare WARP" />
+        </Field>
+        {rtMasque && <Field orientation="horizontal" className="gap-2">
+          <FieldContent>
+            <FieldDescription className="text-xs">Подтверждаю условия Cloudflare WARP: при первом запуске на сервере выполняется его первичная регистрация. MASQUE — протокол туннеля WARP, отдельный аккаунт не создаётся.</FieldDescription>
+          </FieldContent>
+          <Switch id="wdtt-rt-masque-tos" size="sm" checked={rtMasqueAcceptTos} onCheckedChange={setRtMasqueAcceptTos} aria-label="Согласие с условиями Cloudflare WARP" />
+        </Field>}
+      </>}
       <p className="text-muted-foreground text-xs">Новые параметры вступят в силу после «Применить». Режим выключен, пока вы его не включите.</p>
     </div>
     <p className="text-muted-foreground text-xs">Порт WireGuard здесь справочный: рабочую конфигурацию клиент получает от сервера через GETCONF. Пароль и хеши сохраняются с доступом только для root и не возвращаются в панель.</p>

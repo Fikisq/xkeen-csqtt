@@ -85,6 +85,7 @@ const COLLAPSE_SELECTORS_KEY = 'collapseSelectors'
 const DEVICE_IP_KEY = 'mihomoDeviceIp'
 const NO_SORT_TYPES = new Set(['Dns', 'Compatible', 'Direct', 'Reject', 'RejectDrop', 'Pass', 'Fallback', 'URLTest', 'LoadBalance', 'Selector'])
 const TOGGLE_ALL_SELECTORS_EVENT = 'mihomo:toggle-all-selectors'
+let automaticPingStarted = false
 
 function isGeneralSelector(name: string): boolean { return name === 'VPN' || name === 'Селектор' }
 function isNoVpn(name: string): boolean { return /без\s*(?:vpn|впн)/i.test(name) }
@@ -999,6 +1000,13 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
     window.addEventListener('mihomo:test-all', handleTestAll)
     return () => window.removeEventListener('mihomo:test-all', handleTestAll)
   }, [selectorNames, testAll])
+
+  useEffect(() => {
+    const general = selectorNames.find(isGeneralSelector) ?? selectorNames[0]
+    if (loading || !general || automaticPingStarted) return
+    automaticPingStarted = true
+    void testAll(general)
+  }, [loading, selectorNames, testAll])
 
   const toggleCollapse = useCallback((selectorName: string) => {
     blurActiveElement()

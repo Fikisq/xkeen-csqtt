@@ -3,11 +3,12 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Separator } from '@/components/ui/separator'
 import { Input } from '@/components/ui/input'
-import { IconCpu } from '@tabler/icons-react'
+import { IconCpu, IconX } from '@tabler/icons-react'
 import { useEffect, useState } from 'react'
 import { apiCall } from '../../lib/api'
 import { useAppContext, useModalContext } from '../../lib/store'
 import { WdttPlusSettings } from './WdttPlusSettings'
+import { Nfqws2Settings } from './Nfqws2Settings'
 
 interface Props {
   onSwitchCore: (core: string) => void
@@ -38,6 +39,17 @@ interface WdttStatus {
   clientVersion?: string
 }
 
+interface NfqwsStatus {
+  installed: boolean
+  running: boolean
+  mode: 'global' | 'canary'
+  device: string
+  scope: string
+  strategyMode: 'tcp' | 'tcp-quic'
+  verifiedTransport: 'tcp' | 'tcp-quic' | 'none' | 'unmeasured'
+  blocking: Record<string, string>
+}
+
 interface CsqttSpeedResult {
   downloadMbps: number
   uploadMbps: number
@@ -54,7 +66,10 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
   const [controlPending, setControlPending] = useState(false)
   const [csqttStatus, setCsqttStatus] = useState<CsqttStatus | null>(null)
   const [wdttStatus, setWdttStatus] = useState<WdttStatus | null>(null)
+  const [nfqwsStatus, setNfqwsStatus] = useState<NfqwsStatus | null>(null)
+  const [nfqwsError, setNfqwsError] = useState('')
   const [editingWdtt, setEditingWdtt] = useState(false)
+  const [editingNfqws, setEditingNfqws] = useState(false)
   const [wdttError, setWdttError] = useState('')
   const [editingCsqtt, setEditingCsqtt] = useState(false)
   const [showCsqttSpeedtest, setShowCsqttSpeedtest] = useState(false)
@@ -201,6 +216,23 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
     catch { setWdttStatus(null) }
   }
 
+  async function refreshNfqwsStatus() {
+    try { setNfqwsStatus(await apiCall<NfqwsStatus>('GET', 'nfqws2/status')) }
+    catch { setNfqwsStatus(null) }
+  }
+
+  async function controlNfqws(action: 'start' | 'stop') {
+    setControlPending(true)
+    setNfqwsError('')
+    try {
+      const result = await apiCall<{ success: boolean; error?: string }>('POST', 'nfqws2/control', { action })
+      if (!result.success) throw new Error(result.error || 'Не удалось изменить состояние nfqws2')
+      await refreshNfqwsStatus()
+      showToast(action === 'start' ? 'nfqws2 запущен' : 'nfqws2 остановлен; очередь пропускает трафик')
+    } catch (error) { setNfqwsError(error instanceof Error ? error.message : 'Ошибка nfqws2') }
+    finally { setControlPending(false) }
+  }
+
   async function controlWdtt(action: 'start' | 'stop' | 'restart') {
     setControlPending(true)
     setWdttError('')
@@ -253,18 +285,20 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
     if (modals.showCoreManageModal) {
       void refreshCsqttStatus()
       void refreshWdttStatus()
+      void refreshNfqwsStatus()
     }
   }, [modals.showCoreManageModal])
 
   useEffect(() => {
     if (!modals.showCoreManageModal) return
-    const timer = window.setInterval(() => { void refreshCsqttStatus(); void refreshWdttStatus() }, 5000)
+    const timer = window.setInterval(() => { void refreshCsqttStatus(); void refreshWdttStatus(); void refreshNfqwsStatus() }, 5000)
     return () => window.clearInterval(timer)
   }, [modals.showCoreManageModal])
 
   const close = () => {
     setEditingCsqtt(false)
     setEditingWdtt(false)
+    setEditingNfqws(false)
     setShowCsqttSpeedtest(false)
     setCsqttPassword('')
     setCsqttVkToken('')
@@ -274,12 +308,21 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
     dispatch({ type: 'SHOW_MODAL', modal: 'showCoreManageModal', show: false })
   }
 
+  const closeCurrentView = () => {
+    if (showCsqttSpeedtest) { setShowCsqttSpeedtest(false); return }
+    if (editingWdtt) { setEditingWdtt(false); return }
+    if (editingNfqws) { setEditingNfqws(false); return }
+    if (editingCsqtt) { setEditingCsqtt(false); return }
+    close()
+  }
+
   return (
-    <Dialog open={modals.showCoreManageModal} onOpenChange={(open) => !open && close()}>
-      <DialogContent className={editingCsqtt || editingWdtt ? 'max-h-[95dvh] max-w-[min(96vw,900px)]! overflow-y-auto' : 'max-w-[min(96vw,760px)]!'}>
+    <Dialog open={modals.showCoreManageModal} onOpenChange={(open) => !open && closeCurrentView()}>
+      <DialogContent showCloseButton={!editingCsqtt && !editingWdtt && !editingNfqws && !showCsqttSpeedtest} className={editingCsqtt || editingWdtt || editingNfqws ? 'max-h-[95dvh] max-w-[min(96vw,900px)]! overflow-y-auto' : 'max-w-[min(96vw,760px)]!'}>
+        {(editingCsqtt || editingWdtt || editingNfqws || showCsqttSpeedtest) && <Button variant="ghost" size="icon" className="text-ring hover:bg-muted! absolute top-4 right-4 transition-colors hover:text-white" aria-label="Вернуться к управлению ядром" onClick={closeCurrentView}><IconX className="size-6" /></Button>}
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 pb-3">
-          <IconCpu size={24} className="text-chart-2" /> {showCsqttSpeedtest ? 'Скорость CSQTT' : editingWdtt ? 'Настройка WDTT Plus' : editingCsqtt ? 'Настройка CSQTT' : 'Управление ядром'}
+          <IconCpu size={24} className="text-chart-2" /> {showCsqttSpeedtest ? 'Скорость CSQTT' : editingWdtt ? 'Настройка WDTT Plus' : editingCsqtt ? 'Настройка CSQTT' : editingNfqws ? 'Настройка nfqws2' : 'Управление ядром'}
           </DialogTitle>
         </DialogHeader>
 
@@ -292,7 +335,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
           {speedtestResult && <p className="text-muted-foreground text-xs">Интерфейс: {speedtestResult.interface} · узел замера: {speedtestResult.endpoint} · отброшено пакетов: исходящих {speedtestResult.txDropped}, входящих {speedtestResult.rxDropped}</p>}
           {speedtestError && <p role="alert" className="text-sm text-red-500">{speedtestError}</p>}
           <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setShowCsqttSpeedtest(false)}>Назад</Button><Button disabled={speedtestPending || !csqttStatus?.ready} onClick={() => void runCsqttSpeedtest()}>{speedtestPending ? 'Измеряется…' : 'Начать замер'}</Button></div>
-        </div> : editingWdtt ? <WdttPlusSettings onBack={() => setEditingWdtt(false)} onRefresh={() => void refreshWdttStatus()} /> : editingCsqtt ? <div className="space-y-2">
+        </div> : editingWdtt ? <WdttPlusSettings onBack={() => setEditingWdtt(false)} onRefresh={() => void refreshWdttStatus()} /> : editingNfqws ? <Nfqws2Settings onBack={() => setEditingNfqws(false)} onRefresh={() => void refreshNfqwsStatus()} /> : editingCsqtt ? <div className="space-y-2">
           <p className="text-xs text-green-400">Клиент CSQTT {csqttClientVersion}</p>
           <p className="text-muted-foreground text-xs">Ссылка разбирается на адрес и пароль; исходная ссылка не хранится. Сохранённые секреты скрыты. Пустые поля пароля и токена оставляют прежние значения. Изменения вступят в силу после «Применить».</p>
           <p className="text-muted-foreground text-xs">Ручной использует сохранённые ссылки или хеши VK. Авто API создаёт звонки через calls.start и завершает их при остановке. Авто ВК использует встроенный вход клиента.</p>
@@ -427,6 +470,22 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
             </div>
           </div>
           {wdttError && <p role="alert" className="text-sm text-red-500">{wdttError}</p>}
+          <Separator />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium">nfqws2 · zapret2</span>
+                {nfqwsStatus && <Badge variant="outline" className={nfqwsStatus.running ? 'rounded-sm border-none bg-green-500/10 px-2 text-xs text-green-400' : 'rounded-sm border-none bg-amber-500/10 px-2 text-xs text-amber-400'}>{nfqwsStatus.running ? nfqwsStatus.mode === 'global' ? 'Активен' : 'Пробный режим' : nfqwsStatus.installed ? 'Остановлен' : 'Не установлен'}</Badge>}
+                {nfqwsStatus?.installed && <Badge variant="outline" className={nfqwsStatus.running && ['tcp', 'tcp-quic'].includes(nfqwsStatus.verifiedTransport) ? 'rounded-sm border-green-500/30 bg-green-500/10 px-2 text-xs text-green-400' : 'rounded-sm border-amber-500/30 bg-amber-500/10 px-2 text-xs text-amber-400'}>{nfqwsStatus.verifiedTransport === 'tcp-quic' ? 'TCP + QUIC · проверено' : nfqwsStatus.verifiedTransport === 'tcp' ? 'TCP · проверено' : `${nfqwsStatus.strategyMode === 'tcp' ? 'TCP' : 'TCP + QUIC'} · не проверено`}</Badge>}
+              </div>
+            </div>
+            <div className="ml-auto flex flex-wrap gap-2">
+              {nfqwsStatus?.installed && <Button size="sm" variant="outline" onClick={() => setEditingNfqws(true)}>Настроить</Button>}
+              {nfqwsStatus?.installed && <Button size="sm" variant="outline" disabled={controlPending} onClick={() => void controlNfqws(nfqwsStatus.running ? 'stop' : 'start')}>{nfqwsStatus.running ? 'Остановить' : 'Запустить'}</Button>}
+              <Button size="sm" variant="outline" disabled={controlPending} onClick={() => void refreshNfqwsStatus()}>Обновить статус</Button>
+            </div>
+          </div>
+          {nfqwsError && <p role="alert" className="text-sm text-red-500">{nfqwsError}</p>}
         </div>}
       </DialogContent>
     </Dialog>

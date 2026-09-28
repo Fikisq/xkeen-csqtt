@@ -42,8 +42,9 @@ export function xrayToMihomo(source: string, target: string, mapping: NodeMappin
     routes.push(name)
   }
   const defaults = defaultMihomoChoices(content)
+  const supported = new Set([...Object.keys(defaults), ...readMihomoCustomRoutes(content).map((route) => route.tag)])
   const selections = readSelections(content)
-  for (const tag of routeTags(rules)) {
+  for (const tag of routeTags(rules).filter((tag) => supported.has(tag))) {
     const rule = rules.find(item => baseRuleTag(item) === tag)
     const group = defaults[tag]
     const selected = mihomoChoice(rule?.outboundTag, mapping)
@@ -58,7 +59,7 @@ export function xrayToMihomo(source: string, target: string, mapping: NodeMappin
     const fallback = direct ? 'DIRECT' : mihomoChoice(vpn?.outboundTag, mapping) ?? defaults.VPN
     content = updateMihomoDevice(content, ip, 'VPN', fallback)
     if (direct) directDevices.push(ip)
-    for (const tag of routeTags(rules).filter(tag => tag !== 'VPN')) {
+    for (const tag of routeTags(rules).filter(tag => tag !== 'VPN' && supported.has(tag))) {
       const rule = rules.find(item => baseRuleTag(item) === `device:${ip}:${tag}`)
       const selected = mihomoChoice(rule?.outboundTag, mapping)
       if (selected) content = updateMihomoDevice(content, ip, tag, selected)

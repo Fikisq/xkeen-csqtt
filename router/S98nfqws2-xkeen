@@ -1,0 +1,41 @@
+#!/bin/sh
+# Restore the isolated nfqws2 trial after Entware starts XKeen.
+set -eu
+
+CANARY=/opt/etc/xkeen/nfqws2-stage/canary.sh
+MANUAL_STOPPED=/opt/etc/xkeen/nfqws2-stage/manual-stopped
+CONFIG=/opt/etc/xray/configs/00_config.json
+JQ=/opt/bin/jq
+
+selected() {
+    [ -r "$CONFIG" ] && [ -x "$CANARY" ] && [ -x "$JQ" ] || return 1
+    "$JQ" -e 'any(.routing.rules[]?;
+      .ruleTag == "device:192.168.0.130:VPN|nfqws2" and
+      .outboundTag == "direct" and
+      .sourceIP == ["192.168.0.130"])' "$CONFIG" >/dev/null
+}
+
+global_enabled() {
+    [ -f /opt/etc/xkeen/nfqws2-stage/global-enabled ] && [ -r "$CONFIG" ] && [ -x "$JQ" ] || return 1
+    "$JQ" -e 'any(.outbounds[]?;
+      .tag == "nfqws-direct" and .protocol == "freedom" and
+      .streamSettings.sockopt.mark == 832)' "$CONFIG" >/dev/null
+}
+
+case "${1:-}" in
+    start)
+        [ -f "$MANUAL_STOPPED" ] && { echo 'nfqws2 was stopped in the panel'; exit 0; }
+        if selected || global_enabled; then "$CANARY" start; else echo 'nfqws2 is not selected'; fi
+        ;;
+    stop)
+        [ -x "$CANARY" ] && "$CANARY" stop || true
+        ;;
+    restart)
+        [ -x "$CANARY" ] && "$CANARY" stop || true
+        if selected || global_enabled; then "$CANARY" start; fi
+        ;;
+    status)
+        [ -x "$CANARY" ] && "$CANARY" status || echo 'nfqws2 trial is not staged'
+        ;;
+    *) echo 'usage: S98nfqws2-xkeen {start|stop|restart|status}' >&2; exit 2 ;;
+esac

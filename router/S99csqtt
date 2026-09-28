@@ -27,10 +27,9 @@ case "$1" in
         fi
         "$DIR/csqtt-js-calls.sh" || { echo "прежний звонок Auto VK не закрыт" >&2; exit 1; }
         rm -f "$DIR/stopped"
-        RUN_SCRIPT="$DIR/csqtt-run.sh"
-        if [ "$(cat "$DIR/client-version" 2>/dev/null)" = "2.1.9" ]; then
-            RUN_SCRIPT="$DIR/csqtt-run-219.sh"
-        fi
+        version=$(tr -d '\r' < "$DIR/client-version" 2>/dev/null | tr -d '[:space:]')
+        [ "$version" = 2.1.9 ] || { echo "Нужен клиент CSQTT 2.1.9 (найден: ${version:-не указан})" >&2; exit 1; }
+        RUN_SCRIPT="$DIR/csqtt-run-219.sh"
         nohup "$RUN_SCRIPT" >>"$DIR/csqtt.log" 2>&1 &
         echo $! > "/var/run/csqtt.pid"
         echo "OK (PID $(cat "/var/run/csqtt.pid"))"

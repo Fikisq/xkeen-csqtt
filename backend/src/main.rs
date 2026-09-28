@@ -1,4 +1,5 @@
 mod api_relay;
+mod access_journal;
 mod auth;
 mod backuper;
 mod configs;
@@ -16,6 +17,7 @@ mod xray_subscription_refresh;
 mod xray_routes;
 mod device_bypass;
 mod node_metadata;
+mod nfqws2;
 mod ruleset_inspector;
 mod settings;
 mod subscription;
@@ -443,6 +445,7 @@ async fn main() {
     version::start_update_checker(state.clone());
     xray_subscription_refresh::start(state.clone());
     mihomo_subscription_refresh::start(state.clone());
+    nfqws2::start_reconciler();
 
     if let Some(ref _token) = state.rci_token {
         log("INFO", "RCI токен успешно загружен".into());
@@ -519,6 +522,11 @@ async fn main() {
         .route("/api/geo/site", get(geo::get_geosite))
         .route("/api/geo/ip", get(geo::get_geoip))
         .route("/api/auth/logout", post(auth::post_logout))
+        .route("/api/access-journal", get(access_journal::get_access_journal))
+        .route("/api/nfqws2/status", get(nfqws2::status))
+        .route("/api/nfqws2/control", post(nfqws2::control))
+        .route("/api/nfqws2/settings", get(nfqws2::get_settings).post(nfqws2::save_settings))
+        .route("/api/nfqws2/check", post(nfqws2::check_strategy))
         .route("/api/auth/reset", post(auth::post_auth_reset))
         .route("/clash/{*path}", any(api_relay::proxy_http))
         .route("/clash-ws/{*path}", get(api_relay::proxy_ws))
