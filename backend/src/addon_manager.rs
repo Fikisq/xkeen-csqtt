@@ -3,6 +3,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{io::{Cursor, Read}, os::unix::fs::PermissionsExt, path::Path, time::Duration};
+use std::process::Stdio;
 use tokio::{fs, process::Command, sync::Mutex};
 
 use crate::types::AppState;
@@ -59,12 +60,15 @@ async fn control(path: &str, action: &str) -> Result<(), String> {
     let mut command = Command::new(path);
     command.arg(action);
     if path.ends_with("S05xkeen") && action == "restart" { command.arg("on"); }
+    // A daemon started by an init script can inherit captured pipe handles.
+    // Waiting for output() then waits for the daemon, even after the script exits.
+    command.stdout(Stdio::null()).stderr(Stdio::null());
     let result = tokio::time::timeout(Duration::from_secs(120),
-        command.kill_on_drop(true).output()).await
+        command.kill_on_drop(true).status()).await
         .map_err(|_| "Время ожидания сервиса истекло".to_string())?
         .map_err(|error| error.to_string())?;
-    if result.status.success() { Ok(()) }
-    else { Err(String::from_utf8_lossy(&result.stderr).trim().to_string()) }
+    if result.success() { Ok(()) }
+    else { Err(format!("Сервис завершился с кодом {}", result.code().unwrap_or(-1))) }
 }
 
 async fn restart_xray(state: &AppState, previous: &[u8], next: &Value) -> Result<bool, String> {
@@ -205,18 +209,24 @@ async fn remove_inner(state: AppState, name: &str) -> Result<Value, String> {
         let index = items.iter().position(|item| item.get("tag").and_then(Value::as_str) == Some(def.tag))?;
         Some(items.remove(index))
     });
-    let restarted = if let Some(outbound) = outbound {
+    if let Some(outbound) = outbound {
         fs::create_dir_all(BACKUP).await.map_err(|error| error.to_string())?;
         private_write(&format!("{BACKUP}/{name}.json"), &serde_json::to_vec(&outbound).map_err(|error| error.to_string())?)?;
-        restart_xray(&state, &previous, &config).await?
-    } else { false };
-    fs::remove_file(def.binary).await.map_err(|error| error.to_string())?;
+        // Routing references were checked above. Xray can keep its in-memory
+        // unused outbound until its next normal restart; avoid interrupting VPN.
+        private_write(CONFIG, &serde_json::to_vec_pretty(&config).map_err(|error| error.to_string())?)?;
+    }
+    if let Err(error) = fs::remove_file(def.binary).await {
+        let _ = private_write(CONFIG, &previous);
+        return Err(error.to_string());
+    }
     if name == "nfqws2" {
         let _ = fs::remove_file("/opt/etc/xkeen/nfqws2-stage/probe").await;
         let _ = fs::remove_file("/opt/etc/xkeen/nfqws2-stage/global-enabled").await;
     }
     let _ = fs::remove_file(def.service).await;
-    Ok(json!({"success": true, "restarted": restarted}))
+    let _ = state;
+    Ok(json!({"success": true, "restarted": false}))
 }
 
 async fn install_inner(state: AppState, name: &str) -> Result<Value, String> {

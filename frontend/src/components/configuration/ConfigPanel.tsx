@@ -904,14 +904,23 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
   const routingToolbar = (<div className="border-border bg-input-background m-3 flex shrink-0 flex-wrap items-center gap-2 rounded-xl border p-3">
                   <Button size="sm" disabled={!activeRoutingDraft || routingSaving} onClick={() => { if (isMihomo) void commitMihomoRouting(); else if (xraySelectorsConfig) void applyXrayRoutingEdit(xraySelectorsConfig.file, content => content, 'Маршрутизация сохранена и применена', true) }}>{routingSaving ? 'Применение…' : 'Сохранить и применить'}</Button>
                   <Button size="sm" variant="outline" disabled={!activeRoutingDraft || routingSaving} onClick={() => setRoutingDraft(null)}>Отменить изменения</Button>
-                  <Button size="sm" variant="outline" disabled={routingSaving} onClick={() => {
+                  <span className="text-muted-foreground mr-auto text-xs" role="status">{activeRoutingDraft ? 'Есть неприменённые изменения' : 'Все изменения сохранены'}</span>
+                  <Button size="sm" variant="outline" onClick={onOpenBackups}><IconBox data-icon="inline-start" />Резервные копии</Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger render={<Button size="sm" variant="outline" disabled={routingSaving}><IconDotsFilled data-icon="inline-start" />Перенос маршрутов</Button>} />
+                    <DropdownMenuContent align="end" className="max-w-80">
+                      <DropdownMenuLabel>Только маршрутизация</DropdownMenuLabel>
+                      <p className="text-muted-foreground px-2 pb-2 text-xs">Для переноса правил без остальных настроек панели и ядер.</p>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => {
                     const source = activeRoutingDraft?.content ?? (isMihomo ? mihomoConfig?.savedContent : xraySelectorsConfig?.savedContent) ?? ''
                     const value = isMihomo ? exportMihomoRouting(source, activeRoutingDraft ? readSelections(source) : liveMihomoSelections()) : { format: 'xkeen-routing', version: 1, routing: parseJsonc(source).routing }
                     const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' })
                     const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `xkeen-${currentCore}-routes-${new Date().toISOString().slice(0,10)}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000)
-                  }}>Скачать маршруты</Button>
-                  <Button size="sm" variant="outline" disabled={routingSaving} onClick={() => routingImportRef.current?.click()}>Загрузить маршруты</Button>
-                  <Button size="sm" variant="outline" onClick={onOpenBackups}>Резервные копии</Button>
+                  }}>Скачать маршруты</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => routingImportRef.current?.click()}>Загрузить маршруты</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                   <input ref={routingImportRef} type="file" accept=".json" className="hidden" onChange={async (event) => {
                     const file = event.target.files?.[0]; event.target.value = ''; if (!file) return
                     try {
@@ -928,7 +937,6 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
                       }, '')
                     } catch (error) { showToast(error instanceof Error ? error.message : 'Не удалось загрузить копию', 'error') }
                   }} />
-                  <span className="text-muted-foreground text-xs">{activeRoutingDraft ? 'Есть неприменённые изменения' : 'Изменения применяются кнопкой сохранения'}</span>
                 </div>
   )
 

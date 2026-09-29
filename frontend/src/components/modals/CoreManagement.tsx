@@ -9,6 +9,7 @@ import { apiCall } from '../../lib/api'
 import { useAppContext, useModalContext } from '../../lib/store'
 import { WdttPlusSettings } from './WdttPlusSettings'
 import { Nfqws2Settings } from './Nfqws2Settings'
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter } from '@/components/ui/alert-dialog'
 
 interface Props {
   onSwitchCore: (core: string) => void
@@ -250,10 +251,14 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
 
   async function manageAddon(addon: 'csqtt' | 'wdtt-plus' | 'nfqws2', action: 'install' | 'remove') {
     const name = addon === 'csqtt' ? 'CSQTT' : addon === 'wdtt-plus' ? 'WDTT Plus' : 'nfqws2 · zapret2'
-    const message = action === 'remove'
-      ? `Удалить ${name}? Панель сначала проверит пакет для обратной установки в GitHub. Действующий маршрут через компонент нужно переключить заранее. Если GitHub станет недоступен, скачать клиент обратно не получится. При изменении Xray соединения кратковременно прервутся.`
-      : `Скачать и установить ${name} из релиза GitHub? Сохранённые настройки будут использованы. При возвращении узла Xray соединения кратковременно прервутся.`
-    if (!window.confirm(message)) return
+    setAddonConfirmation({ addon, action, name })
+  }
+
+  const [addonConfirmation, setAddonConfirmation] = useState<{ addon: 'csqtt' | 'wdtt-plus' | 'nfqws2'; action: 'install' | 'remove'; name: string } | null>(null)
+
+  async function submitAddon() {
+    if (!addonConfirmation) return
+    const { addon, action, name } = addonConfirmation
     setControlPending(true)
     setCsqttError('')
     setWdttError('')
@@ -270,7 +275,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
       if (addon === 'csqtt') setCsqttError(message)
       else if (addon === 'wdtt-plus') setWdttError(message)
       else setNfqwsError(message)
-    } finally { setControlPending(false) }
+    } finally { setControlPending(false); setAddonConfirmation(null) }
   }
 
   async function controlWdtt(action: 'start' | 'stop' | 'restart') {
@@ -357,6 +362,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
   }
 
   return (
+    <>
     <Dialog open={modals.showCoreManageModal} onOpenChange={(open) => !open && closeCurrentView()}>
       <DialogContent showCloseButton={!editingCsqtt && !editingWdtt && !editingNfqws && !showCsqttSpeedtest} className={editingCsqtt || editingWdtt || editingNfqws ? 'max-h-[95dvh] max-w-[min(96vw,900px)]! overflow-y-auto' : 'max-w-[min(96vw,760px)]!'}>
         {(editingCsqtt || editingWdtt || editingNfqws || showCsqttSpeedtest) && <Button variant="ghost" size="icon" className="text-ring hover:bg-muted! absolute top-4 right-4 transition-colors hover:text-white" aria-label="Вернуться к управлению ядром" onClick={closeCurrentView}><IconX className="size-6" /></Button>}
@@ -537,5 +543,23 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
         </div>}
       </DialogContent>
     </Dialog>
+    <AlertDialog open={Boolean(addonConfirmation)} onOpenChange={open => { if (!open && !controlPending) setAddonConfirmation(null) }}>
+      <AlertDialogContent size="sm">
+        <AlertDialogHeader>
+          <AlertDialogTitle>{addonConfirmation?.action === 'remove' ? 'Удалить' : 'Установить'} {addonConfirmation?.name}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {addonConfirmation?.action === 'remove'
+              ? 'Клиент будет удалён, настройки сохранятся. Перед удалением проверим пакет для повторной установки. Для восстановления потребуется доступ к GitHub. Сначала переключите маршруты, использующие этот компонент.'
+              : 'Скачаем клиент из GitHub и используем сохранённые настройки.'}
+            {' При изменении конфигурации Xray VPN-соединения кратковременно прервутся.'}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <Button variant="outline" disabled={controlPending} onClick={() => setAddonConfirmation(null)}>Отмена</Button>
+          <Button variant={addonConfirmation?.action === 'remove' ? 'destructive' : 'default'} disabled={controlPending} onClick={() => void submitAddon()}>{controlPending ? 'Выполняется…' : addonConfirmation?.action === 'remove' ? 'Удалить' : 'Установить'}</Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   )
 }
