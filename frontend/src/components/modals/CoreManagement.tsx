@@ -384,7 +384,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
         </div> : editingWdtt ? <WdttPlusSettings onBack={() => setEditingWdtt(false)} onRefresh={() => void refreshWdttStatus()} /> : editingNfqws ? <Nfqws2Settings onBack={() => setEditingNfqws(false)} onRefresh={() => void refreshNfqwsStatus()} /> : editingCsqtt ? <div className="space-y-2">
           <p className="text-xs text-green-400">Клиент CSQTT {csqttClientVersion}</p>
           <p className="text-muted-foreground text-xs">Ссылка разбирается на адрес и пароль; исходная ссылка не хранится. Сохранённые секреты скрыты. Пустые поля пароля и токена оставляют прежние значения. Изменения вступят в силу после «Применить».</p>
-          <p className="text-muted-foreground text-xs">Ручной использует сохранённые ссылки или хеши VK. Авто API создаёт звонки через calls.start и завершает их при остановке. Авто ВК использует встроенный вход клиента.</p>
+          <p className="text-muted-foreground text-xs">Ручной использует сохранённые ссылки или хеши VK. Авто API создаёт звонки через calls.start и завершает их при остановке. Авто ВК использует сохранённый токен; вход в аккаунт VK через эту панель не выполняется.</p>
           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
             <label className="min-w-0 text-sm font-medium">Ссылка CSQTT<Input type="password" autoComplete="off" value={csqttLink} onChange={(event) => setCsqttLink(event.target.value)} placeholder="csqtt://connect?..." /></label>
             <Button size="sm" variant="outline" disabled={!csqttLink.trim()} onClick={parseCsqttLink}>Разобрать</Button>
