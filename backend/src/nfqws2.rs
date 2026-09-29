@@ -15,6 +15,7 @@ const CUSTOM: &str = "/opt/etc/xkeen/nfqws2-stage/custom-strategy.args";
 const AUTO_SELECTION: &str = "/opt/etc/xkeen/nfqws2-stage/auto-selection";
 const PROBE: &str = "/opt/etc/xkeen/nfqws2-stage/probe";
 const PROBE_SCRIPT: &str = "/opt/etc/xkeen/nfqws2-stage/probe-check.sh";
+const ACTIVATE_SCRIPT: &str = "/opt/etc/xkeen/nfqws2-stage/activate.sh";
 const PROBE_CANDIDATE: &str = "/opt/etc/xkeen/nfqws2-stage/probe-candidate.args";
 const LAST_CHECK: &str = "/opt/etc/xkeen/nfqws2-stage/last-check.json";
 const XRAY_CONFIG: &str = "/opt/etc/xray/configs/00_config.json";
@@ -206,6 +207,7 @@ async fn status_json() -> Value {
     let verified = if running { check.as_ref().and_then(|value| value.get("verifiedTransport")).and_then(Value::as_str).unwrap_or("unmeasured") } else { "unmeasured" };
     json!({
         "installed": installed,
+        "globalReady": settings_json()["globalReady"],
         "running": running,
         "mode": if global { "global" } else { "canary" },
         "strategyMode": mode,
@@ -442,6 +444,21 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
 
 pub async fn status(State(_state): State<AppState>) -> Json<Value> {
     Json(status_json().await)
+}
+
+pub async fn attach_xray(State(_state): State<AppState>) -> Json<Value> {
+    let _guard = SETTINGS_LOCK.get_or_init(|| Mutex::new(())).lock().await;
+    if !Path::new(ACTIVATE_SCRIPT).is_file() {
+        return Json(json!({"success": false, "error": "Скрипт подключения nfqws2 не установлен"}));
+    }
+    let result = tokio::time::timeout(Duration::from_secs(120),
+        Command::new(ACTIVATE_SCRIPT).kill_on_drop(true).output()).await;
+    match result {
+        Ok(Ok(output)) if output.status.success() => Json(json!({"success": true, "settings": settings_json(), "status": status_json().await})),
+        Ok(Ok(output)) => Json(json!({"success": false, "error": String::from_utf8_lossy(&output.stderr).trim()})),
+        Ok(Err(error)) => Json(json!({"success": false, "error": error.to_string()})),
+        Err(_) => Json(json!({"success": false, "error": "Подключение nfqws2 к Xray превысило 2 минуты"})),
+    }
 }
 
 pub async fn latency_probe() -> Result<u32, &'static str> {

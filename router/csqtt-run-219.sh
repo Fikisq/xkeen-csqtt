@@ -1,5 +1,5 @@
 #!/bin/sh
-# Launcher for the unmodified amurcanov CSQTT v2.1.9 native client.
+# Launcher for amurcanov CSQTT v2.1.9 with the router call-closure patch.
 DIR=$(dirname "$0")
 . "$DIR/csqtt.conf"
 umask 077

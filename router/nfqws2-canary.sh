@@ -10,7 +10,7 @@ CUSTOM="$ROOT/custom-strategy.args"
 QUEUE=330
 CLIENT=192.168.0.130
 LAN=br0
-WAN=eth2.2
+WAN=${NFQWS_WAN:-$(ip -4 route show default | awk 'NR == 1 { for (i = 1; i <= NF; i++) if ($i == "dev") { print $(i + 1); exit } }')}
 COMMENT=xkeen_nfqws2_canary
 GLOBAL_COMMENT=xkeen_nfqws2_global
 MARK=832
@@ -116,7 +116,7 @@ case "${1:-}" in
     start|start-trial)
         [ -x "$BIN" ] || { echo 'nfqws2 engine is missing' >&2; exit 1; }
         # Never silently fall back to intercepting all devices or interfaces.
-        ip route show default | grep -q "dev $WAN " || { echo 'WAN interface changed' >&2; exit 1; }
+        [ -n "$WAN" ] && ip -4 route show default | awk -v wan="$WAN" '{for (i = 1; i <= NF; i++) if ($i == "dev" && $(i + 1) == wan) found = 1} END {exit !found}' || { echo 'WAN interface not found' >&2; exit 1; }
         "$IPT" -j NFQUEUE -h 2>&1 | grep -q -- --queue-bypass || { echo 'NFQUEUE fail-open is unavailable' >&2; exit 1; }
         selected=$(profile) || { echo 'invalid nfqws2 profile' >&2; exit 1; }
         trial=0
