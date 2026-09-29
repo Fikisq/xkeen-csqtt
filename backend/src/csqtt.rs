@@ -13,6 +13,19 @@ use std::time::Duration;
 const CONFIG: &str = "/opt/etc/csqtt/csqtt.conf";
 const VK_TOKEN: &str = "/opt/etc/csqtt/vk_token";
 const SPEEDTEST: &str = "/opt/bin/csqtt-speedtest";
+static CSQTT_GATE: OnceLock<Semaphore> = OnceLock::new();
+
+fn vk_api_notice(running: bool) -> Option<&'static str> {
+    if Path::new("/opt/etc/csqtt/vk_api_calls.uncertain").exists() {
+        Some("Результат создания звонка VK неизвестен. Auto API заблокирован до проверки незавершённых звонков.")
+    } else if Path::new("/opt/etc/csqtt/vk_api_calls.lock").exists() {
+        Some("Выполняется операция VK API. Если сообщение не исчезает после остановки, требуется проверка сервиса.")
+    } else if ["/opt/etc/csqtt/vk_api_calls.stale", "/opt/etc/csqtt/vk_api_calls"].iter()
+        .enumerate().any(|(index, path)| (index == 0 || !running)
+            && std::fs::metadata(path).is_ok_and(|m| m.len() > 0)) {
+        Some("Завершение звонков VK не подтверждено. Нажмите «Остановить» для повторной очистки.")
+    } else { None }
+}
 
 async fn write_private(path: &str, value: &[u8]) -> std::io::Result<()> {
     static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
@@ -110,8 +123,7 @@ pub struct SettingsRequest {
 }
 
 pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<SettingsRequest>) -> Json<Value> {
-    static SAVE_GATE: OnceLock<Semaphore> = OnceLock::new();
-    let gate = SAVE_GATE.get_or_init(|| Semaphore::new(1));
+    let gate = CSQTT_GATE.get_or_init(|| Semaphore::new(1));
     let Ok(_permit) = gate.try_acquire() else {
         return Json(json!({ "success": false, "error": "Сохранение CSQTT уже выполняется" }));
     };
@@ -147,6 +159,9 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
         return Json(json!({ "success": false, "error": "Недопустимый пароль CSQTT" }));
     }
     let token = request.vk_token.as_deref().unwrap_or("").trim();
+    if !token.is_empty() && (starter_running() || vk_api_notice(false).is_some()) {
+        return Json(json!({ "success": false, "error": "Сначала остановите CSQTT и завершите звонки со старым токеном. Замена токена сейчас заблокирована." }));
+    }
     if token.len() > 4096 || (!token.is_empty() && !token.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))) {
         return Json(json!({ "success": false, "error": "Вставьте только значение access_token" }));
     }
@@ -216,8 +231,7 @@ pub struct ControlRequest {
 }
 
 pub async fn control(Json(request): Json<ControlRequest>) -> Json<Value> {
-    static CONTROL_GATE: OnceLock<Semaphore> = OnceLock::new();
-    let gate = CONTROL_GATE.get_or_init(|| Semaphore::new(1));
+    let gate = CSQTT_GATE.get_or_init(|| Semaphore::new(1));
     let Ok(_permit) = gate.try_acquire() else {
         return Json(json!({ "success": false, "error": "Управление CSQTT уже выполняется" }));
     };
@@ -327,5 +341,5 @@ pub async fn status() -> Json<Value> {
         .is_some_and(|age| age < std::time::Duration::from_secs(900));
     let diagnostic = if !ready && log_recent { last_diagnostic() } else { None };
     let client_version = std::fs::read_to_string("/opt/etc/csqtt/client-version").ok().map(|v| v.trim().to_string()).unwrap_or_else(|| "2.0".into());
-    Json(json!({ "installed": installed, "running": running, "interface": interface, "ready": ready, "diagnostic": diagnostic, "clientVersion": client_version }))
+    Json(json!({ "installed": installed, "running": running, "interface": interface, "ready": ready, "diagnostic": diagnostic, "clientVersion": client_version, "vkApiNotice": vk_api_notice(running) }))
 }

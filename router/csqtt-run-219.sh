@@ -52,8 +52,42 @@ case "${VK_HASH_MODE:-auto_js}" in
 esac
 
 "$DIR/csqtt-tun-fd" csqtt0 csqtt_router_tun_uds "$DIR/csqtt.log" &
-echo $! > "$DIR/csqtt-tun-fd.pid"
+HELPER=$!
+echo "$HELPER" > "$DIR/csqtt-tun-fd.pid"
 if [ "${VK_HASH_MODE:-auto_js}" = auto_js ]; then
     exec "$@" < "$FIFO"
+fi
+if [ "${VK_HASH_MODE:-auto_js}" = auto_api ]; then
+    # Retain a parent so an unexpected client exit also triggers API cleanup.
+    # Explicit service stop delegates cleanup to S99csqtt after child shutdown.
+    CHILD=''
+    stop_api_client() {
+        trap '' HUP INT TERM
+        if [ -n "$CHILD" ]; then
+            kill -INT "$CHILD" 2>/dev/null || true
+            n=0
+            while kill -0 "$CHILD" 2>/dev/null && [ "$n" -lt 10 ]; do
+                sleep 1; n=$((n+1))
+            done
+            kill -KILL "$CHILD" 2>/dev/null || true
+            wait "$CHILD" 2>/dev/null || true
+        fi
+        kill "$HELPER" 2>/dev/null || true
+        wait "$HELPER" 2>/dev/null || true
+        if [ ! -f "$DIR/stopped" ]; then
+            "$DIR/csqtt-api-calls.sh" stop || exit 1
+        fi
+        exit 0
+    }
+    trap stop_api_client HUP INT TERM
+    "$@" &
+    CHILD=$!
+    wait "$CHILD"
+    RESULT=$?
+    CHILD=''
+    kill "$HELPER" 2>/dev/null || true
+    wait "$HELPER" 2>/dev/null || true
+    "$DIR/csqtt-api-calls.sh" stop || RESULT=1
+    exit "$RESULT"
 fi
 exec "$@"

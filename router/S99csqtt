@@ -22,7 +22,7 @@ case "$1" in
         if [ -f "/var/run/csqtt.pid" ] && owns_pid "$(cat "/var/run/csqtt.pid")"; then
             echo "уже запущен"; exit 0
         fi
-        if [ -s "$DIR/vk_api_calls" ] || [ -s "$DIR/vk_api_calls.stale" ]; then
+        if [ -s "$DIR/vk_api_calls" ] || [ -s "$DIR/vk_api_calls.stale" ] || [ -f "$DIR/vk_api_calls.uncertain" ]; then
             "$DIR/csqtt-api-calls.sh" stop || { echo "прежние звонки Auto API не закрыты" >&2; exit 1; }
         fi
         "$DIR/csqtt-js-calls.sh" || { echo "прежний звонок Auto VK не закрыт" >&2; exit 1; }
@@ -52,7 +52,10 @@ case "$1" in
                     kill -0 "$WRITER" 2>/dev/null && kill "$WRITER" 2>/dev/null
                     wait "$WRITER" 2>/dev/null || true
                 else
-                    kill -INT "$PID" 2>/dev/null
+                    case "$(tr '\000' ' ' < "/proc/$PID/cmdline")" in
+                        *"$DIR/csqtt-run-219.sh"*) kill -TERM "$PID" 2>/dev/null ;;
+                        *) kill -INT "$PID" 2>/dev/null ;;
+                    esac
                 fi
                 n=0
                 while owns_pid "$PID" && [ $n -lt 75 ]; do
@@ -69,7 +72,7 @@ case "$1" in
         fi
         cleanup_failed=0
         "$DIR/csqtt-js-calls.sh" || { echo "звонок Auto VK не завершён" >&2; cleanup_failed=1; }
-        if [ -f "$DIR/vk_api_calls" ] || [ -f "$DIR/vk_api_calls.stale" ]; then
+        if [ -f "$DIR/vk_api_calls" ] || [ -f "$DIR/vk_api_calls.stale" ] || [ -f "$DIR/vk_api_calls.uncertain" ]; then
             "$DIR/csqtt-api-calls.sh" stop || { echo "звонки Auto API не завершены" >&2; cleanup_failed=1; }
         fi
         KEEP_MANUAL_STAGE=${KEEP_MANUAL_STAGE:-0} /opt/bin/vk-manual-hashes.sh stop csqtt || { echo "ручные звонки VK не завершены" >&2; cleanup_failed=1; }

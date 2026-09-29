@@ -23,6 +23,7 @@ const CORES = [
 ]
 
 interface CsqttStatus {
+  vkApiNotice?: string | null
   installed: boolean
   running: boolean
   interface: boolean
@@ -476,6 +477,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
                 )}
               </div>
               <p className="text-muted-foreground mt-0.5 text-xs">Отдельный сервис{csqttStatus?.clientVersion ? ` · v${csqttStatus.clientVersion}` : ''}{csqttStatus?.interface ? ' · интерфейс csqtt0 доступен' : ''}</p>
+              {csqttStatus?.vkApiNotice && <p className="mt-1 max-w-100 text-xs text-amber-400">{csqttStatus.vkApiNotice}</p>}
               {csqttStatus && !csqttStatus.ready && (csqttStatus.running || csqttStatus.diagnostic) && <p className="mt-1 max-w-100 text-xs text-amber-400">{csqttStatus.diagnostic || 'Клиент запущен, но адрес туннеля ещё не получен'}</p>}
             </div>
             <div className="ml-auto flex max-w-full flex-wrap justify-end gap-2">
@@ -484,7 +486,10 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
               {csqttStatus?.installed && (csqttStatus.running ? <>
                 <Button variant="outline" size="sm" disabled={controlPending} onClick={() => void controlCsqtt('restart')}>Перезапустить</Button>
                 <Button variant="outline" size="sm" disabled={controlPending} onClick={() => void controlCsqtt('stop')}>Остановить</Button>
-              </> : <Button variant="outline" size="sm" disabled={controlPending} onClick={() => void controlCsqtt('start')}>Запустить</Button>)}
+              </> : <>
+                <Button variant="outline" size="sm" disabled={controlPending || Boolean(csqttStatus.vkApiNotice)} onClick={() => void controlCsqtt('start')}>Запустить</Button>
+                {csqttStatus.vkApiNotice && <Button variant="outline" size="sm" disabled={controlPending} onClick={() => void controlCsqtt('stop')}>Остановить</Button>}
+              </>)}
               <Button variant="outline" size="sm" disabled={controlPending} onClick={() => void refreshCsqttStatus()}>Обновить статус</Button>
               {csqttStatus && <Button variant="outline" size="sm" disabled={controlPending} onClick={() => void manageAddon('csqtt', csqttStatus.installed ? 'remove' : 'install')}>{csqttStatus.installed ? 'Удалить' : 'Установить'}</Button>}
             </div>

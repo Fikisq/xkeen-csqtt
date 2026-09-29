@@ -4,6 +4,13 @@ set -eu
 DIR=$(dirname "$0")
 CALLS_FILE="$DIR/vk_api_calls"
 TOKEN=''
+umask 077
+# Serialize all creation/cleanup, including cleanup by the launcher and init.
+LOCK="$DIR/vk_api_calls.lock"
+mkdir "$LOCK" 2>/dev/null || { echo "Операция VK API уже выполняется; повторите остановку позже" >&2; exit 1; }
+trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+trap 'exit 1' HUP INT TERM
+UNCERTAIN="$DIR/vk_api_calls.uncertain"
 load_token() {
     TOKEN=$(cat "$DIR/vk_token" 2>/dev/null) || { echo "VK token не найден" >&2; return 1; }
     printf '%s' "$TOKEN" | grep -Eq '^[A-Za-z0-9._-]+$' || { echo "Неверный формат VK token" >&2; return 1; }
@@ -19,33 +26,23 @@ vk_request() {
             --data-urlencode 'v=5.199' "$@" "https://api.vk.ru/method/$method"
 }
 
-# A call that VK no longer knows about cannot be finished; that is success.
-call_gone() {
-    case "$1" in 104|951|9000) return 0 ;; esac
-    return 1
-}
-
-# Identifiers that fail for another reason stay in the file and the function
-# returns 1. The caller must not treat that as fatal: a call VK refuses to
-# finish would otherwise block every later start.
+# Only an explicit success confirms closure. Preserve every other result.
 finish_file() {
     file=$1
     [ -f "$file" ] || return 0
     remaining=''
     while IFS= read -r call_id; do
         [ -n "$call_id" ] || continue
-        case "$call_id" in *[!A-Za-z0-9_-]*) continue ;; esac
+        case "$call_id" in *[!A-Za-z0-9_-]*) echo "Неверный ID звонка; файл сохранён" >&2; return 1 ;; esac
         attempt=0
         closed=0
         while [ "$attempt" -lt 3 ]; do
             attempt=$((attempt + 1))
             if response=$(vk_request calls.forceFinish --data-urlencode "call_id=$call_id"); then
-                if printf '%s' "$response" | /opt/bin/jq -e '.error == null and .response != null' >/dev/null 2>&1; then
+                if printf '%s' "$response" | /opt/bin/jq -e '.error == null and .response == 1' >/dev/null 2>&1; then
                     closed=1
                     break
                 fi
-                code=$(printf '%s' "$response" | /opt/bin/jq -r '.error.error_code // 1' 2>/dev/null || echo 1)
-                if call_gone "$code"; then closed=1; break; fi
             fi
             [ "$attempt" -lt 3 ] && sleep 1
         done
@@ -53,7 +50,8 @@ finish_file() {
 "
     done < "$file"
     if [ -n "$remaining" ]; then
-        printf '%s' "$remaining" > "$file"
+        printf '%s' "$remaining" > "$file.tmp"
+        mv "$file.tmp" "$file"
         return 1
     fi
     rm -f "$file"
@@ -62,12 +60,15 @@ finish_file() {
 
 # Retain failed IDs, but never create another call while any remain open.
 finish_calls() {
-    if ! finish_file "$CALLS_FILE"; then
-        cat "$CALLS_FILE" >> "$CALLS_FILE.stale"
-        rm -f "$CALLS_FILE"
-    fi
-    if ! finish_file "$CALLS_FILE.stale"; then
+    failed=0
+    finish_file "$CALLS_FILE" || failed=1
+    finish_file "$CALLS_FILE.stale" || failed=1
+    if [ "$failed" -ne 0 ]; then
         echo "Звонки VK не закрыты; новые звонки CSQTT создавать нельзя" >&2
+        return 1
+    fi
+    if [ -f "$UNCERTAIN" ]; then
+        echo "Результат создания звонка VK неизвестен. Auto API заблокирован до проверки незавершённых звонков" >&2
         return 1
     fi
 }
@@ -86,37 +87,33 @@ case "${1:-}" in
         index=0
         created=0
         while [ "$index" -lt "$count" ]; do
-            attempt=0
             call_id=''
             hash=''
-            code=0
-            while [ "$attempt" -lt 3 ]; do
-                attempt=$((attempt + 1))
-                if response=$(vk_request calls.start); then
-                    call_id=$(printf '%s' "$response" | /opt/bin/jq -r '.response.call_id // empty')
-                    hash=$(printf '%s' "$response" | /opt/bin/jq -r '.response.ok_join_link // .response.join_link // empty')
-                    code=$(printf '%s' "$response" | /opt/bin/jq -r '.error.error_code // 0' 2>/dev/null || echo 0)
-                    [ -n "$call_id" ] && [ -n "$hash" ] && break
-                    case "$code" in 4|5|18|27|28) break ;; esac
+            # Write before sending: a timeout or killed process must never cause
+            # an automatic duplicate calls.start on the next service start.
+            date +%s > "$UNCERTAIN"
+            if response=$(vk_request calls.start); then
+                call_id=$(printf '%s' "$response" | /opt/bin/jq -r '.response.call_id // empty' 2>/dev/null) || call_id=''
+                case "$call_id" in *[!A-Za-z0-9_-]*) call_id='' ;; esac
+                if [ -n "$call_id" ]; then
+                    printf '%s\n' "$call_id" >> "$CALLS_FILE"
+                    rm -f "$UNCERTAIN"
+                    hash=$(printf '%s' "$response" | /opt/bin/jq -r '.response.ok_join_link | select(type == "string" and length > 0)' 2>/dev/null) || hash=''
+                    [ -n "$hash" ] || hash=$(printf '%s' "$response" | /opt/bin/jq -r '.response.join_link // empty' 2>/dev/null) || hash=''
+                elif printf '%s' "$response" | /opt/bin/jq -e '.error.error_code | numbers | select(. > 0)' >/dev/null 2>&1; then
+                    # Explicit rejection, unlike a lost response, created no known call.
+                    rm -f "$UNCERTAIN"
                 fi
-                [ "$attempt" -lt 3 ] && sleep 1
-            done
+            fi
             hash=${hash%%\?*}
             hash=${hash%/}
             hash=${hash##*/}
             index=$((index + 1))
             if [ -z "$call_id" ] || [ -z "$hash" ]; then
-                if [ -n "$call_id" ]; then printf '%s\n' "$call_id" >> "$CALLS_FILE"; fi
-                case "$code" in
-                    4|5|18|27|28)
-                        finish_calls || true
-                        echo "VK отклонил токен или аккаунт (код $code)" >&2
-                        exit 1
-                        ;;
-                esac
-                echo "VK API не вернул звонок $index из $count после $attempt попыток (код $code)" >&2
+                finish_calls || true
+                echo "VK API не подтвердил создание звонка; автоматический повтор отменён" >&2
+                exit 1
             else
-                printf '%s\n' "$call_id" >> "$CALLS_FILE"
                 created=$((created + 1))
                 if [ -n "$hashes" ]; then hashes="$hashes,$hash"; else hashes="$hash"; fi
             fi
