@@ -43,7 +43,7 @@ import { fetchClashProxies, useProxiesStore, syncClashApiPort, useAppContext, us
 import type { Config } from '../../lib/types'
 import { cn } from '../../lib/utils'
 import { addCustomRoute, addCustomIpRoute, normalizeDevicePriority, baseRuleTag, mergeRouteDomains, removeCustomRoute, renameCustomRoute, replaceRouteResources, reorderXrayRules, updateDeviceRules, updateGlobalRules, type RouteTag, type RoutingRule } from '../../lib/xrayDeviceRouting'
-import { addMihomoCustomRoute, defaultMihomoChoices, mihomoRouteTags, readMihomoDevices, removeMihomoCustomRoute, renameMihomoCustomRoute, reorderMihomoRoutes, updateMihomoDevice } from '../../lib/mihomoDeviceRouting'
+import { addMihomoCustomRoute, defaultMihomoChoices, isMihomoFullRoute, mihomoRouteTags, readMihomoDevices, removeMihomoCustomRoute, renameMihomoCustomRoute, reorderMihomoRoutes, updateMihomoDevice } from '../../lib/mihomoDeviceRouting'
 import { enableXrayRoutingCards } from '../../lib/xraySubscription'
 import { linkProviderToVpn } from '../../lib/mihomoSubscription'
 import { applyEdits, modify, parse as parseJsonc } from 'jsonc-parser'
@@ -779,7 +779,14 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
     return editMihomoCustomRoute(content => updateMihomoDevice(content, ip, route, target), '')
   }
   async function selectMihomoDraft(name: string, target: string): Promise<boolean> {
-    return editMihomoCustomRoute(content => withSelections(content, { ...readSelections(content), [name]: target }), '')
+    return editMihomoCustomRoute(content => {
+      const selections = { ...readSelections(content), [name]: target }
+      const defaults = defaultMihomoChoices(content)
+      if (name === defaults.VPN && isMihomoFullRoute(target)) for (const group of Object.values(defaults)) {
+        if (group !== 'DIRECT' && group !== target) selections[group] = target
+      }
+      return withSelections(content, selections)
+    }, '')
   }
   async function commitMihomoRouting() {
     if (!mihomoConfig || !routingDraft || routingSaving || routingDraft.file !== mihomoConfig.file) return
@@ -904,7 +911,15 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
                   <Button size="sm" disabled={!activeRoutingDraft || routingSaving} onClick={() => { if (isMihomo) void commitMihomoRouting(); else if (xraySelectorsConfig) void applyXrayRoutingEdit(xraySelectorsConfig.file, content => content, 'Маршрутизация сохранена и применена', true) }}>{routingSaving ? 'Применение…' : 'Сохранить и применить'}</Button>
                   <Button size="sm" variant="outline" disabled={!activeRoutingDraft || routingSaving} onClick={() => setRoutingDraft(null)}>Отменить изменения</Button>
                   <span className="text-muted-foreground mr-auto text-xs" role="status">{activeRoutingDraft ? 'Есть неприменённые изменения' : 'Все изменения сохранены'}</span>
-                  <Button size="sm" variant="outline" onClick={onOpenBackups}><IconBox data-icon="inline-start" />Резервные копии</Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger render={<Button size="sm" variant="outline" aria-label="Утилиты маршрутизации"><IconDotsFilled /></Button>} />
+          <DropdownMenuContent align="end" className="min-w-60">
+                      <DropdownMenuGroup>
+                        <DropdownMenuItem onClick={onOpenBackups}><IconBox /> Резервные копии</DropdownMenuItem>
+                        <DropdownMenuItem onClick={onOpenGeoScan}><IconSearch /> Скан геофайлов</DropdownMenuItem>
+                      </DropdownMenuGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
   )
 
@@ -1036,7 +1051,6 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
                 )}
               </div>
             )}
-            {currentCore === 'xray' && <Button variant="outline" className="text-[13px]" onClick={onOpenGeoScan}><IconSearch data-icon="inline-start" /> Скан геофайлов</Button>}
             {state.availableCores.includes(currentCore) && <Button variant="outline" className={cn('text-[13px]', (isMihomo || hasXraySelectors) && currentPanel === 'selectors' && !isMihomo && 'md:ml-auto')} onClick={currentCore === 'mihomo' ? onOpenMihomoSubscriptions : onOpenXraySubscriptions}><IconListDetails data-icon="inline-start" /> Подписки</Button>}
             {xrayMigrationConfig && <Button variant="outline" className="text-[13px]" onClick={() => void applyXrayRoutingEdit(xrayMigrationConfig.file, enableXrayRoutingCards, 'Карточки Xray и маршрутизация для IP включены', true)}>Включить карточки Xray</Button>}
           </div>

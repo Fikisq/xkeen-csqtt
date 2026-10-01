@@ -1121,6 +1121,7 @@ EOL
     inject_var val_exclude_ip4 "$val_exclude_ip4"
     inject_var name_ipset_deny_mac "$name_ipset_deny_mac"
     inject_var file_client_bypass_macs "$file_client_bypass_macs"
+    inject_var xkeen_cfg "$xkeen_cfg"
     inject_var url_server "$url_server"
     inject_var url_hotspot "$url_hotspot"
 

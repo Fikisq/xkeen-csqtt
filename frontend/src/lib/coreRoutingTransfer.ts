@@ -1,10 +1,54 @@
 import { parse as parseJsonc, modify, applyEdits } from 'jsonc-parser'
-import { addMihomoCustomRoute, defaultMihomoChoices, readMihomoCustomRoutes, readMihomoDevices, updateMihomoDevice } from './mihomoDeviceRouting'
-import { readSelections, withSelections } from './mihomoRoutingBackup'
+import { addMihomoCustomRoute, defaultMihomoChoices, prepareMihomoRouteGroups, readMihomoCustomRoutes, readMihomoDevices, updateMihomoDevice } from './mihomoDeviceRouting'
+import { readSelections, replaceSection, withSelections } from './mihomoRoutingBackup'
+import { load as loadYaml, dump as dumpYaml } from 'js-yaml'
 import { addCustomRoute, baseRuleTag, readDeviceIps, routeTags, updateDeviceRules, updateGlobalRules, type RoutingRule } from './xrayDeviceRouting'
 
 export interface TransferResult { content: string; devices: string[]; directDevices: string[]; routes: string[] }
 export interface NodeMapping { xrayToMihomo: Record<string, string>; mihomoToXray: Record<string, string> }
+
+// Keep working Xray VLESS credentials instead of trusting a stale subscription.
+export function syncMihomoVlessNodes(source: string, target: string, mapping: NodeMapping): {content: string; mapping: NodeMapping} {
+  const config = loadYaml(target) as Record<string, any>
+  const proxies: Array<Record<string, any>> = config.proxies ?? []
+  const translated = {xrayToMihomo: {...mapping.xrayToMihomo}, mihomoToXray: {...mapping.mihomoToXray}}
+  const replacements = new Map<string, string>()
+  for (const outbound of parseJsonc(source)?.outbounds ?? []) {
+    const original = mapping.xrayToMihomo[outbound.tag]
+    const stream = outbound.streamSettings ?? {}
+    const settings = outbound.settings ?? {}
+    if (!original || outbound.protocol !== 'vless') continue
+    if (!['tcp', 'raw', 'xhttp'].includes(stream.network ?? 'tcp')) continue
+    const name = original.endsWith(' · XKeen') ? original : `${original} · XKeen`
+    const proxy: Record<string, any> = {name, type: 'vless', server: settings.address, port: Number(settings.port), uuid: settings.id, udp: true, network: stream.network === 'raw' ? 'tcp' : stream.network ?? 'tcp', 'routing-mark': 255}
+    if (!proxy.server || !proxy.uuid || !proxy.port) continue
+    if (settings.flow) proxy.flow = settings.flow
+    const tls = stream.security === 'reality' ? stream.realitySettings : stream.tlsSettings
+    if (tls) {
+      proxy.tls = true
+      proxy.servername = tls.serverName
+      if (tls.fingerprint) proxy['client-fingerprint'] = tls.fingerprint
+      if (tls.alpn) proxy.alpn = tls.alpn
+      if (stream.security === 'reality') {
+        proxy['reality-opts'] = {'public-key': tls.publicKey, 'short-id': String(tls.shortId ?? ''), 'support-x25519mlkem768': true}
+        proxy['client-fingerprint'] = 'chrome'
+      }
+    }
+    if (proxy.network === 'xhttp') {
+      const xhttp = stream.xhttpSettings ?? {}
+      proxy['xhttp-opts'] = {path: xhttp.path ?? '/', host: xhttp.host ?? '', mode: xhttp.extra?.mode ?? xhttp.mode ?? 'auto'}
+      if (xhttp.extra?.xPaddingBytes) proxy['xhttp-opts']['x-padding-bytes'] = xhttp.extra.xPaddingBytes
+    }
+    const index = proxies.findIndex(node => node.name === name)
+    if (index < 0) proxies.push(proxy); else proxies[index] = proxy
+    translated.xrayToMihomo[outbound.tag] = name
+    translated.mihomoToXray[name] = outbound.tag
+    replacements.set(original, name)
+  }
+  let content = replaceSection(target, 'proxies', dumpYaml({proxies}, {lineWidth: -1, noRefs: true}))
+  content = withSelections(content, Object.fromEntries(Object.entries(readSelections(content)).map(([group, node]) => [group, replacements.get(node) ?? node])))
+  return {content, mapping: translated}
+}
 
 function xrayRules(content: string): RoutingRule[] {
   const parsed = parseJsonc(content)
@@ -25,14 +69,17 @@ function displayCustom(tag: string): string {
 function mihomoChoice(tag: string | undefined, mapping: NodeMapping): string | undefined {
   if (!tag) return undefined
   if (tag === 'direct') return 'DIRECT'
-  if (tag === 'csqtt') return 'CSQTT'
+  if (tag.toLowerCase() === 'csqtt') return 'CSQTT'
   if (tag === 'wdtt-plus') return 'WDTT Plus'
   return mapping.xrayToMihomo[tag]
 }
 
 export function xrayToMihomo(source: string, target: string, mapping: NodeMapping = {xrayToMihomo: {}, mihomoToXray: {}}): TransferResult {
   const rules = xrayRules(source)
-  let content = target
+  if (rules.some(rule => rule.outboundTag === 'nfqws-direct')) throw new Error('Перенос nfqws2 в Mihomo пока не поддерживается. Выберите для этих правил другое подключение перед переключением ядра')
+  const synced = syncMihomoVlessNodes(source, target, mapping)
+  mapping = synced.mapping
+  let content = prepareMihomoRouteGroups(synced.content)
   const routes: string[] = []
   for (const tag of routeTags(rules).filter(tag => tag.startsWith('custom:'))) {
     const name = displayCustom(tag)
@@ -48,7 +95,7 @@ export function xrayToMihomo(source: string, target: string, mapping: NodeMappin
     const rule = rules.find(item => baseRuleTag(item) === tag)
     const group = defaults[tag]
     const selected = mihomoChoice(rule?.outboundTag, mapping)
-    if (group && selected) selections[group] = selected
+    if (group && selected && group !== 'DIRECT' && group !== selected) selections[group] = selected
   }
   content = withSelections(content, selections)
   const devices = readDeviceIps(rules)
@@ -65,6 +112,8 @@ export function xrayToMihomo(source: string, target: string, mapping: NodeMappin
       if (selected) content = updateMihomoDevice(content, ip, tag, selected)
     }
   }
+  const groups = new Set(((loadYaml(content) as Record<string, any>)['proxy-groups'] ?? []).filter((group: any) => group.type === 'select').map((group: any) => group.name))
+  content = withSelections(content, Object.fromEntries(Object.entries(readSelections(content)).filter(([group]) => groups.has(group))))
   return { content, devices, directDevices, routes }
 }
 

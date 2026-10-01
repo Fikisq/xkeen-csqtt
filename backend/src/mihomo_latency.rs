@@ -111,7 +111,7 @@ async fn probe_node(name: &str) -> Result<u32, &'static str> {
 }
 pub async fn probe(Json(request): Json<Request>) -> Json<Value> {
     if request.name.is_empty() || request.name.len() > 256 { return Json(json!({"success": false, "error": "Недопустимое имя узла"})); }
-    let Ok(_guard) = LOCK.get_or_init(|| Semaphore::new(1)).try_acquire() else { return Json(json!({"success": false, "error": "Проверка другого узла уже идёт"})); };
+    let Ok(Ok(_guard)) = tokio::time::timeout(Duration::from_secs(30), LOCK.get_or_init(|| Semaphore::new(1)).acquire()).await else { return Json(json!({"success": false, "error": "Очередь проверки занята. Повторите пинг позже"})); };
     match probe_node(&request.name).await {
         Ok(delay) => Json(json!({"success": true, "delay": delay, "kind": "HTTP GET via proxy"})),
         Err(error) => {

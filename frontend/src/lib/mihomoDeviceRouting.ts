@@ -1,4 +1,5 @@
 import { ROUTE_TAGS, customRouteName, validDeviceIp, type RouteTag } from './xrayDeviceRouting'
+import { load as loadYaml, dump as dumpYaml } from 'js-yaml'
 
 export type DeviceChoices = Record<RouteTag, string>
 export interface DeviceProfile { ip: string; choices: DeviceChoices }
@@ -163,7 +164,42 @@ export function readMihomoDevices(content: string): DeviceProfile[] {
 }
 
 function groupNames(content: string): string[] {
-  return [...content.matchAll(/^  - name:\s*(.+?)\s*$/gm)].map((match) => match[1].replace(/^['"]|['"]$/g, ''))
+  return [...sectionBody(content, 'proxy-groups').matchAll(/^  - name:\s*(.+?)\s*$/gm)].map((match) => match[1].replace(/^['"]|['"]$/g, ''))
+}
+
+// Routing cards are manual selectors. Keep policy groups such as Fallback intact.
+export function prepareMihomoRouteGroups(content: string): string {
+  // XKeen reserves mark 255 to exclude proxy sockets from interception.
+  const marked = /^routing-mark:/m.test(content) ? content.replace(/^routing-mark:[^\r\n]*/m, 'routing-mark: 255') : `routing-mark: 255\n${content}`
+  const clean = removeManagedGroups(marked)
+  const match = /^proxy-groups:\s*\r?\n/m.exec(clean)
+  if (!match) throw new Error('В Mihomo нет групп подключений')
+  const start = match.index + match[0].length
+  const next = /^[A-Za-z][\w-]*:/m.exec(clean.slice(start))
+  const end = next ? start + next.index : clean.length
+  const body = clean.slice(start, end)
+  const blocks = [...body.matchAll(/^  - name:[^\r\n]+\r?\n/gm)]
+  const defaults = defaultMihomoChoices(clean)
+  const routes = new Set(Object.values(defaults))
+  const providers = providerNames(clean)
+  const inline = inlineProxyNames(clean)
+  let updated = body.slice(0, blocks[0]?.index ?? body.length)
+  for (let index = 0; index < blocks.length; index++) {
+    const block = body.slice(blocks[index].index!, blocks[index + 1]?.index ?? body.length)
+    const group = (loadYaml(block) as Array<Record<string, unknown>>)?.[0]
+    if (!group || typeof group.name !== 'string' || !routes.has(group.name)) { updated += block; continue }
+    group.type = 'select'
+    group.hidden = false
+    const options = Array.isArray(group.proxies) ? group.proxies as string[] : []
+    group.proxies = [...new Set(['DIRECT', ...(group.name !== defaults.VPN && defaults.VPN !== 'DIRECT' ? [defaults.VPN] : []), ...options, ...[...inline].filter(name => /^(?:CSQTT|WDTT Plus)$/.test(name) || name.endsWith(' · XKeen'))])]
+    if (providers.length) group.use = [...new Set([...(Array.isArray(group.use) ? group.use as string[] : []), ...providers])]
+    updated += dumpYaml([group], { lineWidth: -1, noRefs: true, indent: 2 }).split('\n').filter(Boolean).map(line => `  ${line}`).join('\n') + '\n'
+  }
+  return clean.slice(0, start) + updated + clean.slice(end)
+}
+
+export function isMihomoFullRoute(target: string): boolean {
+  return target === 'DIRECT' || /^(?:CSQTT|WDTT[ -]Plus)$/i.test(target) || /без\s*(?:vpn|впн)/i.test(target)
 }
 
 export function defaultMihomoChoices(content: string): DeviceChoices {
@@ -196,6 +232,7 @@ export function updateMihomoDevice(content: string, ip: string, route: RouteTag 
     if (target) {
       if (/[\r\n,]/.test(target)) throw new Error('Имя подключения содержит недопустимый символ')
       choices[route] = target
+      if (route === 'VPN' && isMihomoFullRoute(target)) for (const tag of mihomoRouteTags(content)) choices[tag] = target
     }
     profiles.push({ ip, choices })
   }
@@ -211,13 +248,17 @@ export function updateMihomoDevice(content: string, ip: string, route: RouteTag 
   const managed = profiles.map((profile) => {
     const source = `SRC-IP-CIDR,${profile.ip}/32`
     const lines = [`  # ${START} ${profile.ip} ${encodeURIComponent(JSON.stringify(profile.choices))}`]
+    if (isMihomoFullRoute(profile.choices.VPN)) {
+      lines.push(`  - ${source},${ruleTarget(profile.choices.VPN)}`, `  # ${END} ${profile.ip}`)
+      return lines.join('\n') + '\n'
+    }
     for (const category of [...orderedMihomoRouteTags(content), ...mihomoRouteTags(content).filter((tag) => tag !== 'VPN' && !orderedMihomoRouteTags(content).includes(tag))]) {
-      if (profile.choices[category] === defaults[category]) continue
       const target = ruleTarget(profile.choices[category] === defaults.VPN ? profile.choices.VPN : profile.choices[category])
       for (const matcher of matchersForRoute(base, category, defaults)) {
         lines.push(`  - AND,((${source}),(${matcher})),${target}`)
       }
     }
+    lines.push(`  - ${source},${ruleTarget(profile.choices.VPN)}`)
     lines.push(`  # ${END} ${profile.ip}`)
     return lines.join('\n') + '\n'
   }).join('')
@@ -229,10 +270,7 @@ export function updateMihomoDevice(content: string, ip: string, route: RouteTag 
   }
   if (categoryOffset < 0) categoryOffset = base.length
   const withCategories = base.slice(0, categoryOffset) + managed + base.slice(categoryOffset)
-  const fallbacks = profiles.map((profile) => `  # xkeen-device-fallback ${profile.ip}\n  - SRC-IP-CIDR,${profile.ip}/32,${ruleTarget(profile.choices.VPN)}\n`).join('')
-  const fallbackOffset = withCategories.search(/^  - MATCH,/m)
-  const at = fallbackOffset < 0 ? withCategories.length : fallbackOffset
-  const updatedBody = withCategories.slice(0, at) + fallbacks + withCategories.slice(at)
+  const updatedBody = withCategories
   let updated = cleanContent.slice(0, section.start) + updatedBody + cleanContent.slice(section.end)
   if (aliases.size) {
     const groups = ['  # xkeen-device-groups-start', ...[...aliases].flatMap(([name, alias]) => [

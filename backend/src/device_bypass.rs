@@ -224,7 +224,8 @@ async fn iptables(binary: &str, table: &str, operation: &str, mac: &str, comment
 }
 
 async fn sync_firewall(old: &BTreeSet<String>, new: &BTreeSet<String>) -> Result<(), String> {
-    if old == new { return Ok(()) }
+    // Netfilter hooks can recreate chains without changing the saved device list.
+    // Reconcile the actual rules even when the requested list is unchanged.
     let mut ipv4_chains = 0;
     for (binary, table) in [("/opt/sbin/iptables", "nat"), ("/opt/sbin/iptables", "mangle"),
         ("/opt/sbin/ip6tables", "nat"), ("/opt/sbin/ip6tables", "mangle")] {
@@ -241,7 +242,9 @@ async fn sync_firewall(old: &BTreeSet<String>, new: &BTreeSet<String>) -> Result
                 }
             }
         }
-        for mac in new.difference(old) {
+        for mac in new {
+            if iptables(binary, table, "-C", mac, COMMENT).await?
+                || iptables(binary, table, "-C", mac, "xkeen_rule").await? { continue }
             let result = Command::new(binary).args(["-t", table, "-I", "xkeen", "1", "-m", "mac", "--mac-source", mac,
                 "-m", "comment", "--comment", COMMENT, "-j", "RETURN"])
                 .stdout(Stdio::null()).stderr(Stdio::piped()).output().await
