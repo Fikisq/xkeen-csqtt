@@ -1036,6 +1036,7 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
                 )}
               </div>
             )}
+            {currentCore === 'xray' && <Button variant="outline" className="text-[13px]" onClick={onOpenGeoScan}><IconSearch data-icon="inline-start" /> Скан геофайлов</Button>}
             {state.availableCores.includes(currentCore) && <Button variant="outline" className={cn('text-[13px]', (isMihomo || hasXraySelectors) && currentPanel === 'selectors' && !isMihomo && 'md:ml-auto')} onClick={currentCore === 'mihomo' ? onOpenMihomoSubscriptions : onOpenXraySubscriptions}><IconListDetails data-icon="inline-start" /> Подписки</Button>}
             {xrayMigrationConfig && <Button variant="outline" className="text-[13px]" onClick={() => void applyXrayRoutingEdit(xrayMigrationConfig.file, enableXrayRoutingCards, 'Карточки Xray и маршрутизация для IP включены', true)}>Включить карточки Xray</Button>}
           </div>

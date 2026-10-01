@@ -9,7 +9,7 @@ import { parse as parseJsonc } from 'jsonc-parser'
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
 import type { Config } from '@/lib/types'
 import { RouteIcon, routeLabel } from '@/components/configuration/RouteIcon'
-import { baseRuleTag, deviceRuleTag, readDeviceIps, ROSCOMVPN_DIRECT_IP, routeTags, usesSelector, validDeviceIp, type RouteTag, type RoutingRule } from '@/lib/xrayDeviceRouting'
+import { baseRuleTag, deviceRuleTag, readDeviceIps, routeTags, usesSelector, validDeviceIp, type RouteTag, type RoutingRule } from '@/lib/xrayDeviceRouting'
 
 interface Outbound {
   tag: string
@@ -153,7 +153,8 @@ export function XraySelectorsPanel({ config, onSelect, onDeviceSelect, onAddRout
       return { outbounds: [], rules: [], devices: [] }
     }
   }, [config.savedContent])
-  const roscomvpnAvailable = parsed.rules.some((rule) => rule.ip?.includes(ROSCOMVPN_DIRECT_IP))
+  const availableIpLists = [...new Set(parsed.rules.flatMap((rule) => rule.ip ?? []).filter((value) => value.startsWith('ext:') || value.startsWith('geoip:')))]
+  const ipListLabel = (value: string) => value.replace(/^ext:/, '').replace(/^roscomvpn-geoip-[^:]+\.dat:/, 'RoscomVPN · ').replace(/^zkeenip\.dat:/, 'zkeenip · ')
 
   const globalDirect = parsed.rules.some((rule) => baseRuleTag(rule) === 'VPN' && rule.outboundTag === 'direct')
   const globalCsqtt = parsed.rules.some((rule) => baseRuleTag(rule) === 'VPN' && rule.outboundTag?.toLowerCase() === 'csqtt')
@@ -296,7 +297,7 @@ export function XraySelectorsPanel({ config, onSelect, onDeviceSelect, onAddRout
           </div>
           {resourceKind === 'domain' ? <GeoSitePicker search={categorySearch} setSearch={setCategorySearch} resources={newDomainResources} setResources={setNewDomainResources} categories={categories} error={categoryError} onPick={(name) => setRouteName((current) => current || name)} /> : <>
             <p className="text-muted-foreground text-xs">Выберите готовый IP-список или введите несколько IPv4/CIDR, по одному в строке.</p>
-            {roscomvpnAvailable && <Button size="sm" variant={resourceLines(newIpResources).includes(ROSCOMVPN_DIRECT_IP) ? 'default' : 'outline'} aria-pressed={resourceLines(newIpResources).includes(ROSCOMVPN_DIRECT_IP)} onClick={() => setNewIpResources(current => resourceLines(current).includes(ROSCOMVPN_DIRECT_IP) ? resourceLines(current).filter(value => value !== ROSCOMVPN_DIRECT_IP).join('\n') : [...resourceLines(current), ROSCOMVPN_DIRECT_IP].join('\n'))}>RoscomVPN · direct</Button>}
+            {availableIpLists.map(value => <Button key={value} size="sm" variant={resourceLines(newIpResources).includes(value) ? 'default' : 'outline'} aria-pressed={resourceLines(newIpResources).includes(value)} onClick={() => setNewIpResources(current => resourceLines(current).includes(value) ? resourceLines(current).filter(item => item !== value).join('\n') : [...resourceLines(current), value].join('\n'))}>{ipListLabel(value)}</Button>)}
             <Textarea value={newIpResources} onChange={(event) => setNewIpResources(event.target.value)} rows={5} aria-label="IP-адреса и диапазоны" placeholder={'203.0.113.0/24\n198.51.100.7'} />
           </>}
           {matchingRoute && matchingKind !== resourceKind && <p className="text-amber-400 text-xs">Это название уже занято маршрутом другого типа. Укажи другое название.</p>}
@@ -371,7 +372,7 @@ export function XraySelectorsPanel({ config, onSelect, onDeviceSelect, onAddRout
                 <p className="text-muted-foreground text-xs">Этот набор ресурсов используется в общей и выборочной маршрутизации всех устройств.</p>
                 {routeResourceKind === 'domain' ? <GeoSitePicker search={editCategorySearch} setSearch={setEditCategorySearch} resources={editDomainResources} setResources={setEditDomainResources} categories={categories} error={categoryError} /> : <>
                   <p className="text-muted-foreground text-sm">Выбери готовый IP-список или укажи IPv4/CIDR, по одному в строке.</p>
-                  {roscomvpnAvailable && <Button size="sm" variant={resourceLines(resourceText).includes(ROSCOMVPN_DIRECT_IP) ? 'default' : 'outline'} className="w-fit" aria-pressed={resourceLines(resourceText).includes(ROSCOMVPN_DIRECT_IP)} onClick={() => setResourceText(current => resourceLines(current).includes(ROSCOMVPN_DIRECT_IP) ? resourceLines(current).filter(value => value !== ROSCOMVPN_DIRECT_IP).join('\n') : [...resourceLines(current), ROSCOMVPN_DIRECT_IP].join('\n'))}>RoscomVPN · direct</Button>}
+                  {availableIpLists.map(value => <Button key={value} size="sm" variant={resourceLines(resourceText).includes(value) ? 'default' : 'outline'} className="w-fit" aria-pressed={resourceLines(resourceText).includes(value)} onClick={() => setResourceText(current => resourceLines(current).includes(value) ? resourceLines(current).filter(item => item !== value).join('\n') : [...resourceLines(current), value].join('\n'))}>{ipListLabel(value)}</Button>)}
                   <Textarea value={resourceText} onChange={(event) => setResourceText(event.target.value)} rows={8} aria-label="IP-адреса и диапазоны маршрута" />
                 </>}
                 <div className="flex justify-end gap-2"><Button size="sm" variant="outline" onClick={() => setEditingTag('')}>Отмена</Button><Button size="sm" disabled={pending !== null || (routeResourceKind === 'domain' ? editDomainResources.length === 0 || editDomainResources.length > 30 : resourceLines(resourceText).length === 0 || resourceLines(resourceText).length > 30)} onClick={async () => { setPending(`resources:${route}`); try { if (await onEditResources(config.file, route, routeResourceKind === 'domain' ? editDomainResources : resourceLines(resourceText))) setEditingTag('') } finally { setPending(null) } }}>Сохранить ресурсы</Button></div>
