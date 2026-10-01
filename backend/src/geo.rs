@@ -36,6 +36,89 @@ struct GeoCategoryResponse {
     categories: Vec<GeoCategory>,
 }
 
+// Validate every protobuf category and record before making a file visible to Xray.
+fn validate_uploaded_geo(data: &[u8], is_ip: bool) -> Result<(), String> {
+    let mut list = data;
+    let mut records = 0;
+    while list.has_remaining() {
+        let (tag, wire) = decode_key(&mut list).map_err(|_| "Повреждённый .dat файл")?;
+        if tag != 1 || wire != WireType::LengthDelimited { return Err("Нужен GeoSite или GeoIP в формате Xray .dat".into()) }
+        let mut category = read_len_delim(&mut list).ok_or("Повреждённая категория")?;
+        let mut category_name = false;
+        while category.has_remaining() {
+            let (field, wt) = decode_key(&mut category).map_err(|_| "Повреждённая категория")?;
+            match (field, wt) {
+                (1, WireType::LengthDelimited) => {
+                    let name = read_len_delim(&mut category).ok_or("Повреждённое имя категории")?;
+                    category_name = !name.is_empty() && std::str::from_utf8(name).is_ok();
+                }
+                (2, WireType::LengthDelimited) => {
+                    let mut record = read_len_delim(&mut category).ok_or("Повреждённая запись")?;
+                    let (mut address_len, mut prefix, mut domain_value) = (0, 0, false);
+                    while record.has_remaining() {
+                        let (key, format) = decode_key(&mut record).map_err(|_| "Повреждённая запись")?;
+                        match (is_ip, key, format) {
+                            (true, 1, WireType::LengthDelimited) => address_len = read_len_delim(&mut record).ok_or("Повреждённый IP")?.len(),
+                            (true, 2, WireType::Varint) => prefix = decode_varint(&mut record).map_err(|_| "Повреждённая маска")?,
+                            (false, 1, WireType::Varint) => { if decode_varint(&mut record).map_err(|_| "Повреждённый тип домена")? > 3 { return Err("Неизвестный тип домена".into()) } },
+                            (false, 2, WireType::LengthDelimited) => {
+                                let value = read_len_delim(&mut record).ok_or("Повреждённый домен")?;
+                                domain_value = !value.is_empty() && std::str::from_utf8(value).is_ok();
+                            }
+                            _ => skip_field(format, key, &mut record, DecodeContext::default()).map_err(|_| "Повреждённая запись")?,
+                        }
+                    }
+                    if is_ip && !((address_len == 4 && prefix <= 32) || (address_len == 16 && prefix <= 128)) {
+                        return Err("Выбран GeoIP, но файл не содержит корректные IP-диапазоны".into())
+                    }
+                    if !is_ip && !domain_value { return Err("Выбран GeoSite, но файл не содержит домены".into()) }
+                    records += 1;
+                }
+                _ => skip_field(wt, field, &mut category, DecodeContext::default()).map_err(|_| "Повреждённая категория")?,
+            }
+        }
+        if !category_name { return Err("В базе нет имени категории".into()) }
+    }
+    if records == 0 { return Err("База пустая".into()) }
+    Ok(())
+}
+
+pub async fn upload_geo(State(state): State<AppState>, Query(params): Query<HashMap<String, String>>, body: axum::body::Bytes) -> Json<serde_json::Value> {
+    let filename = params.get("file").cloned().unwrap_or_default();
+    let kind = params.get("kind").cloned().unwrap_or_default();
+    if filename.len() > 100 || !filename.ends_with(".dat") || filename.starts_with('.')
+        || !filename.bytes().all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c))
+        || !["domain", "ip"].contains(&kind.as_str()) || body.is_empty() {
+        return Json(serde_json::json!({"success": false, "error": "Нужен файл .dat с именем из латинских букв, цифр, точек, - или _"}))
+    }
+    let result = task::spawn_blocking(move || -> Result<String, String> {
+        validate_uploaded_geo(&body, kind == "ip")?;
+        let directory = Path::new(XRAY_ASSET_DIR);
+        std::fs::create_dir_all(directory).map_err(|e| e.to_string())?;
+        let destination = directory.join(&filename);
+        let temporary = directory.join(format!(".geo-upload-{}", uuid::Uuid::new_v4()));
+        let saved = (|| -> Result<(), String> {
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&temporary).map_err(|e| e.to_string())?;
+            file.write_all(&body).and_then(|_| file.sync_all()).map_err(|_| "Не удалось записать базу: проверьте свободное место")?;
+            drop(file);
+            // An existing installed database must never be replaced by an upload.
+            std::fs::hard_link(&temporary, &destination).map_err(|e| if e.kind() == std::io::ErrorKind::AlreadyExists {
+                "База с этим именем уже есть. Переименуйте новый файл перед загрузкой".into()
+            } else { format!("Не удалось установить базу: {e}") })?;
+            Ok(())
+        })();
+        let _ = std::fs::remove_file(&temporary);
+        saved?;
+        Ok(filename)
+    }).await;
+    match result {
+        Ok(Ok(filename)) => { state.geo_cache.write().unwrap().remove(&filename); Json(serde_json::json!({"success": true, "file": filename})) },
+        Ok(Err(error)) => Json(serde_json::json!({"success": false, "error": error})),
+        Err(_) => Json(serde_json::json!({"success": false, "error": "Не удалось обработать базу"})),
+    }
+}
+
 pub async fn get_geosite_categories() -> impl IntoResponse {
     let result = task::spawn_blocking(|| -> Result<Vec<GeoCategory>, String> {
         let file = File::open(Path::new(XRAY_ASSET_DIR).join("geosite.dat"))

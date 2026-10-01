@@ -157,7 +157,6 @@ fn target(addon: &str, file: &str) -> Option<&'static str> {
         ("csqtt", "csqtt-run-219.sh") => Some("/opt/etc/csqtt/csqtt-run-219.sh"),
         ("csqtt", "csqtt-js-calls.sh") => Some("/opt/etc/csqtt/csqtt-js-calls.sh"),
         ("csqtt", "csqtt-api-calls.sh") => Some("/opt/etc/csqtt/csqtt-api-calls.sh"),
-        ("csqtt", "csqtt-speedtest.sh") => Some("/opt/bin/csqtt-speedtest"),
         ("csqtt", "vk-manual-hashes.sh") | ("wdtt-plus", "vk-manual-hashes.sh") => Some("/opt/bin/vk-manual-hashes.sh"),
         ("csqtt", "S99csqtt") => Some("/opt/etc/init.d/S99csqtt"),
         ("wdtt-plus", "client") => Some("/opt/etc/wdtt-plus/wdtt-plus-client"),
@@ -181,7 +180,7 @@ fn target(addon: &str, file: &str) -> Option<&'static str> {
 
 fn bundle_files(name: &str) -> &'static [&'static str] {
     match name {
-        "csqtt" => &["client", "client-version", "csqtt-tun-fd", "csqtt-run-219.sh", "csqtt-js-calls.sh", "csqtt-api-calls.sh", "vk-manual-hashes.sh", "csqtt-speedtest.sh", "S99csqtt"],
+        "csqtt" => &["client", "client-version", "csqtt-tun-fd", "csqtt-run-219.sh", "csqtt-js-calls.sh", "csqtt-api-calls.sh", "vk-manual-hashes.sh", "S99csqtt"],
         "wdtt-plus" => &["client", "wdtt-plus-run.sh", "wdtt-plus-watchdog.sh", "wdtt-plus-calls.sh", "vk-manual-hashes.sh", "S99wdtt-plus"],
         _ => &["engine", "probe", "canary.sh", "probe-check.sh", "activate.sh", "nfqws2/lua/zapret-lib.lua.gz", "nfqws2/lua/zapret-antidpi.lua.gz", "nfqws2/blobs/quic_initial.bin", "nfqws2/blobs/tls_clienthello.bin", "S98nfqws2-xkeen"],
     }

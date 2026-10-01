@@ -176,7 +176,14 @@ install_prepared() {
   BIN_STAGED=
 }
 
+ensure_conntrack() {
+  command -v conntrack >/dev/null 2>&1 && return 0
+  printf "\n Установка conntrack для сброса старых соединений при смене режима устройства...\n"
+  opkg install conntrack || printf "\n conntrack не установлен. После смены режима может понадобиться переподключить сеть устройства.\n"
+}
+
 install_xkeenui() {
+  ensure_conntrack
   [ -f "/opt/tmp/xkeen-ui-$ARCH" ] && LOCAL=true
   download_files
   install_nfqws2
@@ -201,6 +208,7 @@ install_xkeenui() {
 }
 
 update_xkeenui() {
+  ensure_conntrack
   [ -f "$XKEENUI_BIN" ] || { printf "${ERROR} Ошибка: XKeen UI не установлен!${NCN}"; exit 1; }
   [ -f "/opt/tmp/xkeen-ui-$ARCH" ] && LOCAL=true
   download_files

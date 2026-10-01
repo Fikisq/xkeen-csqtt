@@ -142,7 +142,7 @@ jobs:
           mkdir csqtt-bundle
           cp upstream-csqtt/rust-client/target/aarch64-unknown-linux-musl/release/client csqtt-bundle/client
           aarch64-linux-gnu-gcc -static -O2 -o csqtt-bundle/csqtt-tun-fd router/csqtt-tun-fd.c
-          cp router/S99csqtt router/csqtt-run-219.sh router/csqtt-js-calls.sh router/csqtt-api-calls.sh router/vk-manual-hashes.sh router/csqtt-speedtest.sh csqtt-bundle/
+          cp router/S99csqtt router/csqtt-run-219.sh router/csqtt-js-calls.sh router/csqtt-api-calls.sh router/vk-manual-hashes.sh csqtt-bundle/
           printf '2.1.9\n' > csqtt-bundle/client-version
           chmod 755 csqtt-bundle/*
           tar -czf csqtt-client-arm64-v8a.tar.gz -C csqtt-bundle .

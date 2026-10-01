@@ -130,6 +130,8 @@ pub async fn mihomo_devices(State(state): State<AppState>, Json(request): Json<M
         entries.insert(ip, mac);
     }
     let new = entries.values().cloned().collect();
+    let changed: BTreeSet<Ipv4Addr> = saved.keys().chain(entries.keys()).copied()
+        .filter(|ip| saved.get(ip) != entries.get(ip)).collect();
     if let Err(error) = sync_firewall(&old, &new).await {
         _ = sync_firewall(&new, &old).await;
         return Json(json!({"success": false, "error": error}))
@@ -139,7 +141,8 @@ pub async fn mihomo_devices(State(state): State<AppState>, Json(request): Json<M
         _ = sync_firewall(&new, &old).await;
         return Json(json!({"success": false, "error": error.to_string()}))
     }
-    Json(json!({"success": true}))
+    let warning = clear_device_connections(changed).await;
+    Json(json!({"success": true, "warning": warning}))
 }
 
 pub async fn sync_xray_routing(State(state): State<AppState>) -> Json<Value> {
@@ -201,6 +204,28 @@ fn read_ip_macs(content: &str) -> BTreeMap<Ipv4Addr, String> {
 fn format_bypass(entries: &BTreeMap<Ipv4Addr, String>) -> String {
     if entries.is_empty() { return "# No devices currently bypass XKeen interception.\n".into() }
     entries.iter().map(|(ip, mac)| format!("{mac} # {ip}\n")).collect()
+}
+
+pub async fn clear_changed_direct_connections(old: &Value, new: &Value) -> Option<String> {
+    let (Ok(old_ips), Ok(new_ips)) = (direct_device_ips(old), direct_device_ips(new)) else { return None };
+    clear_device_connections(old_ips.symmetric_difference(&new_ips).copied().collect()).await
+}
+
+async fn clear_device_connections(ips: BTreeSet<Ipv4Addr>) -> Option<String> {
+    if ips.is_empty() { return None }
+    let Some(binary) = ["/opt/sbin/conntrack", "/opt/bin/conntrack"].into_iter().find(|path| Path::new(path).is_file()) else {
+        return Some("Маршруты применены. Для сброса старых соединений установите conntrack или переподключите сеть изменённого устройства".into())
+    };
+    for ip in ips {
+        let output = tokio::time::timeout(std::time::Duration::from_secs(4), Command::new(binary)
+            .args(["-D", "-f", "ipv4", "-s", &ip.to_string()]).kill_on_drop(true).output()).await;
+        match output {
+            Ok(Ok(output)) if output.status.success()
+                || String::from_utf8_lossy(&output.stderr).contains("0 flow entries") => {},
+            _ => return Some(format!("Маршруты применены, но старые соединения {ip} не удалось сбросить. Переподключите сеть этого устройства")),
+        }
+    }
+    None
 }
 
 async fn resolve_mac(ip: Ipv4Addr) -> Result<String, String> {

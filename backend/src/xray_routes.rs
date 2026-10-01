@@ -119,5 +119,6 @@ pub async fn apply_routes(State(state): State<AppState>, Json(request): Json<App
         _ = replace_live_rules(&old_config).await;
         return Json(json!({ "success": false, "error": format!("Не удалось сохранить JSON: {error}") }));
     }
-    Json(json!({ "success": true }))
+    let warning = device_bypass::clear_changed_direct_connections(&old_config, &new_config).await;
+    Json(json!({ "success": true, "warning": warning }))
 }

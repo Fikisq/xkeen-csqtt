@@ -1,4 +1,5 @@
 import * as yaml from 'js-yaml'
+import { DeviceTab } from '@/components/configuration/DeviceTab'
 import { readSelections } from '@/lib/mihomoRoutingBackup'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -1070,8 +1071,7 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
       <div className="absolute inset-0 space-y-4 overflow-y-auto p-4">
         <div className="bg-card flex shrink-0 flex-wrap items-center gap-2 border-b pb-3">
           <Button size="sm" variant={!activeDevice ? 'default' : 'outline'} onClick={() => setDeviceIp('')}>Общая маршрутизация</Button>
-          {devices.map((profile) => <Button size="sm" key={profile.ip} variant={activeDevice?.ip === profile.ip ? 'default' : 'outline'} onClick={() => setDeviceIp(profile.ip)}>{profile.ip}</Button>)}
-          {activeDevice && <Button size="sm" variant="outline" disabled={devicePending} onClick={async () => { if (await changeDevice(activeDevice.ip, null)) setDeviceIp('') }}>Удалить {activeDevice.ip}</Button>}
+          {devices.map((profile) => <DeviceTab key={profile.ip} ip={profile.ip} selected={activeDevice?.ip === profile.ip} disabled={devicePending} onSelect={() => setDeviceIp(profile.ip)} onRemove={async () => { if (await changeDevice(profile.ip, null) && activeDevice?.ip === profile.ip) setDeviceIp('') }} />)}
         </div>
         <div className="border-border flex shrink-0 flex-wrap items-center gap-2 border-b pb-3">
           <span className="text-sm font-medium">Маршрутизация для устройства</span>

@@ -9,6 +9,7 @@ import { apiCall } from '../../lib/api'
 import { useAppContext, useModalContext } from '../../lib/store'
 import { WdttPlusSettings } from './WdttPlusSettings'
 import { Nfqws2Settings } from './Nfqws2Settings'
+import { VK_AUTH_URL, tokenFromVkRedirect } from '@/lib/vkToken'
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter } from '@/components/ui/alert-dialog'
 
 interface Props {
@@ -53,15 +54,6 @@ interface NfqwsStatus {
   blocking: Record<string, string>
 }
 
-interface CsqttSpeedResult {
-  downloadMbps: number
-  uploadMbps: number
-  txDropped: number
-  rxDropped: number
-  interface: string
-  endpoint: string
-}
-
 export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscriptions, onRefreshStatus }: Props) {
   const { state, showToast } = useAppContext()
   const { modals, dispatch } = useModalContext()
@@ -75,10 +67,6 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
   const [editingNfqws, setEditingNfqws] = useState(false)
   const [wdttError, setWdttError] = useState('')
   const [editingCsqtt, setEditingCsqtt] = useState(false)
-  const [showCsqttSpeedtest, setShowCsqttSpeedtest] = useState(false)
-  const [speedtestPending, setSpeedtestPending] = useState(false)
-  const [speedtestResult, setSpeedtestResult] = useState<CsqttSpeedResult | null>(null)
-  const [speedtestError, setSpeedtestError] = useState('')
   const [csqttHashes, setCsqttHashes] = useState('4')
   const [csqttClientVersion, setCsqttClientVersion] = useState('2.0')
   const [csqttWorkers, setCsqttWorkers] = useState('81')
@@ -88,6 +76,9 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
   const [csqttPeer, setCsqttPeer] = useState('')
   const [csqttPassword, setCsqttPassword] = useState('')
   const [csqttVkToken, setCsqttVkToken] = useState('')
+  const [vkAuthOpen, setVkAuthOpen] = useState(false)
+  const [vkRedirect, setVkRedirect] = useState('')
+  const [vkAuthError, setVkAuthError] = useState('')
   const [csqttManualHashes, setCsqttManualHashes] = useState('')
   const [csqttHasManualHashes, setCsqttHasManualHashes] = useState(false)
   const [csqttLink, setCsqttLink] = useState('')
@@ -200,18 +191,6 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
     } catch {
       setCsqttStatus(null)
     }
-  }
-
-  async function runCsqttSpeedtest() {
-    setSpeedtestPending(true)
-    setSpeedtestError('')
-    setSpeedtestResult(null)
-    try {
-      const response = await apiCall<{ success: boolean; result?: CsqttSpeedResult; error?: string }>('POST', 'csqtt/speedtest', {})
-      if (!response.success || !response.result) throw new Error(response.error || 'Замер не завершился')
-      setSpeedtestResult(response.result)
-    } catch (error) { setSpeedtestError(error instanceof Error ? error.message : 'Ошибка замера скорости') }
-    finally { setSpeedtestPending(false) }
   }
 
   async function refreshWdttStatus() {
@@ -341,10 +320,12 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
   }, [modals.showCoreManageModal])
 
   const close = () => {
+    setVkAuthOpen(false)
+    setVkRedirect('')
+    setVkAuthError('')
     setEditingCsqtt(false)
     setEditingWdtt(false)
     setEditingNfqws(false)
-    setShowCsqttSpeedtest(false)
     setCsqttPassword('')
     setCsqttVkToken('')
     setCsqttManualHashes('')
@@ -354,7 +335,6 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
   }
 
   const closeCurrentView = () => {
-    if (showCsqttSpeedtest) { setShowCsqttSpeedtest(false); return }
     if (editingWdtt) { setEditingWdtt(false); return }
     if (editingNfqws) { setEditingNfqws(false); return }
     if (editingCsqtt) { setEditingCsqtt(false); return }
@@ -364,27 +344,18 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
   return (
     <>
     <Dialog open={modals.showCoreManageModal} onOpenChange={(open) => !open && closeCurrentView()}>
-      <DialogContent showCloseButton={!editingCsqtt && !editingWdtt && !editingNfqws && !showCsqttSpeedtest} className={editingCsqtt || editingWdtt || editingNfqws ? 'max-h-[95dvh] max-w-[min(96vw,900px)]! overflow-y-auto' : 'max-w-[min(96vw,760px)]!'}>
-        {(editingCsqtt || editingWdtt || editingNfqws || showCsqttSpeedtest) && <Button variant="ghost" size="icon" className="text-ring hover:bg-muted! absolute top-4 right-4 transition-colors hover:text-white" aria-label="Вернуться к управлению ядром" onClick={closeCurrentView}><IconX className="size-6" /></Button>}
+      <DialogContent showCloseButton={!editingCsqtt && !editingWdtt && !editingNfqws} className={editingCsqtt || editingWdtt || editingNfqws ? 'max-h-[95dvh] max-w-[min(96vw,900px)]! overflow-y-auto' : 'max-w-[min(96vw,760px)]!'}>
+        {(editingCsqtt || editingWdtt || editingNfqws) && <Button variant="ghost" size="icon" className="text-ring hover:bg-muted! absolute top-4 right-4 transition-colors hover:text-white" aria-label="Вернуться к управлению ядром" onClick={closeCurrentView}><IconX className="size-6" /></Button>}
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 pb-3">
-          <IconCpu size={24} className="text-chart-2" /> {showCsqttSpeedtest ? 'Скорость CSQTT' : editingWdtt ? 'Настройка WDTT Plus' : editingCsqtt ? 'Настройка CSQTT' : editingNfqws ? 'Настройка nfqws2' : 'Управление ядром'}
+          <IconCpu size={24} className="text-chart-2" /> {editingWdtt ? 'Настройка WDTT Plus' : editingCsqtt ? 'Настройка CSQTT' : editingNfqws ? 'Настройка nfqws2' : 'Управление ядром'}
           </DialogTitle>
         </DialogHeader>
 
-        {showCsqttSpeedtest ? <div className="space-y-4">
-          <p className="text-muted-foreground text-sm">Замер с роутера через интерфейс csqtt0. Показывает скорость до Cloudflare и не меняет маршруты устройств.</p>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-muted/30 rounded-lg border p-4"><p className="text-muted-foreground text-sm">Загрузка</p><p className="text-2xl font-semibold">{speedtestResult ? speedtestResult.downloadMbps.toFixed(2) : '—'} <span className="text-sm font-normal">Мбит/с</span></p></div>
-            <div className="bg-muted/30 rounded-lg border p-4"><p className="text-muted-foreground text-sm">Отдача</p><p className="text-2xl font-semibold">{speedtestResult ? speedtestResult.uploadMbps.toFixed(2) : '—'} <span className="text-sm font-normal">Мбит/с</span></p></div>
-          </div>
-          {speedtestResult && <p className="text-muted-foreground text-xs">Интерфейс: {speedtestResult.interface} · узел замера: {speedtestResult.endpoint} · отброшено пакетов: исходящих {speedtestResult.txDropped}, входящих {speedtestResult.rxDropped}</p>}
-          {speedtestError && <p role="alert" className="text-sm text-red-500">{speedtestError}</p>}
-          <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setShowCsqttSpeedtest(false)}>Назад</Button><Button disabled={speedtestPending || !csqttStatus?.ready} onClick={() => void runCsqttSpeedtest()}>{speedtestPending ? 'Измеряется…' : 'Начать замер'}</Button></div>
-        </div> : editingWdtt ? <WdttPlusSettings onBack={() => setEditingWdtt(false)} onRefresh={() => void refreshWdttStatus()} /> : editingNfqws ? <Nfqws2Settings onBack={() => setEditingNfqws(false)} onRefresh={() => void refreshNfqwsStatus()} /> : editingCsqtt ? <div className="space-y-2">
+        {editingWdtt ? <WdttPlusSettings onBack={() => setEditingWdtt(false)} onRefresh={() => void refreshWdttStatus()} /> : editingNfqws ? <Nfqws2Settings onBack={() => setEditingNfqws(false)} onRefresh={() => void refreshNfqwsStatus()} /> : editingCsqtt ? <div className="space-y-2">
           <p className="text-xs text-green-400">Клиент CSQTT {csqttClientVersion}</p>
           <p className="text-muted-foreground text-xs">Ссылка разбирается на адрес и пароль; исходная ссылка не хранится. Сохранённые секреты скрыты. Пустые поля пароля и токена оставляют прежние значения. Изменения вступят в силу после «Применить».</p>
-          <p className="text-muted-foreground text-xs">Ручной использует сохранённые ссылки или хеши VK. Авто API создаёт звонки через calls.start и завершает их при остановке. Авто ВК использует сохранённый токен; вход в аккаунт VK через эту панель не выполняется.</p>
+          <p className="text-muted-foreground text-xs">Ручной использует сохранённые ссылки или хеши VK. Авто API создаёт звонки через calls.start и завершает их при остановке. Для токена откройте вход VK: пароль вводится только на сайте VK.</p>
           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
             <label className="min-w-0 text-sm font-medium">Ссылка CSQTT<Input type="password" autoComplete="off" value={csqttLink} onChange={(event) => setCsqttLink(event.target.value)} placeholder="csqtt://connect?..." /></label>
             <Button size="sm" variant="outline" disabled={!csqttLink.trim()} onClick={parseCsqttLink}>Разобрать</Button>
@@ -394,7 +365,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
           <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
             <label className="min-w-0 text-sm font-medium">Сервер:порт<Input value={csqttPeer} onChange={(event) => setCsqttPeer(event.target.value)} placeholder="server.example:46000" /></label>
             <label className="min-w-0 text-sm font-medium">Пароль сервера <span className={csqttHasPassword ? 'text-green-400' : 'text-amber-400'}>{csqttHasPassword ? '· сохранён' : '· не сохранён'}</span><Input type="password" autoComplete="new-password" value={csqttPassword} onChange={(event) => setCsqttPassword(event.target.value)} placeholder={csqttHasPassword ? 'Новый пароль (пусто = без изменений)' : 'Введите пароль'} /></label>
-            <label className="min-w-0 text-sm font-medium">VK OAuth access_token <span className={csqttHasVkToken ? 'text-green-400' : 'text-amber-400'}>{csqttHasVkToken ? '· сохранён' : '· не сохранён'}</span><Input type="password" autoComplete="off" value={csqttVkToken} onChange={(event) => setCsqttVkToken(event.target.value)} placeholder={csqttHasVkToken ? 'Новый токен (пусто = без изменений)' : 'Введите токен'} /></label>
+            <div className="min-w-0 space-y-2"><label className="text-sm font-medium">VK OAuth access_token <span className={csqttHasVkToken ? 'text-green-400' : 'text-amber-400'}>{csqttHasVkToken ? '· сохранён' : '· не сохранён'}</span><Input type="password" autoComplete="off" value={csqttVkToken} onChange={(event) => setCsqttVkToken(event.target.value)} placeholder={csqttHasVkToken ? 'Новый токен (пусто = без изменений)' : 'Введите токен'} /></label><Button size="sm" variant="outline" onClick={() => { setVkRedirect(''); setVkAuthError(''); setVkAuthOpen(true) }}>Получить токен через VK</Button></div>
             <div className="grid grid-cols-2 gap-2">
               {csqttClientVersion === '2.1.9' && csqttHashMode === 'auto_js'
                 ? <label className="min-w-0 text-sm font-medium">Звонки<Input className="mt-1" value="1 · Авто ВК" readOnly /></label>
@@ -488,7 +459,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
             </div>
             <div className="ml-auto flex max-w-full flex-wrap justify-end gap-2">
               <Button variant="outline" size="sm" disabled={!csqttStatus?.installed} onClick={() => void openCsqttSettings()}>Настроить</Button>
-              <Button variant="outline" size="sm" disabled={!csqttStatus?.installed} onClick={() => { setSpeedtestResult(null); setSpeedtestError(''); setShowCsqttSpeedtest(true) }}>Замер скорости</Button>
+
               {csqttStatus?.installed && (csqttStatus.running ? <>
                 <Button variant="outline" size="sm" disabled={controlPending} onClick={() => void controlCsqtt('restart')}>Перезапустить</Button>
                 <Button variant="outline" size="sm" disabled={controlPending} onClick={() => void controlCsqtt('stop')}>Остановить</Button>
@@ -541,6 +512,27 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
           </div>
           {nfqwsError && <p role="alert" className="text-sm text-red-500">{nfqwsError}</p>}
         </div>}
+      </DialogContent>
+    </Dialog>
+    <Dialog open={vkAuthOpen} onOpenChange={open => { setVkAuthOpen(open); if (!open) { setVkRedirect(''); setVkAuthError('') } }}>
+      <DialogContent className="max-w-[min(94vw,580px)]!">
+        <DialogHeader><DialogTitle>Получить токен VK</DialogTitle></DialogHeader>
+        <ol className="text-muted-foreground list-decimal space-y-2 pl-5 text-sm">
+          <li>Откройте вход VK и подтвердите разрешения приложения.</li>
+          <li>Когда появится пустая страница blank.html, скопируйте её полный адрес из адресной строки.</li>
+          <li>Вставьте ссылку ниже. Панель извлечёт access_token; сохраните настройки CSQTT.</li>
+        </ol>
+        <a href={VK_AUTH_URL} target="_blank" rel="noopener noreferrer" className="bg-primary text-primary-foreground inline-flex h-9 items-center justify-center rounded-md px-4 text-sm font-medium">Открыть вход VK</a>
+        <Input type="password" autoComplete="off" value={vkRedirect} onChange={event => { setVkRedirect(event.target.value); setVkAuthError('') }} placeholder="https://oauth.vk.ru/blank.html#access_token=…" aria-label="Итоговая ссылка VK" />
+        <p className="text-muted-foreground text-xs">Пароль вводится на сайте VK. Итоговая ссылка содержит секретный токен: не отправляйте её другим людям. Получение токена не запускает CSQTT.</p>
+        {vkAuthError && <p role="alert" className="text-sm text-red-400">{vkAuthError}</p>}
+        <Button disabled={!vkRedirect.trim()} onClick={() => {
+          try {
+            const result = tokenFromVkRedirect(vkRedirect)
+            setCsqttVkToken(result.token); setVkRedirect(''); setVkAuthError(''); setVkAuthOpen(false)
+            showToast(result.expiresIn ? 'Токен получен с ограниченным сроком действия. Сохраните настройки CSQTT.' : 'Токен получен. Сохраните настройки CSQTT.')
+          } catch (error) { setVkAuthError(error instanceof Error ? error.message : 'Не удалось извлечь токен') }
+        }}>Использовать токен</Button>
       </DialogContent>
     </Dialog>
     <AlertDialog open={Boolean(addonConfirmation)} onOpenChange={open => { if (!open && !controlPending) setAddonConfirmation(null) }}>

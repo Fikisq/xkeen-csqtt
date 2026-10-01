@@ -9,6 +9,7 @@ import { parse as parseJsonc } from 'jsonc-parser'
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
 import type { Config } from '@/lib/types'
 import { RouteIcon, routeLabel } from '@/components/configuration/RouteIcon'
+import { DeviceTab } from '@/components/configuration/DeviceTab'
 import { baseRuleTag, deviceRuleTag, readDeviceIps, routeTags, usesSelector, validDeviceIp, type RouteTag, type RoutingRule } from '@/lib/xrayDeviceRouting'
 
 interface Outbound {
@@ -273,8 +274,7 @@ export function XraySelectorsPanel({ config, onSelect, onDeviceSelect, onAddRout
     <div className="absolute inset-0 overflow-y-auto p-4">
       <div className="bg-card z-20 mb-4 flex shrink-0 flex-wrap items-center gap-2 border-b pb-3">
         <Button size="sm" variant={!activeDevice ? 'default' : 'outline'} onClick={() => setDeviceIp('')}>Общая маршрутизация</Button>
-        {parsed.devices.map((ip) => <Button key={ip} size="sm" variant={activeDevice === ip ? 'default' : 'outline'} onClick={() => setDeviceIp(ip)}>{ip}</Button>)}
-        {activeDevice && <Button size="sm" variant="outline" disabled={pending !== null} onClick={async () => { setPending('remove'); try { await onDeviceSelect(config.file, activeDevice, null); setDeviceIp('') } finally { setPending(null) } }}>Удалить {activeDevice}</Button>}
+        {parsed.devices.map((ip) => <DeviceTab key={ip} ip={ip} selected={activeDevice === ip} disabled={pending !== null} onSelect={() => setDeviceIp(ip)} onRemove={async () => { setPending('remove'); try { await onDeviceSelect(config.file, ip, null); if (activeDevice === ip) setDeviceIp('') } finally { setPending(null) } }} />)}
         <Button size="icon-sm" variant="outline" className="ml-auto" aria-label={Object.values(collapsedRoutes).some((value) => value) ? 'Развернуть все маршруты' : 'Свернуть все маршруты'} onClick={() => {
           const collapse = !Object.values(collapsedRoutes).some((value) => value)
           setCollapsedRoutes(Object.fromEntries(['VPN', ...routeTags(parsed.rules)].map((route) => [route, collapse])))

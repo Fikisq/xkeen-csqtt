@@ -12,7 +12,6 @@ use std::time::Duration;
 
 const CONFIG: &str = "/opt/etc/csqtt/csqtt.conf";
 const VK_TOKEN: &str = "/opt/etc/csqtt/vk_token";
-const SPEEDTEST: &str = "/opt/bin/csqtt-speedtest";
 static CSQTT_GATE: OnceLock<Semaphore> = OnceLock::new();
 
 fn vk_api_notice(running: bool) -> Option<&'static str> {
@@ -40,32 +39,6 @@ async fn write_private(path: &str, value: &[u8]) -> std::io::Result<()> {
     }.await;
     if result.is_err() { let _ = tokio::fs::remove_file(&temp).await; }
     result
-}
-
-pub async fn speedtest() -> Json<Value> {
-    static TEST_GATE: OnceLock<Semaphore> = OnceLock::new();
-    let gate = TEST_GATE.get_or_init(|| Semaphore::new(1));
-    let Ok(_permit) = gate.try_acquire() else {
-        return Json(json!({"success": false, "error": "Замер CSQTT уже выполняется"}));
-    };
-    if !Path::new(SPEEDTEST).is_file() || !Path::new("/sys/class/net/csqtt0").exists() {
-        return Json(json!({"success": false, "error": "Запустите CSQTT перед замером скорости"}));
-    }
-    let result = tokio::time::timeout(Duration::from_secs(120),
-        tokio::process::Command::new(SPEEDTEST).kill_on_drop(true).output()).await;
-    match result {
-        Ok(Ok(output)) if output.status.success() => {
-            match serde_json::from_slice::<Value>(&output.stdout) {
-                Ok(data) if data.get("downloadMbps").and_then(Value::as_f64).is_some()
-                    && data.get("uploadMbps").and_then(Value::as_f64).is_some() =>
-                    Json(json!({"success": true, "result": data})),
-                _ => Json(json!({"success": false, "error": "Замер вернул неверный формат данных"})),
-            }
-        }
-        Ok(Ok(_)) => Json(json!({"success": false, "error": "Замер не завершился: проверьте состояние туннеля CSQTT"})),
-        Ok(Err(_)) => Json(json!({"success": false, "error": "Не удалось запустить замер CSQTT"})),
-        Err(_) => Json(json!({"success": false, "error": "Превышено время замера CSQTT"})),
-    }
 }
 
 fn value(content: &str, key: &str) -> Option<String> {

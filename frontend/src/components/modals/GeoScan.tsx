@@ -8,7 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { IconSearch, IconServer, IconWorld, IconX } from '@tabler/icons-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAppContext, useModalContext } from '../../lib/store'
 import { cn, copyText } from '../../lib/utils'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group'
@@ -32,6 +32,8 @@ export function GeoScanModal() {
   const [fileStatuses, setFileStatuses] = useState<Record<string, FileStatus>>({})
   const [scanning, setScanning] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [uploading, setUploading] = useState(false)
+  const uploadInput = useRef<HTMLInputElement>(null)
 
   const close = () => dispatch({ type: 'SHOW_MODAL', modal: 'showGeoScanModal', show: false })
 
@@ -50,8 +52,8 @@ export function GeoScanModal() {
           ip: data.ip_files || [],
         }
         setGeoFiles(files)
-        setSelectedFiles(files.domain)
-        initStatuses(files.domain)
+        setSelectedFiles(files[geoType])
+        initStatuses(files[geoType])
       }
     } catch {
       /* ignore */
@@ -69,6 +71,22 @@ export function GeoScanModal() {
     setInput('')
     setSelectedFiles(geoFiles[type])
     initStatuses(geoFiles[type])
+  }
+
+  async function upload(file: File) {
+    if (!file.name.endsWith('.dat') || file.size > 32 * 1024 * 1024 || file.size === 0) {
+      showToast('Нужна база Xray .dat размером до 32 МБ', 'error'); return
+    }
+    setUploading(true)
+    try {
+      const response = await fetch(`/api/geo/upload?file=${encodeURIComponent(file.name)}&kind=${geoType}`, {method: 'POST', headers: {'Content-Type': 'application/octet-stream'}, body: file})
+      if (response.status === 413) throw new Error('База превышает ограничение 32 МБ')
+      const result = await response.json()
+      if (!response.ok || !result.success) throw new Error(result.error || 'Не удалось загрузить базу')
+      await loadGeoFiles()
+      showToast('База добавлена. Для маршрутизации выберите её категорию в правиле.')
+    } catch (error) { showToast(error instanceof Error ? error.message : 'Не удалось загрузить базу', 'error') }
+    finally { setUploading(false); if (uploadInput.current) uploadInput.current.value = '' }
   }
 
   function toggleFile(filename: string) {
@@ -132,19 +150,21 @@ export function GeoScanModal() {
             <IconSearch size={24} className="text-chart-2" />
             Скан геофайлов
           </DialogTitle>
-          <DialogDescription>Проверка наличия домена или IP-адреса в геофайлах</DialogDescription>
+          <DialogDescription>Найдите категории, в которые входит домен или IP. Скан не изменяет правила маршрутизации.</DialogDescription>
         </DialogHeader>
 
         <Tabs value={geoType} onValueChange={(value) => switchType(value as GeoType)} className="shrink-0">
           <TabsList className="border-border h-full! w-full! overflow-hidden rounded-lg border bg-transparent p-0">
             <TabsTrigger
               value="domain"
+              disabled={uploading || scanning}
               className="bg-input-background! data-active:bg-primary! hover:bg-muted! data-active:hover:bg-primary! dark:data-active:text-foreground! h-full flex-1 gap-1.5 rounded-none border-none! py-2 data-active:text-white!"
             >
               <IconWorld size={16} /> GeoSite
             </TabsTrigger>
             <TabsTrigger
               value="ip"
+              disabled={uploading || scanning}
               className="bg-input-background! data-active:bg-primary! hover:bg-muted! data-active:hover:bg-primary! dark:data-active:text-foreground! h-full flex-1 gap-1.5 rounded-none border-none! py-2 data-active:text-white!"
             >
               <IconServer size={16} /> GeoIP
@@ -152,6 +172,11 @@ export function GeoScanModal() {
           </TabsList>
         </Tabs>
 
+        <div className="space-y-1">
+          <input ref={uploadInput} type="file" accept=".dat" className="hidden" aria-label="Загрузить геобазу" onChange={event => { const file = event.target.files?.[0]; if (file) void upload(file) }} />
+          <Button size="sm" variant="outline" disabled={uploading || scanning || loading} onClick={() => uploadInput.current?.click()}>{uploading ? 'Загрузка…' : `Добавить базу ${geoType === 'ip' ? 'GeoIP' : 'GeoSite'}`}</Button>
+          <p className="text-muted-foreground text-xs">Формат Xray .dat, до 32 МБ. Загруженные базы появятся в списке; правила добавляются отдельно.</p>
+        </div>
         {/* Files header */}
         <div className="-my-2 flex shrink-0 items-center justify-between">
           <div className="flex items-center gap-2 pl-1">
@@ -267,7 +292,7 @@ export function GeoScanModal() {
         </InputGroup>
 
         <DialogFooter className="shrink-0">
-          <Button onClick={scan} disabled={scanning || !input.trim() || selectedFiles.length === 0} className="h-9 w-full">
+          <Button onClick={scan} disabled={uploading || scanning || !input.trim() || selectedFiles.length === 0} className="h-9 w-full">
             {scanning ? 'Сканирование...' : 'Сканировать'}
           </Button>
         </DialogFooter>

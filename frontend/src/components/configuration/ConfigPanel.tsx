@@ -643,13 +643,13 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
       const current = parseJsonc(config.savedContent)
       const liveRouting = current?.api?.listen === '127.0.0.1:18085' && current.api.services?.includes('RoutingService')
       if (liveRouting) {
-        const applied = await apiCall<{ success: boolean; error?: string }>('POST', 'xray/routes', {
+        const applied = await apiCall<{ success: boolean; error?: string; warning?: string }>('POST', 'xray/routes', {
           file, previous_content: config.savedContent, content,
         })
         if (!applied.success) throw new Error(applied.error || 'Xray не принял правила')
         setRoutingDraft(null)
         await onRefreshConfigs()
-        showToast(successMessage)
+        showToast(applied.warning || successMessage)
         return true
       }
       dispatch({ type: 'SET_SERVICE_STATUS', status: 'pending', pendingText: 'Переключение Xray...' })
@@ -817,7 +817,7 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
       }
       const profiles = readMihomoDevices(content)
       const ips = profiles.filter(p => direct(p.choices.VPN) && routes.every(route => direct(p.choices[route] === defaults[route] ? defaults[route] : p.choices[route]))).map(p => p.ip)
-      const bypass = await apiCall<{success: boolean; error?: string}>('POST', 'mihomo/device-direct', {ips})
+      const bypass = await apiCall<{success: boolean; error?: string; warning?: string}>('POST', 'mihomo/device-direct', {ips})
       if (!bypass.success) throw new Error(bypass.error || 'Не удалось применить обход устройств')
       let name: string | undefined = proxies.VPN ? 'VPN' : 'Селектор'
       const seen = new Set<string>()
@@ -826,6 +826,7 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
       const global = await apiCall<{success: boolean; error?: string}>('POST', 'mihomo/global-direct', {enabled: !!name && direct(name) && !selective && routes.every(route => direct(defaults[route]))})
       if (!global.success) throw new Error(global.error || 'Не удалось применить общий режим')
       await fetchClashProxies(activeClashApiPort ?? '', clashApiSecret, true, activeClashApiUnix)
+      return bypass.warning
     }
     try {
       const fresh = await apiCall<{configs: Array<{file: string; content: string}>}>('GET', 'configs?core=mihomo')
@@ -833,10 +834,10 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
       const put = await apiCall<{success: boolean; error?: string}>('PUT', 'configs?core=mihomo&validate=mihomo', {file: mihomoConfig.file, content: routingDraft.content})
       if (!put.success) throw new Error(put.error || 'Проверка Mihomo не пройдена')
       saved = true
-      await applyRuntime(routingDraft.content, readSelections(routingDraft.content))
+      const warning = await applyRuntime(routingDraft.content, readSelections(routingDraft.content))
       await onRefreshConfigs()
       setRoutingDraft(null)
-      showToast('Маршрутизация Mihomo сохранена и применена')
+      showToast(warning || 'Маршрутизация Mihomo сохранена и применена')
     } catch (error) {
       if (saved) {
         const rollback = await apiCall<{success: boolean}>('PUT', 'configs?core=mihomo&validate=mihomo', {file: mihomoConfig.file, content: mihomoConfig.savedContent}).catch(() => null)
