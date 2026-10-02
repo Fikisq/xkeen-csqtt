@@ -43,7 +43,7 @@ import { fetchClashProxies, useProxiesStore, syncClashApiPort, useAppContext, us
 import type { Config } from '../../lib/types'
 import { cn } from '../../lib/utils'
 import { addCustomRoute, addCustomIpRoute, normalizeDevicePriority, baseRuleTag, mergeRouteDomains, removeCustomRoute, renameCustomRoute, replaceRouteResources, reorderXrayRules, updateDeviceRules, updateGlobalRules, type RouteTag, type RoutingRule } from '../../lib/xrayDeviceRouting'
-import { addMihomoCustomRoute, defaultMihomoChoices, readMihomoFullBypass, withMihomoFullBypass, isMihomoFullRoute, mihomoRouteTags, readMihomoDevices, removeMihomoCustomRoute, renameMihomoCustomRoute, reorderMihomoRoutes, updateMihomoDevice } from '../../lib/mihomoDeviceRouting'
+import { addMihomoCustomRoute, defaultMihomoChoices, readMihomoFullBypass, withMihomoFullBypass, isMihomoFullRoute, mihomoRouteTags, readMihomoDevices, removeMihomoRoute as removeMihomoRouteDefinition, editMihomoRouteResources, renameMihomoCustomRoute, reorderMihomoRoutes, updateMihomoDevice } from '../../lib/mihomoDeviceRouting'
 import { enableXrayRoutingCards } from '../../lib/xraySubscription'
 import { linkProviderToVpn } from '../../lib/mihomoSubscription'
 import { applyEdits, modify, parse as parseJsonc } from 'jsonc-parser'
@@ -854,7 +854,11 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
   }
 
   async function removeMihomoRoute(tag: string): Promise<boolean> {
-    return editMihomoCustomRoute((content) => removeMihomoCustomRoute(content, tag), 'Маршрут удалён')
+    return editMihomoCustomRoute((content) => removeMihomoRouteDefinition(content, tag), 'Маршрут удалён')
+  }
+
+  async function editMihomoResources(tag: RouteTag, values: string[]): Promise<boolean> {
+    return editMihomoCustomRoute(content => editMihomoRouteResources(content, tag, values), 'Ресурсы маршрута обновлены')
   }
 
   async function renameMihomoRoute(tag: string, name: string): Promise<boolean> {
@@ -1086,6 +1090,7 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
                         onDeviceSelect={selectMihomoDevice}
                         onAddRoute={addMihomoRoute}
                         onRemoveRoute={removeMihomoRoute}
+                        onEditResources={editMihomoResources}
                         onRenameRoute={renameMihomoRoute}
                         onReorderRoute={reorderMihomoRoute}
                       />

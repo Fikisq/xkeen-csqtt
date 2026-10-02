@@ -22,7 +22,7 @@ export function readMihomoCustomRoutes(content: string): MihomoCustomRoute[] {
 }
 
 export function mihomoRouteTags(content: string): RouteTag[] {
-  return [...ROUTE_TAGS, ...readMihomoCustomRoutes(content).map((route) => route.tag)]
+  return [...new Set([...ROUTE_TAGS, ...readMihomoCustomRoutes(content).map((route) => route.tag)])]
 }
 
 interface OrderedRouteBlock { tag: RouteTag; start: number; end: number; text: string }
@@ -39,39 +39,39 @@ function orderedRouteBlocks(content: string): OrderedRouteBlock[] {
   const lines = [...body.matchAll(/^.*(?:\r?\n|$)/gm)].filter((match) => match[0].length > 0)
   const blocks: OrderedRouteBlock[] = []
   for (const line of lines) {
-    const rule = /^  - (?:RULE-SET|DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD|GEOSITE|IP-CIDR|IP-CIDR6),[^,\r\n]+,([^,\r\n]+)(?:,[^\r\n]+)?\r?\n?$/.exec(line[0])
+    const rule = /^  - (?:RULE-SET|DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD|GEOSITE|GEOIP|IP-CIDR|IP-CIDR6),[^,\r\n]+,([^,\r\n]+)(?:,[^\r\n]+)?\r?\n?$/.exec(line[0])
     const tag = rule && targets.get(rule[1].trim())
     if (!tag) continue
     const previous = blocks[blocks.length - 1]
-    const start = line.index!
-    const end = start + line[0].length
+    const before = body.slice(0, line.index!)
+    const metadata = /  # xkeen-custom-route \S+\r?\n$/.exec(before)
+    const start = metadata && !blocks.some(block => block.tag === tag) ? metadata.index : line.index!
+    const end = line.index! + line[0].length
     if (previous?.tag === tag && /^\s*$/.test(body.slice(previous.end, start))) {
       previous.end = end
       previous.text = body.slice(previous.start, end)
     } else {
-      if (blocks.some((block) => block.tag === tag)) throw new Error(`Правила ${routeLabelForError(tag)} разделены другими правилами; сначала исправьте YAML вручную`)
-      blocks.push({ tag, start, end, text: line[0] })
+      blocks.push({ tag, start, end, text: body.slice(start, end) })
     }
   }
   return blocks
 }
 
-function routeLabelForError(tag: RouteTag): string { return tag.startsWith('custom:') ? customRouteName(tag) : tag }
-
 export function orderedMihomoRouteTags(content: string): RouteTag[] {
-  try { return orderedRouteBlocks(content).map((block) => block.tag) } catch { return [] }
+  try { return [...new Set(orderedRouteBlocks(content).map((block) => block.tag))] } catch { return [] }
 }
 
 export function reorderMihomoRoutes(content: string, source: RouteTag, target: RouteTag): string {
   const section = rulesSection(content)
   const blocks = orderedRouteBlocks(content)
-  const from = blocks.findIndex((block) => block.tag === source)
-  const to = blocks.findIndex((block) => block.tag === target)
+  const tags = [...new Set(blocks.map(block => block.tag))]
+  const from = tags.indexOf(source)
+  const to = tags.indexOf(target)
   if (from < 0 || to < 0) throw new Error('Маршрут не найден среди отдельных правил Mihomo')
   if (from === to) return content
-  const reordered = blocks.map((block) => block.text)
-  const [moved] = reordered.splice(from, 1)
-  reordered.splice(to, 0, moved)
+  const [moved] = tags.splice(from, 1)
+  tags.splice(to, 0, moved)
+  const reordered = [...blocks].sort((a, b) => tags.indexOf(a.tag) - tags.indexOf(b.tag)).map(block => block.text)
   let cursor = 0
   let body = ''
   blocks.forEach((block, index) => {
@@ -79,15 +79,9 @@ export function reorderMihomoRoutes(content: string, source: RouteTag, target: R
     cursor = block.end
   })
   body += section.body.slice(cursor)
-  return content.slice(0, section.start) + body + content.slice(section.end)
-}
-const DEFAULT_MATCHERS: Partial<Record<RouteTag, string[]>> = {
-  Youtube: ['DOMAIN-SUFFIX,youtube.com', 'DOMAIN-SUFFIX,googlevideo.com'],
-  Discord: ['DOMAIN-SUFFIX,discord.com', 'DOMAIN-SUFFIX,discord.gg'],
-  Games: ['DOMAIN-SUFFIX,steampowered.com', 'DOMAIN-SUFFIX,epicgames.com'],
-  AI: ['DOMAIN-SUFFIX,gemini.google.com', 'DOMAIN-SUFFIX,openai.com'],
-  Github: ['DOMAIN-SUFFIX,github.com'],
-  RU: ['GEOSITE,category-ru'],
+  const updated = content.slice(0, section.start) + body + content.slice(section.end)
+  const profiles = readMihomoDevices(content)
+  return profiles.length ? updateMihomoDevice(updated, profiles[0].ip, 'VPN') : updated
 }
 const GROUP_HINTS: Record<RouteTag, RegExp> = {
   VPN: /vpn/i, Youtube: /youtube/i, Discord: /discord/i,
@@ -211,7 +205,7 @@ export function isMihomoFullRoute(target: string): boolean {
 export function defaultMihomoChoices(content: string): DeviceChoices {
   const names = groupNames(content)
   const selector = generalSelectorName(names) ?? 'DIRECT'
-  return Object.fromEntries(mihomoRouteTags(content).map((route) => [route, route === 'VPN' ? selector : route.startsWith('custom:') ? customRouteName(route) : names.find((name) => GROUP_HINTS[route]?.test(name)) ?? selector])) as unknown as DeviceChoices
+  return Object.fromEntries(mihomoRouteTags(content).map((route) => [route, route === 'VPN' ? selector : route.startsWith('custom:') ? customRouteName(route) : names.find((name) => !readMihomoCustomRoutes(content).some(custom => custom.name === name) && GROUP_HINTS[route]?.test(name)) ?? selector])) as unknown as DeviceChoices
 }
 
 function matchersForRoute(body: string, route: RouteTag, choices: DeviceChoices): string[] {
@@ -219,10 +213,10 @@ function matchersForRoute(body: string, route: RouteTag, choices: DeviceChoices)
   const group = choices[route]
   const result: string[] = []
   for (const line of body.split(/\r?\n/)) {
-    const match = /^\s*-\s*(RULE-SET|DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD|GEOSITE|IP-CIDR|IP-CIDR6),([^,]+),([^,#]+)(?:,.*)?$/.exec(line)
+    const match = /^\s*-\s*(RULE-SET|DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD|GEOSITE|GEOIP|IP-CIDR|IP-CIDR6),([^,]+),([^,#]+)(?:,.*)?$/.exec(line)
     if (match && match[3].trim() === group) result.push(`${match[1]},${match[2]}`)
   }
-  return result.length ? result : DEFAULT_MATCHERS[route] ?? []
+  return choices[route] === choices.VPN ? [] : [...new Set(result)]
 }
 
 export function updateMihomoDevice(content: string, ip: string, route: RouteTag | null, target?: string): string {
@@ -295,7 +289,8 @@ export function addMihomoCustomRoute(content: string, name: string, domains: str
   if (groupNames(content).includes(title)) throw new Error('Группа с таким названием уже есть')
   const validDomain = (domain: string) => /^(?:(?:domain|full):)?[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i.test(domain)
     || /^geosite:[a-z0-9_-]+$/i.test(domain)
-  if (domains.length < 1 || domains.length > 50 || domains.some((domain) => !validDomain(domain))) throw new Error('Введите от 1 до 50 доменов или категорий GeoSite')
+    || /^(?:RULE-SET|DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD|GEOSITE|GEOIP|IP-CIDR|IP-CIDR6),[^,\r\n]+$/.test(domain)
+  if (domains.length < 1 || domains.length > 50 || domains.some((domain) => !validDomain(domain))) throw new Error('Выберите от 1 до 50 ресурсов маршрута')
   const tag = `custom:${encodeURIComponent(title)}`
   if (readMihomoCustomRoutes(content).some((route) => route.tag === tag)) throw new Error('Маршрут уже добавлен')
   const selector = defaultMihomoChoices(content).VPN
@@ -310,8 +305,9 @@ export function addMihomoCustomRoute(content: string, name: string, domains: str
   if (updated === content) throw new Error('В config.yaml нет раздела proxy-groups')
   const section = rulesSection(updated)
   const base = section.body
-  const metadata: MihomoCustomRoute = { tag, name: title, domains: [...new Set(domains.map((domain) => domain.toLowerCase()))] }
+  const metadata: MihomoCustomRoute = { tag, name: title, domains: [...new Set(domains.map((domain) => /^[A-Z-]+,/.test(domain) ? domain : domain.toLowerCase()))] }
   const ruleBlock = `  # ${CUSTOM} ${encodeURIComponent(JSON.stringify(metadata))}\n` + metadata.domains.map((domain) => {
+    if (/^[A-Z-]+,/.test(domain)) return `  - ${domain},${title}${/^(?:GEOIP|IP-CIDR|IP-CIDR6),/.test(domain) ? ',no-resolve' : ''}\n`
     const [kind, value] = domain.startsWith('geosite:') || domain.startsWith('domain:') || domain.startsWith('full:')
       ? domain.split(/:(.*)/s, 2) : ['domain', domain]
     const ruleKind = kind === 'geosite' ? 'GEOSITE' : kind === 'full' ? 'DOMAIN' : 'DOMAIN-SUFFIX'
@@ -348,7 +344,7 @@ export function removeMihomoCustomRoute(content: string, tag: string): string {
   const escaped = route.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const cleaned = rules.body.replace(/^  # xkeen-custom-route \S+\r?\n/gm, (line) => {
     try { return (JSON.parse(decodeURIComponent(line.trim().split(' ')[2])) as MihomoCustomRoute).tag === tag ? '' : line } catch { return line }
-  }).replace(new RegExp(`^  - (?:DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD|GEOSITE),[^,\\r\\n]+,${escaped}\\r?\\n`, 'gm'), '')
+  }).replace(new RegExp(`^  - (?:RULE-SET|DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD|GEOSITE|GEOIP|IP-CIDR|IP-CIDR6),[^,\\r\\n]+,${escaped}(?:,[^\\r\\n]+)?\\r?\\n`, 'gm'), '')
   updated = updated.slice(0, rules.start) + cleaned + updated.slice(rules.end)
   const profiles = readMihomoDevices(content)
   return profiles.length ? updateMihomoDevice(updated, profiles[0].ip, 'VPN') : updated
@@ -370,7 +366,7 @@ export function renameMihomoCustomRoute(content: string, tag: string, name: stri
   updated = updated.replace(metadata, `  # ${CUSTOM} ${encodeURIComponent(JSON.stringify({ ...route, tag: nextTag, name: title }))}`)
   const section = rulesSection(updated)
   const lines = section.body.split('\n').map((line) => {
-    const match = /^(  - (?:DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD|GEOSITE),[^,\r\n]+,)([^,\r\n]+)(\r?)$/.exec(line)
+    const match = /^(  - (?:RULE-SET|DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD|GEOSITE|GEOIP|IP-CIDR|IP-CIDR6),[^,\r\n]+,)([^,\r\n]+)((?:,[^\r\n]+)?\r?)$/.exec(line)
     return match && match[2] === route.name ? `${match[1]}${title}${match[3]}` : line
   })
   updated = updated.slice(0, section.start) + lines.join('\n') + updated.slice(section.end)
@@ -387,4 +383,36 @@ export function renameMihomoCustomRoute(content: string, tag: string, name: stri
   })
   const profiles = readMihomoDevices(updated)
   return profiles.length ? updateMihomoDevice(updated, profiles[0].ip, 'VPN') : updated
+}
+
+// Resources are native Mihomo matchers, preserving provider references and IP flags.
+export function readMihomoRouteResources(content: string, tag: RouteTag): string[] {
+  const defaults = defaultMihomoChoices(content)
+  return matchersForRoute(removeManaged(rulesSection(content).body), tag, defaults)
+}
+
+export function editMihomoRouteResources(content: string, tag: RouteTag, resources: string[]): string {
+  if (tag === 'VPN') throw new Error('У маршрута по умолчанию нет отдельных ресурсов')
+  const target = defaultMihomoChoices(content)[tag]
+  if (!target || target === defaultMihomoChoices(content).VPN) throw new Error('Отдельная группа маршрута не найдена')
+  const values = [...new Set(resources.map(value => value.trim()).filter(Boolean))]
+  if (values.some(value => !/^(?:RULE-SET|DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD|GEOSITE|GEOIP|IP-CIDR|IP-CIDR6),[^,\r\n]+$/.test(value))) throw new Error('Неверный ресурс Mihomo')
+  const section = rulesSection(content)
+  let inserted = false
+  const body = section.body.split(/\r?\n/).flatMap(line => {
+    const match = /^  - (?:RULE-SET|DOMAIN|DOMAIN-SUFFIX|DOMAIN-KEYWORD|GEOSITE|GEOIP|IP-CIDR|IP-CIDR6),[^,]+,([^,]+)(?:,.*)?$/.exec(line)
+    if (!match || match[1] !== target) return [line]
+    if (inserted) return []
+    inserted = true
+    return values.map(value => `  - ${value},${target}${/^(?:GEOIP|IP-CIDR|IP-CIDR6),/.test(value) ? ',no-resolve' : ''}`)
+  }).join('\n')
+  if (!inserted) throw new Error('Правила маршрута не найдены')
+  let updated = content.slice(0, section.start) + body + content.slice(section.end)
+  const profiles = readMihomoDevices(content)
+  return profiles.length ? updateMihomoDevice(updated, profiles[0].ip, 'VPN') : updated
+}
+
+export function removeMihomoRoute(content: string, tag: RouteTag): string {
+  if (tag.startsWith('custom:')) return removeMihomoCustomRoute(content, tag)
+  return editMihomoRouteResources(content, tag, [])
 }

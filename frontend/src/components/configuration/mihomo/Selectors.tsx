@@ -26,7 +26,7 @@ import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
 import { apiCall, clashFetch } from '../../../lib/api'
 import { fetchClashProxies, useProxiesStore, useSettings, useAppContext } from '../../../lib/store'
-import { defaultMihomoChoices, readMihomoFullBypass, isMihomoFullRoute, mihomoRouteTags, orderedMihomoRouteTags, readMihomoCustomRoutes, readMihomoDevices } from '../../../lib/mihomoDeviceRouting'
+import { defaultMihomoChoices, readMihomoFullBypass, isMihomoFullRoute, orderedMihomoRouteTags, readMihomoDevices, readMihomoRouteResources } from '../../../lib/mihomoDeviceRouting'
 import { findRoutePresets } from '../../../lib/routePresets'
 import { validDeviceIp, type RouteTag } from '../../../lib/xrayDeviceRouting'
 import { RouteIcon, routeLabel } from '../RouteIcon'
@@ -66,6 +66,7 @@ interface Props {
   onSelectDraft: (name: string, target: string) => Promise<boolean>
   onDeviceSelect: (ip: string, route: RouteTag | null, target?: string) => Promise<boolean>
   onAddRoute: (name: string, domains: string[]) => Promise<boolean>
+  onEditResources: (tag: RouteTag, values: string[]) => Promise<boolean>
   onRemoveRoute: (tag: string) => Promise<boolean>
   onRenameRoute: (tag: string, name: string) => Promise<boolean>
   onReorderRoute: (source: RouteTag, target: RouteTag) => Promise<boolean>
@@ -654,6 +655,22 @@ const SelectorCombobox = memo(function SelectorCombobox({
   )
 })
 
+const CARD_ORDER_KEY = 'xkeen-mihomo-protocol-card-order'
+const useCardOrder = create<{ order: string[]; move: (source: string, target: string, visible: string[]) => void; reset: () => void }>((set, get) => {
+  let order: string[] = []
+  try { const stored = JSON.parse(localStorage.getItem(CARD_ORDER_KEY) ?? '[]'); if (Array.isArray(stored)) order = stored.filter(value => typeof value === 'string') } catch { /* Default order. */ }
+  return { order, move: (source, target, visible) => {
+    const next = [...new Set([...visible, ...get().order])]
+    const from = next.indexOf(source), to = next.indexOf(target)
+    if (from < 0 || to < 0 || from === to) return
+    next.splice(to, 0, ...next.splice(from, 1))
+    localStorage.setItem(CARD_ORDER_KEY, JSON.stringify(next)); set({ order: next })
+  }, reset: () => { localStorage.removeItem(CARD_ORDER_KEY); set({ order: [] }) } }
+})
+function orderedCards(names: string[], order: string[]): string[] {
+  return order.length ? [...names].sort((a, b) => (order.indexOf(a) < 0 ? Infinity : order.indexOf(a)) - (order.indexOf(b) < 0 ? Infinity : order.indexOf(b))) : names
+}
+
 /* ====================== СТРОКА СЕЛЕКТОРА ====================== */
 const SelectorRow = memo(function SelectorRow({
   selectorName,
@@ -674,6 +691,9 @@ const SelectorRow = memo(function SelectorRow({
   onToggleCollapse: (name: string) => void
   orderControls?: import('react').ReactNode
 }) {
+  const cardOrder = useCardOrder(s => s.order)
+  const moveCard = useCardOrder(s => s.move)
+  const [draggedCard, setDraggedCard] = useState<string | null>(null)
   const selector = useRoutingProxies((s) => s.proxies[selectorName] as ProxyInfo | undefined)
   const isTesting = useSelectorsStore((s) => !!s.testingAll[selectorName])
   const selectedProxy = useRoutingProxies((s) => {
@@ -701,8 +721,8 @@ const SelectorRow = memo(function SelectorRow({
       result = result.filter((name) => !hasNConsecutiveTimeouts(allProxiesMap[name], hideCounter))
     }
     result = sortProxyNames(result, sortOrder, allProxiesMap)
-    return result
-  }, [allProxies, selectorName, hideUnavailable, hideCounter, sortOrder, allProxiesMap])
+    return orderedCards(result, cardOrder)
+  }, [allProxies, selectorName, hideUnavailable, hideCounter, sortOrder, allProxiesMap, cardOrder])
 
   return (
     <div className="border-border bg-input-background rounded-xl border p-4">
@@ -767,6 +787,11 @@ const SelectorRow = memo(function SelectorRow({
           <div className="min-h-0 overflow-hidden">
             <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
               {filteredSortedProxies.map((proxyName) => (
+                <div key={proxyName} draggable title="Перетащить карточку подключения"
+                  onDragStart={event => { event.stopPropagation(); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', proxyName); setDraggedCard(proxyName) }}
+                  onDragEnd={() => setDraggedCard(null)}
+                  onDragOver={event => { if (draggedCard && draggedCard !== proxyName) { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move' } }}
+                  onDrop={event => { if (!draggedCard) return; event.preventDefault(); event.stopPropagation(); moveCard(draggedCard, proxyName, filteredSortedProxies); setDraggedCard(null) }}>
                 <ProxyCard
                   key={proxyName}
                   proxyName={proxyName}
@@ -776,6 +801,7 @@ const SelectorRow = memo(function SelectorRow({
                   onSelect={onSelect}
                   onTestSingle={onTestSingle}
                 />
+                </div>
               ))}
             </div>
           </div>
@@ -806,7 +832,7 @@ const SelectorRow = memo(function SelectorRow({
 })
 
 /* ====================== ОСНОВНОЙ КОМПОНЕНТ ====================== */
-function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCollapsedStateChange, configContent, onDeviceSelect, onAddRoute, onRemoveRoute, onRenameRoute, onReorderRoute, onSelectDraft }: Props) {
+function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCollapsedStateChange, configContent, onDeviceSelect, onAddRoute, onRemoveRoute, onEditResources, onRenameRoute, onReorderRoute, onSelectDraft }: Props) {
   const { showToast } = useAppContext()
   const loading = useRoutingProxies((s) => s.loading)
   const error = useRoutingProxies((s) => s.error)
@@ -823,10 +849,16 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
   const [draggedRoute, setDraggedRoute] = useState<RouteTag | null>(null)
   const [renamingTag, setRenamingTag] = useState('')
   const [renamingName, setRenamingName] = useState('')
+  const [deletingTag, setDeletingTag] = useState<RouteTag | null>(null)
+  const [editingTag, setEditingTag] = useState<RouteTag | null>(null)
+  const [resources, setResources] = useState<string[]>([])
+  const [resourceSearch, setResourceSearch] = useState('')
+  const cardOrder = useCardOrder(s => s.order)
+  const moveCard = useCardOrder(s => s.move)
+  const resetCards = useCardOrder(s => s.reset)
+  const [draggedProtocol, setDraggedProtocol] = useState<string | null>(null)
   
   const devices = useMemo(() => readMihomoDevices(configContent), [configContent])
-  const routeTags = useMemo(() => mihomoRouteTags(configContent), [configContent])
-  const customRoutes = useMemo(() => readMihomoCustomRoutes(configContent), [configContent])
   const defaultChoices = useMemo(() => defaultMihomoChoices(configContent), [configContent])
   const orderedTags = useMemo(() => orderedMihomoRouteTags(configContent), [configContent])
   useEffect(() => { sessionStorage.setItem(DEVICE_IP_KEY, deviceIp) }, [deviceIp])
@@ -904,7 +936,7 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
     useShallow((s) => {
       const allSelectors = Object.values(s.proxies).filter((p: any) => {
         if (!SELECTOR_TYPES.has(p.type) || p.hidden || p.name.startsWith('xkeen-device-node-') || isNoVpn(p.name) || /fallback/i.test(p.name)) return false
-        if (!Object.values(defaultChoices).includes(p.name)) return false
+        if (p.name !== defaultChoices.VPN && !orderedTags.some(tag => defaultChoices[tag] === p.name)) return false
         return mode === 'global' ? p.name === 'GLOBAL' : p.name !== 'GLOBAL'
       }) as ProxyInfo[]
       const globalProxy = s.proxies['GLOBAL'] as ProxyInfo | undefined
@@ -980,6 +1012,29 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
     [applyDelayResults, clashApiPort, clashApiSecret, clashApiUnix, requestProxyDelay, showToast]
   )
 
+  const resourceOptions = useMemo(() => {
+    try {
+      const config = yaml.load(configContent) as any
+      const providers = Object.keys(config?.['rule-providers'] ?? {}).map(name => `RULE-SET,${name}`)
+      const existing = orderedTags.flatMap(tag => readMihomoRouteResources(configContent, tag))
+      return [...new Set([...providers, ...existing])]
+    } catch { return [] }
+  }, [configContent, orderedTags])
+  function routeControls(route: RouteTag) {
+    const index = orderedTags.indexOf(route)
+    return <div className="flex flex-wrap items-center gap-1.5 text-xs">
+      <span className="text-muted-foreground flex w-7 justify-center rounded border px-1 py-0.5 tabular-nums">{route === 'VPN' ? '−1' : index + 1}</span>
+      {route !== 'VPN' && <>
+        <span draggable={!routePending} onDragStart={event => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', route); setDraggedRoute(route) }} onDragEnd={() => setDraggedRoute(null)} className="text-muted-foreground cursor-grab p-1 active:cursor-grabbing" title="Перетащить правило"><IconGripVertical size={18} /></span>
+        <Button size="sm" variant="outline" disabled={routePending || index <= 0} onClick={() => void moveRoute(route, orderedTags[index - 1])}>↑ Выше</Button>
+        <Button size="sm" variant="outline" disabled={routePending || index === orderedTags.length - 1} onClick={() => void moveRoute(route, orderedTags[index + 1])}>↓ Ниже</Button>
+        <Button size="sm" variant="outline" disabled={routePending} onClick={() => { setEditingTag(route); setResources(readMihomoRouteResources(configContent, route)); setResourceSearch('') }}>Ресурсы</Button>
+        {route.startsWith('custom:') && <Button size="sm" variant="outline" disabled={routePending} onClick={() => { setRenamingTag(route); setRenamingName(routeLabel(route)) }}>Переименовать</Button>}
+        <Button size="sm" variant="outline" disabled={routePending} onClick={() => setDeletingTag(route)}>Удалить маршрут</Button>
+      </>}
+    </div>
+  }
+
   const selectProxy = useCallback((name: string, target: string) => {
     void onSelectDraft(name, target)
   }, [onSelectDraft])
@@ -1034,7 +1089,7 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
 
   if (loading) {
     return (
-      <div className="text-muted-foreground absolute inset-4 flex items-center justify-center text-sm">
+      <div className="text-muted-foreground flex min-h-48 items-center justify-center text-sm">
         <Spinner className="mr-2 size-5" /> Загрузка...
       </div>
     )
@@ -1042,7 +1097,7 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
 
   if (error || selectorNames.length === 0) {
     return (
-      <div className="absolute inset-4">
+      <div className="relative m-4 h-64">
         <Empty className="text-muted-foreground border-border absolute inset-0 gap-3 rounded-xl border border-dashed">
           <EmptyHeader>
             <EmptyMedia variant="icon">
@@ -1084,40 +1139,34 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
           <Dialog open={addingRoute} onOpenChange={setAddingRoute}><DialogContent className="max-w-[min(94vw,680px)]! max-h-[85dvh] overflow-y-auto"><DialogHeader><DialogTitle>Новый маршрут</DialogTitle></DialogHeader><div className="flex flex-col gap-4">
 <label className="space-y-2 text-sm font-medium">Название маршрута<Input value={routeName} onChange={(event) => setRouteName(event.target.value)} placeholder="Например, Работа или Видеосервисы" aria-label="Название маршрута" maxLength={40} /></label>
             <Input value={routeSearch} onChange={(event) => setRouteSearch(event.target.value)} placeholder="Найти сервис: Telegram, YouTube, нейронки…" aria-label="Поиск сервиса" />
-            <div className="flex flex-wrap gap-2">{findRoutePresets(routeSearch).map((preset) => <Button key={preset.name} size="sm" variant="outline" onClick={() => { setRouteName(current => current || preset.name); setRouteDomains(preset.domains.join('\n')) }}>{preset.name}</Button>)}</div>
+            <div className="flex flex-wrap gap-2">{findRoutePresets(routeSearch).map((preset) => <Button key={preset.name} size="sm" variant="outline" onClick={() => { setRouteName(current => current || preset.name); setRouteDomains(current => [...new Set([...current.split('\n').filter(Boolean), ...preset.domains])].join('\n')) }}>{preset.name}</Button>)}</div>
 
-            <textarea className="bg-input-background border-border min-h-20 rounded-md border p-2 text-sm" value={routeDomains} onChange={(event) => setRouteDomains(event.target.value)} placeholder="Домены, по одному в строке" aria-label="Домены маршрута" />
-            <Button size="sm" disabled={routePending || !routeName.trim() || !routeDomains.trim()} onClick={async () => { setRoutePending(true); try { const saved = await onAddRoute(routeName, routeDomains.split(/\r?\n|,/).map((domain) => domain.trim()).filter(Boolean)); if (saved) { setRouteName(''); setRouteDomains(''); setRouteSearch(''); setAddingRoute(false) } } finally { setRoutePending(false) } }}>Создать маршрут</Button>
+            <div className="flex flex-wrap gap-2">{routeDomains.split('\n').filter(Boolean).map(value => <button key={value} type="button" className="rounded border border-blue-400 bg-blue-500/20 px-2 py-1 text-xs" onClick={() => setRouteDomains(routeDomains.split('\n').filter(item => item !== value).join('\n'))}>{value} ×</button>)}</div>
+            <div className="max-h-64 overflow-y-auto rounded border p-1">{resourceOptions.filter(value => value.toLowerCase().includes(routeSearch.toLowerCase())).map(value => { const selected = routeDomains.split('\n').includes(value); return <button type="button" key={value} aria-pressed={selected} className={cn('block w-full rounded px-2 py-2 text-left hover:bg-blue-500/10', selected && 'bg-blue-500/20')} onClick={() => setRouteDomains(selected ? routeDomains.split('\n').filter(item => item !== value).join('\n') : [...routeDomains.split('\n').filter(Boolean), value].join('\n'))}>{selected ? '✓ ' : ''}{value}</button> })}</div>
+
+            <Button size="sm" disabled={routePending || !routeName.trim() || !routeDomains.trim()} onClick={async () => { setRoutePending(true); try { const saved = await onAddRoute(routeName, routeDomains.split(/\r?\n/).map((domain) => domain.trim()).filter(Boolean)); if (saved) { setRouteName(''); setRouteDomains(''); setRouteSearch(''); setAddingRoute(false) } } finally { setRoutePending(false) } }}>Создать маршрут</Button>
           </div></DialogContent></Dialog>
-          {customRoutes.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{customRoutes.map((route) => <div key={route.tag} className="border-border flex flex-wrap items-center gap-2 rounded-md border px-2 py-1 text-sm">
-            {renamingTag === route.tag ? <>
-              <Input className="w-48" value={renamingName} maxLength={40} onChange={(event) => setRenamingName(event.target.value)} aria-label="Новое название маршрута" />
-              <Button size="sm" disabled={routePending || !renamingName.trim()} onClick={async () => { setRoutePending(true); try { if (await onRenameRoute(route.tag, renamingName)) { setRenamingTag(''); setRenamingName('') } } finally { setRoutePending(false) } }}>Сохранить</Button>
-              <Button size="sm" variant="ghost" onClick={() => { setRenamingTag(''); setRenamingName('') }}>Отмена</Button>
-            </> : <>
-              <span>{route.name}</span>
-              <Button size="sm" variant="ghost" disabled={routePending} onClick={() => { setRenamingTag(route.tag); setRenamingName(route.name) }}>Переименовать</Button>
-              <Button size="sm" variant="ghost" disabled={routePending} onClick={async () => { if (!window.confirm(`Удалить маршрут «${route.name}»?`)) return; setRoutePending(true); try { await onRemoveRoute(route.tag) } finally { setRoutePending(false) } }}>Удалить</Button>
-            </>}
-          </div>)}</div>}
+
         </div>}
+        <p className="text-muted-foreground text-xs">Карточки подключений можно перетаскивать мышью. <button type="button" className="ml-2 underline" onClick={resetCards}>Стандартный порядок</button></p>
+        <Dialog open={!!deletingTag} onOpenChange={open => { if (!open && !routePending) setDeletingTag(null) }}><DialogContent><DialogHeader><DialogTitle>Удалить маршрут «{deletingTag ? routeLabel(deletingTag) : ''}»?</DialogTitle></DialogHeader><p className="text-muted-foreground">Маршрут будет удалён из общей маршрутизации и правил устройств. Изменения применяются после сохранения.</p><div className="flex justify-end gap-2"><Button variant="outline" disabled={routePending} onClick={() => setDeletingTag(null)}>Отмена</Button><Button variant="destructive" disabled={routePending} onClick={async () => { if (!deletingTag) return; setRoutePending(true); try { if (await onRemoveRoute(deletingTag)) setDeletingTag(null) } finally { setRoutePending(false) } }}>{routePending ? 'Удаление…' : 'Удалить'}</Button></div></DialogContent></Dialog>
+        <Dialog open={!!editingTag} onOpenChange={open => { if (!open) setEditingTag(null) }}><DialogContent className="max-w-[min(94vw,680px)]! max-h-[85dvh] overflow-y-auto"><DialogHeader><DialogTitle>Ресурсы: {editingTag ? routeLabel(editingTag) : ''}</DialogTitle></DialogHeader>
+          <p className="text-muted-foreground text-sm">Ресурсы маршрута общие для всех устройств. Выберите несколько наборов из конфигурации Mihomo.</p>
+          <div className="flex flex-wrap gap-2">{resources.map(value => <button key={value} type="button" className="rounded border border-blue-400 bg-blue-500/20 px-2 py-1 text-xs" onClick={() => setResources(resources.filter(item => item !== value))}>{value} ×</button>)}</div>
+          <Input value={resourceSearch} onChange={event => setResourceSearch(event.target.value)} placeholder="Поиск ресурса…" />
+          <div className="max-h-64 overflow-y-auto rounded border p-1">{resourceOptions.filter(value => value.toLowerCase().includes(resourceSearch.toLowerCase())).map(value => <button type="button" key={value} aria-pressed={resources.includes(value)} className={cn('block w-full rounded px-2 py-2 text-left hover:bg-blue-500/10', resources.includes(value) && 'bg-blue-500/20')} onClick={() => setResources(resources.includes(value) ? resources.filter(item => item !== value) : [...resources, value])}>{resources.includes(value) ? '✓ ' : ''}{value}</button>)}</div>
+          <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setEditingTag(null)}>Отмена</Button><Button disabled={routePending || !resources.length} onClick={async () => { if (!editingTag) return; setRoutePending(true); try { if (await onEditResources(editingTag, resources)) setEditingTag(null) } finally { setRoutePending(false) } }}>Сохранить ресурсы</Button></div>
+        </DialogContent></Dialog>
+        <Dialog open={!!renamingTag} onOpenChange={open => { if (!open) setRenamingTag('') }}><DialogContent><DialogHeader><DialogTitle>Переименовать маршрут</DialogTitle></DialogHeader><Input value={renamingName} maxLength={40} onChange={event => setRenamingName(event.target.value)} /><Button disabled={routePending || !renamingName.trim()} onClick={async () => { setRoutePending(true); try { if (await onRenameRoute(renamingTag, renamingName)) setRenamingTag('') } finally { setRoutePending(false) } }}>Сохранить</Button></DialogContent></Dialog>
         {!activeDevice && <Button size="sm" variant={globalDirect ? 'default' : 'outline'} disabled={routePending} onClick={() => void onSelectDraft(defaultChoices.VPN, globalDirect ? 'DIRECT' : '@bypass')}>Полный обход</Button>}
         {globalDirect && <p className="text-muted-foreground text-sm">Общий трафик идёт напрямую. Для отдельных правил и устройств можно выбрать VPN ниже.</p>}
         {!activeDevice && orderedSelectorNames.filter(name => !globalDirect || isGeneralSelector(name)).map((name) => {
           const route = orderedTags.find((tag) => defaultChoices[tag] === name)
-          const index = route ? orderedTags.indexOf(route) : -1
           return <div key={name} onDragOver={(event) => { if (route && draggedRoute && draggedRoute !== route) { event.preventDefault(); event.dataTransfer.dropEffect = 'move' } }} onDrop={(event) => { event.preventDefault(); if (route && draggedRoute) void moveRoute(draggedRoute, route) }}>
             <SelectorRow
             key={name}
             selectorName={name}
-            orderControls={<div className="flex items-center gap-1.5 text-xs">
-              <span className="text-muted-foreground flex w-7 justify-center rounded border px-1 py-0.5 tabular-nums">{isGeneralSelector(name) ? '−1' : route ? index + 1 : '—'}</span>
-              {route && <>
-                <span draggable={!routePending} onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', route); setDraggedRoute(route) }} onDragEnd={() => setDraggedRoute(null)} className="text-muted-foreground cursor-grab rounded p-1 active:cursor-grabbing" title={`Перетащить ${routeLabel(route)}`} aria-label={`Перетащить ${routeLabel(route)}`}><IconGripVertical size={18} /></span>
-                <Button size="sm" variant="outline" disabled={routePending || index === 0} onClick={() => void moveRoute(route, orderedTags[index - 1])}>↑ Выше</Button>
-                <Button size="sm" variant="outline" disabled={routePending || index === orderedTags.length - 1} onClick={() => void moveRoute(route, orderedTags[index + 1])}>↓ Ниже</Button>
-              </>}
-            </div>}
+            orderControls={routeControls(route ?? 'VPN')}
             onTestAll={testAll}
             onSelect={selectProxy}
             onTestSingle={testSingle}
@@ -1128,17 +1177,23 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
           </div>
         })}
         {activeDeviceDirect && <p className="text-muted-foreground text-sm">Для {activeDevice?.ip} выбран полный маршрут: {displayName(activeDevice.choices.VPN)}. Правила сервисов не применяются.</p>}
-        {activeDevice && ['VPN', ...orderedTags, ...routeTags.filter((tag) => tag !== 'VPN' && !orderedTags.includes(tag))].filter(route => !activeDeviceDirect || route === 'VPN').map((route) => (
-          <section key={route} className="border-border bg-input-background rounded-xl border p-4">
-            <div className="mb-2 flex items-center gap-2 text-[15px] font-medium"><RouteIcon route={route} />{routeLabel(route)}<Button size="sm" variant="outline" className="ml-auto" disabled={!!testingGroups[defaultChoices[route]]} onClick={() => void testAll(defaultChoices[route], deviceOptions.filter((name) => name === 'DIRECT' || (!isNoVpn(name) && isRouteOption(name, route === 'VPN', allProxyData))))}> <IconBoltFilled size={16} />{testingGroups[defaultChoices[route]] ? 'Пинг…' : 'Пинг'}</Button></div>
+        {activeDevice && ['VPN', ...new Set(orderedTags)].filter(route => !activeDeviceDirect || route === 'VPN').map((route) => (
+          <section key={route} className="border-border bg-input-background rounded-xl border p-4"
+            onDragOver={event => { if (draggedRoute && draggedRoute !== route && route !== 'VPN') { event.preventDefault(); event.dataTransfer.dropEffect = 'move' } }}
+            onDrop={event => { event.preventDefault(); if (draggedRoute && route !== 'VPN') void moveRoute(draggedRoute, route) }}>
+            <div className="mb-2 flex flex-wrap items-center gap-2 text-[15px] font-medium">{routeControls(route)}<RouteIcon route={route} />{routeLabel(route)}<Button size="sm" variant="outline" className="ml-auto" disabled={!!testingGroups[defaultChoices[route]]} onClick={() => void testAll(defaultChoices[route], deviceOptions.filter((name) => name === 'DIRECT' || (!isNoVpn(name) && isRouteOption(name, route === 'VPN', allProxyData))))}> <IconBoltFilled size={16} />{testingGroups[defaultChoices[route]] ? 'Пинг…' : 'Пинг'}</Button></div>
             {route === 'VPN' && <Button size="sm" className="mb-2" variant={activeDevice.choices.VPN === 'DIRECT' ? 'default' : 'outline'} disabled={devicePending} onClick={() => void changeDevice(activeDevice.ip, route, activeDevice.choices.VPN === 'DIRECT' ? '@direct' : 'DIRECT')}>Полный обход</Button>}
             <div className="text-muted-foreground mb-3 text-sm">Выбрано: {displayName(activeDevice.choices[route] === '@direct' ? 'DIRECT' : activeDevice.choices[route] === defaultChoices[route] ? allProxyData[defaultChoices[route]]?.now ?? activeDevice.choices[route] : activeDevice.choices[route])}</div>
             <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-              {sortProxyNames(deviceOptions.filter((name) => name === 'DIRECT' || (!isNoVpn(name) && isRouteOption(name, route === 'VPN', allProxyData))), 'default', allProxyData).map((name) => {
+              {orderedCards(sortProxyNames(deviceOptions.filter((name) => name === 'DIRECT' || (!isNoVpn(name) && isRouteOption(name, route === 'VPN', allProxyData))), 'default', allProxyData), cardOrder).map((name, _, cards) => {
                 const proxy = allProxyData[name]
                 const selected = activeDevice.choices[route] === '@direct' ? 'DIRECT' : activeDevice.choices[route] === defaultChoices[route] ? allProxyData[defaultChoices[route]]?.now ?? activeDevice.choices[route] : activeDevice.choices[route]
                 const delay = proxy ? getLastDelay(proxy) : null
-                return <div key={name} role="button" tabIndex={0} aria-pressed={selected === name} aria-disabled={devicePending}
+                return <div key={name} draggable={!devicePending} title="Перетащить карточку подключения"
+                  onDragStart={event => { event.stopPropagation(); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', name); setDraggedProtocol(name) }}
+                  onDragEnd={() => setDraggedProtocol(null)}
+                  onDragOver={event => { if (draggedProtocol && draggedProtocol !== name) { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move' } }}
+                  onDrop={event => { if (!draggedProtocol) return; event.preventDefault(); event.stopPropagation(); moveCard(draggedProtocol, name, cards); setDraggedProtocol(null) }} role="button" tabIndex={0} aria-pressed={selected === name} aria-disabled={devicePending}
                   onClick={() => { if (!devicePending && activeDevice.choices[route] !== (route === 'VPN' && name === 'DIRECT' ? '@direct' : name)) void changeDevice(activeDevice.ip, route, route === 'VPN' && name === 'DIRECT' ? '@direct' : name) }}
                   onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && !devicePending && activeDevice.choices[route] !== (route === 'VPN' && name === 'DIRECT' ? '@direct' : name)) { event.preventDefault(); void changeDevice(activeDevice.ip, route, route === 'VPN' && name === 'DIRECT' ? '@direct' : name) } }}
                   className={cn('relative flex min-h-28 flex-col justify-between rounded-xl border p-3.5 pr-12 text-left text-sm', selected === name ? 'border-blue-400 bg-blue-500/20' : 'border-ring/40 hover:border-blue-400 hover:bg-blue-500/10', devicePending && 'opacity-60')}>
