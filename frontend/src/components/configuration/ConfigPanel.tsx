@@ -1,4 +1,3 @@
-import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter } from '@/components/ui/alert-dialog'
 import { readSelections, withSelections } from '@/lib/mihomoRoutingBackup'
 import { Button } from '@/components/ui/button'
 import {
@@ -309,26 +308,6 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
   const [mode, setMode] = useState<ClashMode>('rule')
   const [routingDraft, setRoutingDraft] = useState<{ file: string; base: string; content: string } | null>(null)
   const [routingSaving, setRoutingSaving] = useState(false)
-  const [repairOpen, setRepairOpen] = useState(false)
-  const [repairPending, setRepairPending] = useState(false)
-  async function repairRouting() {
-    if (repairPending || routingSaving || routingDraft || configs.some(config => config.isDirty)) return
-    setRepairPending(true)
-    dispatch({ type: 'SET_SERVICE_STATUS', status: 'pending', pendingText: 'Перезапуск VPN и маршрутизации…' })
-    try {
-      const result = await apiCall<{success: boolean; error?: string}>('POST', 'control', { action: 'repairRouting', core: currentCore })
-      if (!result.success) throw new Error(result.error || 'Не удалось восстановить маршрутизацию')
-      showToast('VPN и маршрутизация перезапущены', 'success')
-      setRepairOpen(false)
-    } catch (error) { showToast(error instanceof Error ? error.message : 'Ошибка перезапуска', 'error') }
-    finally {
-      setRepairPending(false)
-      try {
-        const result = await apiCall<{running: boolean}>('GET', 'control')
-        dispatch({ type: 'SET_SERVICE_STATUS', status: result.running ? 'running' : 'stopped' })
-      } catch { dispatch({ type: 'SET_SERVICE_STATUS', status: 'stopped' }) }
-    }
-  }
   useEffect(() => {
     if (!routingDraft) return
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
@@ -940,7 +919,6 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
                       <DropdownMenuGroup>
                         <DropdownMenuItem onClick={onOpenBackups}><IconBox /> Резервные копии</DropdownMenuItem>
                         <DropdownMenuItem onClick={onOpenGeoScan}><IconSearch /> Скан геофайлов</DropdownMenuItem>
-                        <DropdownMenuItem disabled={isPending || routingSaving || !!routingDraft || configs.some(config => config.isDirty) || repairPending} onClick={() => setRepairOpen(true)}><IconRefresh /> Перезапустить VPN и маршрутизацию</DropdownMenuItem>
                       </DropdownMenuGroup>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -950,18 +928,6 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
   return (
     <TooltipProvider delayDuration={500}>
       <>
-        <AlertDialog open={repairOpen} onOpenChange={open => { if (!repairPending) setRepairOpen(open) }}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Перезапустить VPN и маршрутизацию?</AlertDialogTitle>
-              <AlertDialogDescription>Будет перезапущено активное ядро {currentCore === 'xray' ? 'Xray' : 'Mihomo'}, пересозданы правила XKeen и очищены связанные соединения. VPN-соединения устройств кратковременно прервутся. Сохранённые настройки и исключения устройств останутся.</AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <Button variant="outline" disabled={repairPending} onClick={() => setRepairOpen(false)}>Отмена</Button>
-              <Button disabled={repairPending} onClick={() => void repairRouting()}>{repairPending ? 'Выполняется…' : 'Перезапустить'}</Button>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
         <div className="border-border bg-card flex flex-col overflow-hidden rounded-xl border md:min-h-0 md:flex-1">
           <div className={cn('flex shrink-0 flex-col gap-2 px-3 pt-3 sm:px-4 sm:pt-4 md:flex-row md:items-start')}>
             <div className="flex min-w-0 shrink-0 items-center gap-2">
@@ -1235,7 +1201,6 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
                           <DropdownMenuItem onClick={onOpenGeoScan}>
                             <IconSearch /> Скан геофайлов
                           </DropdownMenuItem>
-                          <DropdownMenuItem disabled={isPending || routingSaving || !!routingDraft || configs.some(config => config.isDirty) || repairPending} onClick={() => setRepairOpen(true)}><IconRefresh /> Перезапустить VPN и маршрутизацию</DropdownMenuItem>
                         </DropdownMenuGroup>
                         <DropdownMenuSeparator />
                         {isMobile ? (
