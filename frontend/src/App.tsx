@@ -15,8 +15,7 @@ import { linkProviderToVpn } from './lib/mihomoSubscription'
 import { DEFAULT_PING_TEST_TIMEOUT, DEFAULT_PING_TEST_URL, type Config, type ThemeMode } from './lib/types'
 import { parseClashApiCredentials } from './lib/utils'
 import { parse as parseJsonc } from 'jsonc-parser'
-import { mihomoToXray, xrayToMihomo } from './lib/coreRoutingTransfer'
-import { defaultMihomoChoices, mihomoRouteTags, readMihomoDevices } from './lib/mihomoDeviceRouting'
+import { defaultMihomoChoices, mihomoRouteTags, readMihomoDevices, readMihomoFullBypass, isMihomoFullRoute } from './lib/mihomoDeviceRouting'
 import { readSelections } from './lib/mihomoRoutingBackup'
 
 const CommentsWarningModal = lazyLoad(() => import('./components/modals/CommentsWarning'), 'CommentsWarningModal')
@@ -291,44 +290,29 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       }
       const old = appState.currentCore
       const file = core === 'mihomo' ? '/opt/etc/mihomo/config.yaml' : '/opt/etc/xray/configs/00_config.json'
-      const sourceFile = old === 'mihomo' ? '/opt/etc/mihomo/config.yaml' : '/opt/etc/xray/configs/00_config.json'
-      let original = ''
-      let destinationWritten = false
       let switched = false
-      dispatch({ type: 'SET_SERVICE_STATUS', status: 'pending', pendingText: 'Перенос маршрутов...' })
+      dispatch({ type: 'SET_SERVICE_STATUS', status: 'pending', pendingText: 'Переключение...' })
       try {
-        const [sourceResponse, targetResponse] = await Promise.all([
-          apiCall<{success: boolean; configs: Array<{file: string; content: string}>}>('GET', `configs?core=${old}`),
-          apiCall<{success: boolean; configs: Array<{file: string; content: string}>}>('GET', `configs?core=${core}`),
-        ])
-        const source = sourceResponse.configs?.find(item => item.file === sourceFile)?.content
-        original = targetResponse.configs?.find(item => item.file === file)?.content ?? ''
-        if (!sourceResponse.success || !targetResponse.success || !source || !original) throw new Error('Не удалось прочитать конфигурации обоих ядер')
-        const nodeMap = await apiCall<{success: boolean; xrayToMihomo: Record<string, string>; mihomoToXray: Record<string, string>}>('GET', 'mihomo/node-mapping')
-        if (!nodeMap.success) throw new Error('Не удалось сопоставить подключения Xray и Mihomo')
-        const transferred = old === 'xray' ? xrayToMihomo(source, original, nodeMap) : mihomoToXray(source, original, nodeMap)
-        if (transferred.content !== original) {
-          const backup = await apiCall<{success: boolean; error?: string}>('PUT', 'backup')
-          if (!backup.success) throw new Error(backup.error || 'Не удалось создать бэкап перед переносом')
-          const put = await apiCall<{success: boolean; error?: string}>('PUT', `configs?core=${core}&validate=${core}`, {file, content: transferred.content})
-          if (!put.success) throw new Error(put.error || 'Целевое ядро не приняло перенесённые маршруты')
-          destinationWritten = true
-        }
+        // Switching cores uses the destination's own saved routing configuration.
+        // Importing profiles here can silently reintroduce stale direct exceptions.
+        const targetResponse = await apiCall<{success: boolean; configs: Array<{file: string; content: string}>}>('GET', `configs?core=${core}`)
+        const content = targetResponse.configs?.find(item => item.file === file)?.content
+        if (!targetResponse.success || !content) throw new Error('Не удалось прочитать настройки выбранного ядра')
         dispatch({ type: 'SET_SERVICE_STATUS', status: 'pending', pendingText: 'Переключение...' })
         const result = await apiCall<{success: boolean; error?: string}>('POST', 'control', { action: 'switchCore', core })
         if (!result.success) throw new Error(result.error || 'Не удалось переключить ядро')
         switched = true
         if (core === 'mihomo') {
-          const {port, secret, unix} = parseClashApiCredentials(transferred.content)
+          const {port, secret, unix} = parseClashApiCredentials(content)
           if (!port && !unix) throw new Error('В Mihomo не настроен API для применения выбора подключений')
-          const selected = readSelections(transferred.content)
+          const selected = readSelections(content)
           const live = await clashFetch<{proxies: Record<string, {all?: string[]; now?: string}>}>(port ?? '', 'proxies', {secret, unix})
           for (const [group, node] of Object.entries(selected)) {
             if (!live.proxies[group]?.all?.includes(node)) throw new Error(`В группе Mihomo «${group}» нет подключения «${node}»`)
             await clashFetch(port ?? '', `proxies/${encodeURIComponent(group)}`, {method: 'PUT', secret, unix, body: {name: node}, retry: false})
           }
-          const defaults = defaultMihomoChoices(transferred.content)
-          const routes = mihomoRouteTags(transferred.content).filter(route => route !== 'VPN')
+          const defaults = defaultMihomoChoices(content)
+          const routes = mihomoRouteTags(content).filter(route => route !== 'VPN')
           const direct = (initial: string): boolean => {
             let name = initial
             const seen = new Set<string>()
@@ -339,19 +323,19 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             }
             return false
           }
-          const profiles = readMihomoDevices(transferred.content)
-          const ips = profiles.filter(profile => direct(profile.choices.VPN) && routes.every(route => direct(profile.choices[route] === defaults[route] ? defaults[route] : profile.choices[route]))).map(profile => profile.ip)
+          const profiles = readMihomoDevices(content)
+          const ips = profiles.filter(profile => isMihomoFullRoute(profile.choices.VPN) && direct(profile.choices.VPN)).map(profile => profile.ip)
           const bypass = await apiCall<{success: boolean; error?: string}>('POST', 'mihomo/device-direct', {ips})
           if (!bypass.success) throw new Error(bypass.error || 'Не удалось перенести локальные исключения Mihomo')
           const selective = profiles.some(profile => !direct(profile.choices.VPN) || routes.some(route => !direct(profile.choices[route] === defaults[route] ? defaults[route] : profile.choices[route])))
-          const global = await apiCall<{success: boolean; error?: string}>('POST', 'mihomo/global-direct', {enabled: direct(defaults.VPN) && !selective && routes.every(route => direct(defaults[route]))})
+          const global = await apiCall<{success: boolean; error?: string}>('POST', 'mihomo/global-direct', {enabled: readMihomoFullBypass(content) && direct(defaults.VPN) && !selective && routes.every(route => direct(defaults[route]))})
           if (!global.success) throw new Error(global.error || 'Не удалось применить общий режим Mihomo')
         } else {
           const bypass = await apiCall<{success: boolean; error?: string}>('POST', 'xray/sync-bypass')
           if (!bypass.success) throw new Error(bypass.error || 'Не удалось перенести локальные исключения Xray')
         }
         dispatch({ type: 'SHOW_MODAL', modal: 'showCoreManageModal', show: false })
-        showToast(`Ядро изменено на ${capitalize(core)}. Перенесено IP: ${transferred.devices.length}, новых маршрутов: ${transferred.routes.length}`)
+        showToast(`Ядро изменено на ${capitalize(core)}. Используются его сохранённые настройки`)
         const data = await apiCall<any>('GET', 'control')
         if (data.success) {
           dispatch({ type: 'SET_CONFIGS_LOADING', loading: true })
@@ -366,8 +350,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           const reverted = await apiCall<{success: boolean}>('POST', 'control', {action: 'switchCore', core: old}).catch(() => null)
           if (!reverted?.success) showToast('Не удалось вернуть прежнее ядро. Проверьте статус XKeen', 'error')
         }
-        if (destinationWritten) await apiCall('PUT', `configs?core=${core}&validate=${core}`, {file, content: original}).catch(() => null)
-        showToast(error instanceof Error ? error.message : 'Не удалось перенести маршруты', 'error')
+        showToast(error instanceof Error ? error.message : 'Не удалось переключить ядро', 'error')
         const data = await apiCall<any>('GET', 'control').catch(() => null)
         if (data?.success) dispatch({type: 'SET_CORE_INFO', currentCore: data.currentCore, coreVersions: getAppState().coreVersions, availableCores: data.cores})
         dispatch({ type: 'SET_SERVICE_STATUS', status: data?.running ? 'running' : 'stopped' })
