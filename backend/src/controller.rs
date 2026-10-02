@@ -297,8 +297,85 @@ async fn check_core_config(core: &str) -> Result<(), String> {
     Ok(())
 }
 
+// Serialize core control requests so two restarts cannot overlap.
+static CONTROL_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+
+async fn repair_routing(state: &AppState, requested: &str) -> Result<(), String> {
+    let core = state.core.read().unwrap().name.clone();
+    if core != requested { return Err("Активное ядро изменилось. Обновите страницу".into()) }
+    let binary = ["/opt/sbin/conntrack", "/opt/bin/conntrack"].into_iter()
+        .find(|path| Path::new(path).is_file()).ok_or("Для очистки соединений требуется пакет conntrack")?;
+    let init = fs::read_to_string(resolve_init_file(state).await?).await.map_err(|e| e.to_string())?;
+    let mark = init.lines().find_map(|line| line.trim().strip_prefix("table_mark="))
+        .map(|value| value.trim_matches(&['"', '\''][..]).to_string())
+        .filter(|value| value.strip_prefix("0x").is_some_and(|hex| !hex.is_empty() && hex.bytes().all(|b| b.is_ascii_hexdigit()))
+            || (!value.is_empty() && value.bytes().all(|b| b.is_ascii_digit())))
+        .ok_or("Не удалось определить метку перехвата XKeen")?;
+    let numeric_mark = if let Some(hex) = mark.strip_prefix("0x") { u32::from_str_radix(hex, 16).ok() } else { mark.parse::<u32>().ok() };
+    if numeric_mark.is_none_or(|value| value == 0) { return Err("Недопустимая метка перехвата XKeen".into()) }
+    let mut files = Vec::new();
+    let mut ports = std::collections::BTreeSet::new();
+    let directory = if core == "xray" { XRAY_CONF_DIR } else { MIHOMO_CONF_DIR };
+    let mut entries = fs::read_dir(directory).await.map_err(|e| e.to_string())?;
+    while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
+        let path = entry.path();
+        if (core == "xray" && path.extension().is_some_and(|ext| ext == "json"))
+            || (core == "mihomo" && path.file_name().is_some_and(|name| name == "config.yaml")) {
+            let content = fs::read_to_string(&path).await.map_err(|e| e.to_string())?;
+            if core == "xray" {
+                let config: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+                if let Some(inbounds) = config.get("inbounds").and_then(serde_json::Value::as_array) {
+                    for inbound in inbounds {
+                        if inbound.get("protocol").and_then(serde_json::Value::as_str) == Some("dokodemo-door")
+                            && inbound.pointer("/settings/followRedirect").and_then(serde_json::Value::as_bool) == Some(true) {
+                            if let Some(port) = inbound.get("port").and_then(serde_json::Value::as_u64).filter(|port| *port > 0 && *port <= 65535) { ports.insert(port.to_string()); }
+                        }
+                    }
+                }
+            } else {
+                let documents = yaml_rust2::YamlLoader::load_from_str(&content).map_err(|e| e.to_string())?;
+                let config = documents.first().ok_or("Пустая конфигурация Mihomo")?;
+                for key in ["redir-port", "tproxy-port"] {
+                    if let Some(port) = config[key].as_i64().filter(|port| *port > 0 && *port <= 65535) { ports.insert(port.to_string()); }
+                }
+            }
+            files.push(crate::configs::ConfigReq { file: path.to_string_lossy().into(), content });
+        }
+    }
+    if files.is_empty() { return Err("Не найдена сохранённая конфигурация ядра".into()) }
+    crate::configs::validate_core(&core, &files).await.map_err(|_| "Проверка конфигурации не пройдена. Перезапуск отменён".to_string())?;
+    let stopped = run_init_command(state, &["stop"]).await;
+    let mut cleanup_error = stopped.err();
+    if cleanup_error.is_none() {
+        for family in ["ipv4", "ipv6"] {
+            let mut filters = vec![vec!["--mark".to_string(), mark.clone()]];
+            for port in &ports { filters.push(vec!["-p".into(), "tcp".into(), "--dst-nat".into(), "--reply-port-src".into(), port.clone()]); }
+            for filter in filters {
+                let result = tokio::time::timeout(std::time::Duration::from_secs(5), Command::new(binary)
+                    .args(["-D", "-f", family]).args(filter).kill_on_drop(true).output()).await;
+                match result {
+                    Ok(Ok(output)) if output.status.success() || String::from_utf8_lossy(&output.stderr).contains("0 flow entries") => {},
+                    _ => { cleanup_error = Some("Не удалось полностью очистить соединения перехвата".into()); }
+                }
+            }
+        }
+    }
+    // Always attempt to bring the saved configuration back, even after cleanup errors.
+    run_init_command(state, &["start", "on"]).await.map_err(|e| format!("Не удалось запустить ядро: {e}"))?;
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    if get_pid(&core).is_empty() { return Err("После перезапуска ядро не запущено. Проверьте журнал".into()) }
+    if let Some(error) = cleanup_error { return Err(format!("Ядро запущено, но очистка выполнена не полностью: {error}")) }
+    Ok(())
+}
+
 pub async fn post_control(State(state): State<AppState>, Json(req): Json<ControlReq>) -> impl IntoResponse {
+    let _guard = CONTROL_LOCK.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;
     match req.action.as_str() {
+        "repairRouting" => {
+            if let Err(error) = repair_routing(&state, &req.core).await {
+                return Json(ApiResponse { success: false, error: Some(error), data: None });
+            }
+        }
         "switchCore" => {
             let old = state.core.read().unwrap().name.clone();
             if old == req.core {
