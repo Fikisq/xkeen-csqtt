@@ -5,6 +5,7 @@ import type { CodeMirrorRef } from './components/configuration/CodeMirror'
 import { ConfigPanel } from './components/configuration/ConfigPanel'
 import { LogPanel } from './components/log/LogPanel'
 import { StatusBar } from './components/status/StatusBar'
+import { Dialog, DialogContent, DialogTitle } from './components/ui/dialog'
 import { Toast } from './components/ui/toast'
 import { apiCall, capitalize, clashFetch } from './lib/api'
 import { LazyBoundary, lazyLoad, useLazyMount } from './lib/loader'
@@ -123,6 +124,7 @@ const ModalManager = memo(function ModalManager({
 
 function AppContent({ onLogout }: { onLogout: () => void }) {
   const { dispatch, showToast } = useAppActions()
+  const [logOpen, setLogOpen] = useState(false)
   const [xraySubscriptionsOpen, setXraySubscriptionsOpen] = useState(false)
   const mountXraySubscriptions = useLazyMount(xraySubscriptionsOpen)
   const [mihomoSubscriptionsOpen, setMihomoSubscriptionsOpen] = useState(false)
@@ -542,11 +544,17 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             onOpenTemplate={() => openModal('showTemplateModal')}
             onOpenGeoScan={() => openModal('showGeoScanModal')}
             onOpenBackups={() => openModal('showBackupsModal')}
+            onOpenLog={() => setLogOpen(true)}
             onRefreshConfigs={() => loadConfigs(undefined, false, true)}
           />
-          <LogPanel />
         </div>
       </main>
+      <Dialog open={logOpen} onOpenChange={setLogOpen}>
+        <DialogContent className="max-w-[min(96vw,1280px)]! overflow-hidden p-0">
+          <DialogTitle className="sr-only">Журнал</DialogTitle>
+          {logOpen && <LogPanel inDialog />}
+        </DialogContent>
+      </Dialog>
       <Toast />
       <ModalManager
         onSwitchCore={switchCore}

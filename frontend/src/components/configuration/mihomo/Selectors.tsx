@@ -1068,7 +1068,7 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
 
   return (
     <TooltipProvider delayDuration={500}>
-      <div className="absolute inset-0 space-y-4 overflow-y-auto p-4">
+      <div className="space-y-4 p-4">
         <div className="bg-card flex shrink-0 flex-wrap items-center gap-2 border-b pb-3">
           <Button size="sm" variant={!activeDevice ? 'default' : 'outline'} onClick={() => setDeviceIp('')}>Общая маршрутизация</Button>
           {devices.map((profile) => <DeviceTab key={profile.ip} ip={profile.ip} selected={activeDevice?.ip === profile.ip} disabled={devicePending} onSelect={() => setDeviceIp(profile.ip)} onRemove={async () => { if (await changeDevice(profile.ip, null) && activeDevice?.ip === profile.ip) setDeviceIp('') }} />)}

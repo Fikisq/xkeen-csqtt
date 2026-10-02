@@ -224,7 +224,7 @@ export function XraySelectorsPanel({ config, onSelect, onDeviceSelect, onAddRout
   }, [pingTargetKey])
 
   return (
-    <div className="absolute inset-0 overflow-y-auto p-4">
+    <div className="p-4">
       <div className="bg-card z-20 mb-4 flex shrink-0 flex-wrap items-center gap-2 border-b pb-3">
         <Button size="sm" variant={!activeDevice ? 'default' : 'outline'} onClick={() => setDeviceIp('')}>Общая маршрутизация</Button>
         {parsed.devices.map((ip) => <DeviceTab key={ip} ip={ip} selected={activeDevice === ip} disabled={pending !== null} onSelect={() => setDeviceIp(ip)} onRemove={async () => { setPending('remove'); try { await onDeviceSelect(config.file, ip, null); if (activeDevice === ip) setDeviceIp('') } finally { setPending(null) } }} />)}

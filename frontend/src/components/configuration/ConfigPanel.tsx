@@ -92,6 +92,7 @@ interface Props {
   onOpenTemplate: () => void
   onOpenGeoScan: () => void
   onOpenBackups: () => void
+  onOpenLog: () => void
   onRefreshConfigs: () => Promise<Config[]>
   editorRef: React.RefObject<CodeMirrorRef | null>
   configActionsRef: React.RefObject<{ switchTab: (index: number) => void; getActiveIndex: () => number }>
@@ -280,7 +281,7 @@ function ConfigTab({ config, currentCore, showToast, onRefreshConfigs, withConte
   )
 }
 
-export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihomoSubscriptions, onOpenTemplate, onOpenGeoScan, onOpenBackups, onRefreshConfigs, editorRef, configActionsRef }: Props) {
+export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihomoSubscriptions, onOpenTemplate, onOpenGeoScan, onOpenBackups, onOpenLog, onRefreshConfigs, editorRef, configActionsRef }: Props) {
   const { state, dispatch, showToast } = useAppContext({ includeConfigs: true })
   const { configs, isConfigsLoading, currentCore, serviceStatus, clashApiPort, clashApiSecret, clashApiUnix } = state
   const guiRouting = useSettings((s) => s.guiRouting)
@@ -919,6 +920,7 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
                       <DropdownMenuGroup>
                         <DropdownMenuItem onClick={onOpenBackups}><IconBox /> Резервные копии</DropdownMenuItem>
                         <DropdownMenuItem onClick={onOpenGeoScan}><IconSearch /> Скан геофайлов</DropdownMenuItem>
+                        <DropdownMenuItem onClick={onOpenLog}><IconFileText /> Журнал</DropdownMenuItem>
                       </DropdownMenuGroup>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -1057,7 +1059,7 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
             {xrayMigrationConfig && <Button variant="outline" className="text-[13px]" onClick={() => void applyXrayRoutingEdit(xrayMigrationConfig.file, enableXrayRoutingCards, 'Карточки Xray и маршрутизация для IP включены', true)}>Включить карточки Xray</Button>}
           </div>
 
-          <div className="relative min-h-175! md:min-h-0 md:flex-1">
+          <div className={cn('relative', currentPanel === 'selectors' && (isMihomo || hasXraySelectors) ? '' : 'min-h-175! md:min-h-0 md:flex-1')}>
             {isEditorMounted && activeConfig && isRoutingGui && (
               <GuiRouting editorRef={editorRef} configs={configs} activeConfigIndex={activeConfigIndex} />
             )}
@@ -1068,7 +1070,7 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
             {isMihomo && (
               <>
                 {mountedPanels.has('selectors') && (
-                  <div className={cn('absolute inset-0 flex flex-col', currentPanel !== 'selectors' && 'hidden')}>
+                  <div className={cn('flex flex-col', currentPanel !== 'selectors' && 'hidden')}>
                     {routingToolbar}
                     <div className={cn('relative min-h-0 flex-1', routingSaving && 'pointer-events-none opacity-60')}>
                     <LazyBoundary>
@@ -1106,7 +1108,7 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
             )}
 
             {currentCore === 'xray' && hasXraySelectors && xraySelectorsConfig && currentPanel === 'selectors' && (
-              <div className="absolute inset-0 flex flex-col">
+              <div className="flex flex-col">
                 {routingToolbar}
                 <div className={cn('relative min-h-0 flex-1', routingSaving && 'pointer-events-none opacity-60')}>
               <LazyBoundary>
@@ -1200,6 +1202,9 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={onOpenGeoScan}>
                             <IconSearch /> Скан геофайлов
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={onOpenLog}>
+                            <IconFileText /> Журнал
                           </DropdownMenuItem>
                         </DropdownMenuGroup>
                         <DropdownMenuSeparator />

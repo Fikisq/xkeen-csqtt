@@ -30,6 +30,7 @@ export function useWebSocket(onMessage: WsMessageHandler) {
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.onclose = null
       wsRef.current.close()
     }
     if (pingIntervalRef.current) clearInterval(pingIntervalRef.current)
@@ -73,7 +74,15 @@ export function useWebSocket(onMessage: WsMessageHandler) {
     return () => {
       if (pingIntervalRef.current) clearInterval(pingIntervalRef.current)
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current)
-      wsRef.current?.close()
+      const ws = wsRef.current
+      wsRef.current = null
+      if (ws) {
+        ws.onopen = null
+        ws.onclose = null
+        ws.onerror = null
+        ws.onmessage = null
+        ws.close()
+      }
     }
   }, [connect])
 

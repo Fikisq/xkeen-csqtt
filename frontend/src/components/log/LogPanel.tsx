@@ -14,7 +14,7 @@ import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '
 const LOG_FILES = ['error.log', 'access.log']
 const MAX_LINES = 1000
 
-export function LogPanel() {
+export function LogPanel({ inDialog = false }: { inDialog?: boolean } = {}) {
   const timezone = useSettings((s) => s.timezone)
   const [filter, setFilter] = useState('')
   const [currentFile, setCurrentFile] = useState('error.log')
@@ -36,7 +36,7 @@ export function LogPanel() {
   useEffect(() => {
     return () => {
       if (filterTimerRef.current) clearTimeout(filterTimerRef.current)
-      document.body.style.overflow = ''
+      if (isFullscreenRef.current) document.body.style.overflow = ''
     }
   }, [])
 
@@ -281,7 +281,7 @@ export function LogPanel() {
 
   return (
     <TooltipProvider delayDuration={500}>
-      <div className="relative h-70 w-full pb-3 md:shrink-0">
+      <div className={cn("relative w-full", inDialog ? "h-[80dvh]" : "h-70 pb-3 md:shrink-0")}>
         <div
           ref={backdropRef}
           className="fixed inset-0 z-40 bg-black/50 opacity-0"
@@ -301,7 +301,7 @@ export function LogPanel() {
             height: isFullscreen ? 'calc(100dvh - 1.25rem)' : '100%',
           }}
         >
-          <div className="flex shrink-0 flex-col justify-between gap-3 px-4 pt-4 sm:flex-row sm:items-center">
+          <div className={cn("flex shrink-0 flex-col justify-between gap-3 px-4 pt-4 sm:flex-row sm:items-center", inDialog && "pr-16")}>
             <h2 className="text-lg font-semibold select-none">Журнал</h2>
             <div className="flex flex-wrap items-center gap-1.5">
               <div className="relative flex min-w-30 flex-1 items-center sm:flex-none">
@@ -353,14 +353,14 @@ export function LogPanel() {
                   <TooltipTrigger render={<Button variant="outline" size="icon" className="hover:text-destructive" onClick={() => ws.clearLog()}><IconTrash /></Button>} />
                   <TooltipContent>Очистить лог</TooltipContent>
                 </Tooltip>
-                <Tooltip>
+                {!inDialog && <Tooltip>
                   <TooltipTrigger render={
                     <Button variant="outline" size="icon" onClick={toggleFullscreen}>
                       {isFullscreen ? <IconMinimize /> : <IconMaximize />}
                     </Button>
                   } />
                   <TooltipContent>{isFullscreen ? 'Свернуть' : 'Развернуть'}</TooltipContent>
-                </Tooltip>
+                </Tooltip>}
               </div>
             </div>
           </div>
