@@ -97,8 +97,7 @@ export function addCustomRoute(rules: RoutingRule[], name: string, domains: stri
   if (!title || title.length > 40 || /[<>\r\n]/.test(title)) throw new Error('Название маршрута: от 1 до 40 символов')
   const tag = `custom:${encodeURIComponent(title)}`
   if (routeTags(rules).includes(tag)) throw new Error('Маршрут с таким названием уже есть')
-  if (!domains.length || domains.length > 30 || domains.some((domain) => !/^(?:domain:|full:|geosite:)?[a-z0-9*._-]+$/i.test(domain))) throw new Error('Введите до 30 доменов, по одному в строке')
-  const normalized = domains.map((domain) => /^(?:domain:|full:|geosite:)/i.test(domain) ? domain : `domain:${domain}`)
+  const normalized = normalizeRouteResources('domain', domains)
   const vpn = rules.find((rule) => baseRuleTag(rule) === 'VPN')
   const target = destination(vpn)
   if (!target.outboundTag && !target.balancerTag) throw new Error('Сначала настройте общий Селектор')
@@ -113,7 +112,7 @@ export function addCustomRoute(rules: RoutingRule[], name: string, domains: stri
 }
 
 function validIpResource(value: string): boolean {
-  if (value === ROSCOMVPN_DIRECT_IP) return true
+  if (value === ROSCOMVPN_DIRECT_IP || /^(?:geoip:[a-z0-9_-]+|ext:[a-z0-9_][a-z0-9._-]*\.dat:[a-z0-9_-]+)$/i.test(value)) return true
   const pieces = value.split('/')
   if (pieces.length > 2) return false
   const [address, prefix] = pieces
@@ -126,10 +125,10 @@ export function normalizeRouteResources(kind: 'domain' | 'ip', values: string[])
   const resources = [...new Set(values.map((value) => value.trim()).filter(Boolean))]
   if (!resources.length || resources.length > 30) throw new Error('Укажите от 1 до 30 ресурсов')
   if (kind === 'domain') {
-    if (resources.some((value) => !/^(?:domain:|full:|geosite:)?[a-z0-9*._-]+$/i.test(value))) throw new Error('Некорректный домен или категория GeoSite')
-    return resources.map((value) => /^(?:domain:|full:|geosite:)/i.test(value) ? value : `domain:${value}`)
+    if (resources.some((value) => !/^(?:(?:domain:|full:|geosite:)?[a-z0-9*._-]+|ext:[a-z0-9_][a-z0-9._-]*\.dat:[a-z0-9_-]+)$/i.test(value))) throw new Error('Некорректный домен или категория GeoSite')
+    return resources.map((value) => /^(?:domain:|full:|geosite:|ext:)/i.test(value) ? value : `domain:${value}`)
   }
-  if (resources.some((value) => !validIpResource(value))) throw new Error('Введите IPv4, CIDR или доступный IP-список RoscomVPN')
+  if (resources.some((value) => !validIpResource(value))) throw new Error('Введите IPv4, CIDR или категорию GeoIP')
   return resources
 }
 
@@ -167,8 +166,7 @@ export function replaceRouteResources(rules: RoutingRule[], tag: string, values:
 export function mergeRouteDomains(rules: RoutingRule[], tag: string, domains: string[]): RoutingRule[] {
   const global = rules.find((rule) => baseRuleTag(rule) === tag)
   if (!global || tag === 'VPN') throw new Error('Маршрут не найден')
-  if (!domains.length || domains.length > 30 || domains.some((domain) => !/^(?:domain:|full:|geosite:)?[a-z0-9*._-]+$/i.test(domain))) throw new Error('Введите до 30 доменов, по одному в строке')
-  const normalized = domains.map((domain) => /^(?:domain:|full:|geosite:)/i.test(domain) ? domain : `domain:${domain}`)
+  const normalized = normalizeRouteResources('domain', domains)
   const merged = [...new Set([...(global.domain ?? []), ...normalized])]
   if (merged.length > 30) throw new Error('В одном маршруте может быть не больше 30 доменных ресурсов')
   return rules.map((rule) => baseRuleTag(rule) === tag || baseRuleTag(rule).endsWith(`:${tag}`) ? { ...rule, domain: merged } : rule)

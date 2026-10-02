@@ -6,9 +6,10 @@ import { cn } from '@/lib/utils'
 import { apiCall } from '@/lib/api'
 import { IconBolt, IconChevronDown, IconChevronUp, IconGripVertical } from '@tabler/icons-react'
 import { parse as parseJsonc } from 'jsonc-parser'
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Config } from '@/lib/types'
 import { RouteIcon, routeLabel } from '@/components/configuration/RouteIcon'
+import { GeoDatabasePicker } from '@/components/configuration/GeoDatabasePicker'
 import { DeviceTab } from '@/components/configuration/DeviceTab'
 import { baseRuleTag, deviceRuleTag, readDeviceIps, routeTags, usesSelector, validDeviceIp, type RouteTag, type RoutingRule } from '@/lib/xrayDeviceRouting'
 
@@ -51,8 +52,6 @@ function outboundTransport(outbound: Outbound): string {
   return [network?.toUpperCase(), security].filter(Boolean).join(' / ') || 'Транспорт не указан'
 }
 
-const categoryLabels: Record<string, string> = { youtube: 'YouTube', discord: 'Discord', telegram: 'Telegram', github: 'GitHub' }
-const aiDomains = ['geosite:openai', 'geosite:anthropic', 'geosite:perplexity', 'domain:gemini.google.com', 'domain:aistudio.google.com']
 const protocolOrderKey = 'xkeen-xray-protocol-card-order'
 let automaticPingStarted = false
 
@@ -63,36 +62,6 @@ function defaultProtocolRank(tag: string): number {
   if (tag === 'wdtt-plus') return 4
   if (tag === '@selector') return 5
   return 2
-}
-
-function GeoSitePicker({ search, setSearch, resources, setResources, categories, error, onPick }: {
-  search: string
-  setSearch: (value: string) => void
-  resources: string[]
-  setResources: Dispatch<SetStateAction<string[]>>
-  categories: Array<{ name: string; count: number }>
-  error: string
-  onPick?: (name: string) => void
-}) {
-  const toggle = (values: string[], name: string) => {
-    const selected = values.every((value) => resources.includes(value))
-    setResources((current) => selected ? current.filter((value) => !values.includes(value)) : [...new Set([...current, ...values])])
-    if (!selected) onPick?.(name)
-  }
-  const visible = categories.filter((item) => `${item.name} ${categoryLabels[item.name] ?? ''}`.toLowerCase().includes(search.trim().toLowerCase())).slice(0, 100)
-  return <div className="space-y-3">
-    <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Поиск в GeoSite: vrchat, timeweb…" aria-label="Поиск категории GeoSite" />
-    {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
-    <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto" aria-label="Выбранные ресурсы">
-      {resources.length ? resources.map((value) => <button type="button" key={value} onClick={() => setResources((current) => current.filter((item) => item !== value))} aria-label={`Убрать ${value}`} className="rounded-md border border-blue-400 bg-blue-500/20 px-2 py-1 text-xs text-blue-100 hover:bg-blue-500/30">{value.startsWith('geosite:') ? value.slice(8) : value} ×</button>) : <span className="text-muted-foreground text-xs">Выбери один или несколько ресурсов. Они останутся здесь при новом поиске.</span>}
-    </div>
-    <div className="border-border max-h-52 overflow-y-auto rounded-md border p-1" aria-label="Категории GeoSite">
-      {(!search.trim() || 'нейронки ai artificial intelligence'.includes(search.trim().toLowerCase())) && <button type="button" aria-pressed={aiDomains.every((value) => resources.includes(value))} onClick={() => toggle(aiDomains, 'Нейронки')} className={cn('flex w-full justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-blue-500/10', aiDomains.every((value) => resources.includes(value)) && 'bg-blue-500/20')}><span>{aiDomains.every((value) => resources.includes(value)) ? '✓ ' : ''}Нейронки</span><span className="text-muted-foreground">набор</span></button>}
-      {visible.map((item) => { const value = `geosite:${item.name}`; const selected = resources.includes(value); return <button key={item.name} type="button" aria-pressed={selected} onClick={() => toggle([value], categoryLabels[item.name] || item.name)} className={cn('flex w-full justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-blue-500/10', selected && 'bg-blue-500/20')}><span>{selected ? '✓ ' : ''}{categoryLabels[item.name] ? `${categoryLabels[item.name]} · ${item.name}` : item.name}</span><span className="text-muted-foreground">{item.count}</span></button> })}
-      {!visible.length && search.trim() && <p className="text-muted-foreground px-2 py-2 text-xs">Совпадений нет</p>}
-    </div>
-    <p className="text-muted-foreground text-xs">Выбрано ресурсов: {resources.length}. Нажми на выделенную строку или плашку, чтобы убрать её.</p>
-  </div>
 }
 
 export function XraySelectorsPanel({ config, onSelect, onDeviceSelect, onAddRoute, onAddIpRoute, onEditResources, onRemoveRoute, onRenameRoute, onExtendRoute, onReorder }: {
@@ -117,11 +86,7 @@ export function XraySelectorsPanel({ config, onSelect, onDeviceSelect, onAddRout
   const [editingTag, setEditingTag] = useState('')
   const [resourceText, setResourceText] = useState('')
   const [editDomainResources, setEditDomainResources] = useState<string[]>([])
-  const [editCategorySearch, setEditCategorySearch] = useState('')
-  const [categorySearch, setCategorySearch] = useState('')
   const [newDomainResources, setNewDomainResources] = useState<string[]>([])
-  const [categories, setCategories] = useState<Array<{ name: string; count: number }>>([])
-  const [categoryError, setCategoryError] = useState('')
   const [testingTag, setTestingTag] = useState<string | null>(null)
   const [testingAll, setTestingAll] = useState(false)
   const [testingRoute, setTestingRoute] = useState('')
@@ -154,9 +119,6 @@ export function XraySelectorsPanel({ config, onSelect, onDeviceSelect, onAddRout
       return { outbounds: [], rules: [], devices: [] }
     }
   }, [config.savedContent])
-  const availableIpLists = [...new Set(parsed.rules.flatMap((rule) => rule.ip ?? []).filter((value) => value.startsWith('ext:') || value.startsWith('geoip:')))]
-  const ipListLabel = (value: string) => value.replace(/^ext:/, '').replace(/^roscomvpn-geoip-[^:]+\.dat:/, 'RoscomVPN · ').replace(/^zkeenip\.dat:/, 'zkeenip · ')
-
   const globalDirect = parsed.rules.some((rule) => baseRuleTag(rule) === 'VPN' && rule.outboundTag === 'direct')
   const globalCsqtt = parsed.rules.some((rule) => baseRuleTag(rule) === 'VPN' && rule.outboundTag?.toLowerCase() === 'csqtt')
   const globalWdtt = parsed.rules.some((rule) => baseRuleTag(rule) === 'VPN' && rule.outboundTag?.toLowerCase() === 'wdtt-plus')
@@ -215,15 +177,6 @@ export function XraySelectorsPanel({ config, onSelect, onDeviceSelect, onAddRout
     setDraggedCard(null)
     if (source) await reorderCard(source, target)
   }
-
-  useEffect(() => {
-    if (!addingRoute && !editingTag) return
-    let alive = true
-    void apiCall<{ success: boolean; categories?: Array<{ name: string; count: number }>; error?: string }>('GET', 'geo/categories')
-      .then((result) => { if (alive) { setCategories(result.categories ?? []); setCategoryError(result.success ? '' : result.error || 'Не удалось загрузить категории') } })
-      .catch((error) => { if (alive) setCategoryError(error instanceof Error ? error.message : 'Не удалось загрузить категории') })
-    return () => { alive = false }
-  }, [addingRoute, editingTag])
 
   async function change(route: RouteTag, tag: string, index: number) {
     setPending(`${activeDevice}:${route}`)
@@ -295,9 +248,9 @@ export function XraySelectorsPanel({ config, onSelect, onDeviceSelect, onAddRout
             <Button size="sm" variant={resourceKind === 'domain' ? 'default' : 'outline'} onClick={() => setResourceKind('domain')}>Домены</Button>
             <Button size="sm" variant={resourceKind === 'ip' ? 'default' : 'outline'} onClick={() => setResourceKind('ip')}>IP-диапазоны</Button>
           </div>
-          {resourceKind === 'domain' ? <GeoSitePicker search={categorySearch} setSearch={setCategorySearch} resources={newDomainResources} setResources={setNewDomainResources} categories={categories} error={categoryError} onPick={(name) => setRouteName((current) => current || name)} /> : <>
+          {resourceKind === 'domain' ? <GeoDatabasePicker kind="domain" resources={newDomainResources} onChange={setNewDomainResources} onPick={(name) => setRouteName((current) => current || name)} /> : <>
             <p className="text-muted-foreground text-xs">Выберите готовый IP-список или введите несколько IPv4/CIDR, по одному в строке.</p>
-            {availableIpLists.map(value => <Button key={value} size="sm" variant={resourceLines(newIpResources).includes(value) ? 'default' : 'outline'} aria-pressed={resourceLines(newIpResources).includes(value)} onClick={() => setNewIpResources(current => resourceLines(current).includes(value) ? resourceLines(current).filter(item => item !== value).join('\n') : [...resourceLines(current), value].join('\n'))}>{ipListLabel(value)}</Button>)}
+            <GeoDatabasePicker kind="ip" resources={resourceLines(newIpResources)} onChange={values => setNewIpResources(values.join("\n"))} />
             <Textarea value={newIpResources} onChange={(event) => setNewIpResources(event.target.value)} rows={5} aria-label="IP-адреса и диапазоны" placeholder={'203.0.113.0/24\n198.51.100.7'} />
           </>}
           {matchingRoute && matchingKind !== resourceKind && <p className="text-amber-400 text-xs">Это название уже занято маршрутом другого типа. Укажи другое название.</p>}
@@ -305,7 +258,7 @@ export function XraySelectorsPanel({ config, onSelect, onDeviceSelect, onAddRout
             const saved = resourceKind === 'domain'
               ? await (matchingRoute ? onExtendRoute(config.file, matchingRoute, newDomainResources) : onAddRoute(config.file, routeName, newDomainResources))
               : matchingRoute ? await onEditResources(config.file, matchingRoute, [...(matchingRule?.ip ?? []), ...resourceLines(newIpResources)]) : await onAddIpRoute(config.file, routeName, resourceLines(newIpResources))
-            if (saved) { setRouteName(''); setNewDomainResources([]); setNewIpResources(''); setCategorySearch(''); setAddingRoute(false) }
+            if (saved) { setRouteName(''); setNewDomainResources([]); setNewIpResources('');  setAddingRoute(false) }
           } finally { setPending(null) } }}>{matchingRoute ? 'Добавить ресурсы в маршрут' : 'Создать маршрут'}</Button>
         </div></DialogContent></Dialog>
       </div>}
@@ -362,7 +315,7 @@ export function XraySelectorsPanel({ config, onSelect, onDeviceSelect, onAddRout
                 <RouteIcon route={route} />{routeLabel(route)}
                 <div className="ml-auto flex items-center gap-2">
                   <Button size="icon-sm" variant="outline" aria-label={collapsedRoutes[route] ? `Развернуть ${routeLabel(route)}` : `Свернуть ${routeLabel(route)}`} onClick={() => setCollapsedRoutes((current) => ({ ...current, [route]: !current[route] }))}>{collapsedRoutes[route] ? <IconChevronDown size={16} /> : <IconChevronUp size={16} />}</Button>
-                  {route !== 'VPN' && <Button size="sm" variant="outline" disabled={pending !== null} title="Ресурсы этого маршрута общие для всех устройств" onClick={() => { setEditingTag(route); setResourceText(global.ip?.join('\n') ?? ''); setEditDomainResources(global.domain ?? []); setEditCategorySearch('') }}>Ресурсы</Button>}
+                  {route !== 'VPN' && <Button size="sm" variant="outline" disabled={pending !== null} title="Ресурсы этого маршрута общие для всех устройств" onClick={() => { setEditingTag(route); setResourceText(global.ip?.join('\n') ?? ''); setEditDomainResources(global.domain ?? []); }}>Ресурсы</Button>}
                   {route.startsWith('custom:') && <Button size="sm" variant="outline" disabled={pending !== null} title="Название маршрута общее для всех устройств" onClick={() => { setRenamingTag(route); setRenamingName(routeLabel(route)) }}>Переименовать</Button>}
                   {route !== 'VPN' && <Button size="sm" variant="outline" disabled={pending !== null} title="Удалит маршрут у всех устройств" onClick={() => { if (window.confirm(`Удалить маршрут «${routeLabel(route)}» для всех устройств?`)) void onRemoveRoute(config.file, route) }}>Удалить маршрут</Button>}
                   <Button size="sm" variant="outline" disabled={testingTag !== null || testingAll || pingTargets.length === 0} aria-label={`Пинг ${routeLabel(route)}`} title="HTTP GET через подключения этого правила" onClick={() => void testAllOutbounds(route)}><IconBolt size={16} /> {testingRoute === route ? 'Пинг…' : 'Пинг'}</Button>
@@ -370,9 +323,9 @@ export function XraySelectorsPanel({ config, onSelect, onDeviceSelect, onAddRout
               </div>
               <Dialog open={editingTag === route} onOpenChange={(open) => { if (!open) setEditingTag('') }}><DialogContent className="max-w-[min(94vw,680px)]! max-h-[85dvh] overflow-y-auto"><DialogHeader><DialogTitle>Ресурсы: {routeLabel(route)}</DialogTitle></DialogHeader>
                 <p className="text-muted-foreground text-xs">Этот набор ресурсов используется в общей и выборочной маршрутизации всех устройств.</p>
-                {routeResourceKind === 'domain' ? <GeoSitePicker search={editCategorySearch} setSearch={setEditCategorySearch} resources={editDomainResources} setResources={setEditDomainResources} categories={categories} error={categoryError} /> : <>
+                {routeResourceKind === 'domain' ? <GeoDatabasePicker kind="domain" resources={editDomainResources} onChange={setEditDomainResources} /> : <>
                   <p className="text-muted-foreground text-sm">Выбери готовый IP-список или укажи IPv4/CIDR, по одному в строке.</p>
-                  {availableIpLists.map(value => <Button key={value} size="sm" variant={resourceLines(resourceText).includes(value) ? 'default' : 'outline'} className="w-fit" aria-pressed={resourceLines(resourceText).includes(value)} onClick={() => setResourceText(current => resourceLines(current).includes(value) ? resourceLines(current).filter(item => item !== value).join('\n') : [...resourceLines(current), value].join('\n'))}>{ipListLabel(value)}</Button>)}
+            <GeoDatabasePicker kind="ip" resources={resourceLines(resourceText)} onChange={values => setResourceText(values.join("\n"))} />
                   <Textarea value={resourceText} onChange={(event) => setResourceText(event.target.value)} rows={8} aria-label="IP-адреса и диапазоны маршрута" />
                 </>}
                 <div className="flex justify-end gap-2"><Button size="sm" variant="outline" onClick={() => setEditingTag('')}>Отмена</Button><Button size="sm" disabled={pending !== null || (routeResourceKind === 'domain' ? editDomainResources.length === 0 || editDomainResources.length > 30 : resourceLines(resourceText).length === 0 || resourceLines(resourceText).length > 30)} onClick={async () => { setPending(`resources:${route}`); try { if (await onEditResources(config.file, route, routeResourceKind === 'domain' ? editDomainResources : resourceLines(resourceText))) setEditingTag('') } finally { setPending(null) } }}>Сохранить ресурсы</Button></div>

@@ -119,11 +119,23 @@ pub async fn upload_geo(State(state): State<AppState>, Query(params): Query<Hash
     }
 }
 
-pub async fn get_geosite_categories() -> impl IntoResponse {
-    let result = task::spawn_blocking(|| -> Result<Vec<GeoCategory>, String> {
-        let file = File::open(Path::new(XRAY_ASSET_DIR).join("geosite.dat"))
-            .map_err(|_| "Файл geosite.dat не установлен".to_string())?;
+pub async fn get_geosite_categories(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+    let filename = params.get("file").cloned().unwrap_or_else(|| "geosite.dat".into());
+    let kind = params.get("kind").cloned().unwrap_or_else(|| "domain".into());
+    let result = task::spawn_blocking(move || -> Result<Vec<GeoCategory>, String> {
+        if filename.len() > 100 || filename.starts_with('.') || !filename.ends_with(".dat")
+            || !filename.bytes().all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c))
+            || !["domain", "ip"].contains(&kind.as_str()) {
+            return Err("Некорректное имя или тип базы".into())
+        }
+        let path = Path::new(XRAY_ASSET_DIR).join(&filename);
+        if !std::fs::symlink_metadata(&path).map_err(|_| "База не установлена")?.file_type().is_file() {
+            return Err("Нужен обычный файл базы".into())
+        }
+        let file = File::open(path).map_err(|_| "База не установлена".to_string())?;
         let data = unsafe { MmapOptions::new().map(&file) }.map_err(|e| e.to_string())?;
+        let (site, ip) = detect_geo_file_type(&data);
+        if !(if kind == "ip" { ip } else { site }) { return Err("База не соответствует типу ресурсов".into()) }
         let mut buf = &data[..];
         let mut categories = Vec::new();
         while buf.has_remaining() {
