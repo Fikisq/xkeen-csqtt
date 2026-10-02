@@ -10,7 +10,7 @@ import type { RouteTag } from '@/lib/xrayDeviceRouting'
 import { customRouteName } from '@/lib/xrayDeviceRouting'
 
 export const ROUTE_LABELS: Record<RouteTag, string> = {
-  VPN: 'Селектор', Youtube: 'YouTube', Discord: 'Discord',
+  VPN: 'Маршрут по умолчанию', Youtube: 'YouTube', Discord: 'Discord',
   Games: 'Игры', AI: 'Нейронки', Github: 'GitHub', RU: 'Российские сайты | домены', RU_IP: 'Российские сайты | IP',
 }
 

@@ -11,7 +11,7 @@ import type { Config } from '@/lib/types'
 import { RouteIcon, routeLabel } from '@/components/configuration/RouteIcon'
 import { GeoDatabasePicker } from '@/components/configuration/GeoDatabasePicker'
 import { DeviceTab } from '@/components/configuration/DeviceTab'
-import { baseRuleTag, deviceRuleTag, readDeviceIps, routeTags, usesSelector, validDeviceIp, type RouteTag, type RoutingRule } from '@/lib/xrayDeviceRouting'
+import { baseRuleTag, isFullBypass, deviceRuleTag, readDeviceIps, routeTags, usesSelector, validDeviceIp, type RouteTag, type RoutingRule } from '@/lib/xrayDeviceRouting'
 
 interface Outbound {
   tag: string
@@ -119,12 +119,12 @@ export function XraySelectorsPanel({ config, onSelect, onDeviceSelect, onAddRout
       return { outbounds: [], rules: [], devices: [] }
     }
   }, [config.savedContent])
-  const globalDirect = parsed.rules.some((rule) => baseRuleTag(rule) === 'VPN' && rule.outboundTag === 'direct')
+  const globalDirect = parsed.rules.some((rule) => baseRuleTag(rule) === 'VPN' && isFullBypass(rule))
   const globalCsqtt = parsed.rules.some((rule) => baseRuleTag(rule) === 'VPN' && rule.outboundTag?.toLowerCase() === 'csqtt')
   const globalWdtt = parsed.rules.some((rule) => baseRuleTag(rule) === 'VPN' && rule.outboundTag?.toLowerCase() === 'wdtt-plus')
   const globalLocked = globalDirect || globalCsqtt || globalWdtt
   const activeDevice = parsed.devices.includes(deviceIp) ? deviceIp : ''
-  const activeDeviceDirect = !!activeDevice && parsed.rules.some((rule) => baseRuleTag(rule) === deviceRuleTag(activeDevice, 'VPN') && rule.outboundTag === 'direct')
+  const activeDeviceDirect = !!activeDevice && parsed.rules.some((rule) => baseRuleTag(rule) === deviceRuleTag(activeDevice, 'VPN') && isFullBypass(rule))
   const activeDeviceCsqtt = !!activeDevice && parsed.rules.some((rule) => baseRuleTag(rule) === deviceRuleTag(activeDevice, 'VPN') && rule.outboundTag?.toLowerCase() === 'csqtt')
   const activeDeviceWdtt = !!activeDevice && parsed.rules.some((rule) => baseRuleTag(rule) === deviceRuleTag(activeDevice, 'VPN') && rule.outboundTag?.toLowerCase() === 'wdtt-plus')
   const activeDeviceLocked = activeDeviceDirect || activeDeviceCsqtt || activeDeviceWdtt
@@ -263,7 +263,7 @@ export function XraySelectorsPanel({ config, onSelect, onDeviceSelect, onAddRout
         </div></DialogContent></Dialog>
       </div>}
       <p className="text-muted-foreground mb-4 text-sm">
-        {activeDeviceDirect ? `Для ${activeDevice} включён полный обход перехвата: весь трафик идёт напрямую. Правила сервисов скрыты и не применяются.` : activeDeviceCsqtt || activeDeviceWdtt ? `Весь трафик ${activeDevice} направлен через ${activeDeviceWdtt ? 'WDTT Plus' : 'CSQTT'}. Правила сервисов скрыты и не применяются, пока выбран этот общий маршрут.` : activeDevice ? `Показаны только правила ${activeDevice}. Перетащите карточку или используйте стрелки, чтобы изменить приоритет.` : globalDirect ? 'По умолчанию трафик идёт напрямую. Индивидуальный выбор VPN для устройств имеет приоритет.' : globalCsqtt || globalWdtt ? `Общий ${globalWdtt ? 'WDTT Plus' : 'CSQTT'} задаёт маршрут по умолчанию. Индивидуальные настройки устройств имеют приоритет.` : 'Правила сервисов применяются по порядку 1, 2, 3… Селектор −1 служит общим маршрутом для остального трафика. Перетащите карточку или используйте стрелки, чтобы изменить приоритет.'}
+        {activeDeviceDirect ? `Для ${activeDevice} включён полный обход перехвата: весь трафик идёт напрямую. Правила сервисов скрыты и не применяются.` : activeDeviceCsqtt || activeDeviceWdtt ? `Весь трафик ${activeDevice} направлен через ${activeDeviceWdtt ? 'WDTT Plus' : 'CSQTT'}. Правила сервисов скрыты и не применяются, пока выбран этот общий маршрут.` : activeDevice ? `Показаны только правила ${activeDevice}. Перетащите карточку или используйте стрелки, чтобы изменить приоритет.` : globalDirect ? 'По умолчанию трафик идёт напрямую. Индивидуальный выбор VPN для устройств имеет приоритет.' : globalCsqtt || globalWdtt ? `Общий ${globalWdtt ? 'WDTT Plus' : 'CSQTT'} задаёт маршрут по умолчанию. Индивидуальные настройки устройств имеют приоритет.` : 'Правила сервисов применяются по порядку 1, 2, 3… Маршрут по умолчанию служит общим маршрутом для остального трафика. Перетащите карточку или используйте стрелки, чтобы изменить приоритет.'}
       </p>
       <div className="text-muted-foreground mb-4 flex flex-wrap items-center gap-2 text-xs">
         <span>Карточки подключений можно перетаскивать мышью. Их порядок сохраняется в этом браузере.</span>
@@ -278,7 +278,7 @@ export function XraySelectorsPanel({ config, onSelect, onDeviceSelect, onAddRout
           const specific = activeDevice ? parsed.rules.find((rule) => baseRuleTag(rule) === deviceRuleTag(activeDevice, route)) : undefined
           const inherited = !!activeDevice && !specific && route !== 'VPN'
           const selectedRule = specific ?? global
-          const selected = selectedRule.ruleTag?.endsWith('|nfqws2') ? '@nfqws2' : usesSelector(selectedRule) ? '@selector' : selectedRule.outboundTag ?? (selectedRule.balancerTag ? `@balancer:${selectedRule.balancerTag}` : undefined)
+          const selected = selectedRule.ruleTag?.endsWith('|nfqws2') ? '@nfqws2' : route === 'VPN' && isFullBypass(selectedRule) ? '@bypass' : usesSelector(selectedRule) ? '@selector' : selectedRule.outboundTag ?? (selectedRule.balancerTag ? `@balancer:${selectedRule.balancerTag}` : undefined)
           const subscribed = parsed.outbounds.filter((outbound) => outbound.tag.startsWith('sub-'))
           const base = subscribed.length ? parsed.outbounds.filter((outbound) => outbound.tag.startsWith('sub-') || outbound.tag === 'direct' || outbound.tag === 'nfqws-direct' || /csqtt/i.test(outbound.tag) || outbound.tag === 'wdtt-plus') : parsed.outbounds
           const primary = parsed.outbounds.filter((outbound) => base.includes(outbound) || outbound.tag === selected)
@@ -296,7 +296,7 @@ export function XraySelectorsPanel({ config, onSelect, onDeviceSelect, onAddRout
               onClick={() => { if (selected !== outbound.tag || (activeDevice && !specific)) void change(route, outbound.tag, global.index) }}
               className="flex min-h-22 w-full flex-col justify-between px-3 py-2.5 pr-12 text-left disabled:opacity-60">
               <span className="font-medium">{outboundTitle(outbound)}</span>
-              <span className="text-muted-foreground text-xs">{route === 'VPN' && outbound.tag === 'direct' ? 'Полный обход перехвата · напрямую' : outbound.tag === 'nfqws-direct' ? `Прямой WAN · ${nfqwsCanary?.strategyMode === 'tcp' ? 'TCP' : 'TCP + QUIC'}` : outboundTransport(outbound)}</span>
+              <span className="text-muted-foreground text-xs">{route === 'VPN' && outbound.tag === 'direct' ? 'Напрямую; правила ресурсов действуют' : outbound.tag === 'nfqws-direct' ? `Прямой WAN · ${nfqwsCanary?.strategyMode === 'tcp' ? 'TCP' : 'TCP + QUIC'}` : outboundTransport(outbound)}</span>
             </button>
             <button type="button" disabled={testingTag !== null || testingAll} aria-label={`Проверить соединение через ${outboundTitle(outbound)}`} title={latencies[outbound.tag]?.error ?? 'Проверить соединение через узел'}
               onClick={() => void testOutbound(outbound.tag)} className={cn('absolute right-2 top-2 rounded p-1 text-xs font-medium tabular-nums hover:bg-blue-500/20 disabled:opacity-50', latencies[outbound.tag]?.ms !== undefined ? 'text-green-400' : latencies[outbound.tag]?.error ? 'text-red-400' : 'text-sky-400')}>
@@ -336,8 +336,12 @@ export function XraySelectorsPanel({ config, onSelect, onDeviceSelect, onAddRout
                 <Button size="sm" disabled={pending !== null || !renamingName.trim()} onClick={async () => { setPending(`rename:${route}`); try { if (await onRenameRoute(config.file, route, renamingName)) { setRenamingTag(''); setRenamingName('') } } finally { setPending(null) } }}>Сохранить</Button>
                 <Button size="sm" variant="outline" onClick={() => { setRenamingTag(''); setRenamingName('') }}>Отмена</Button>
               </div>}
+              {route === 'VPN' && <div className="mb-3 flex flex-wrap items-center gap-2">
+                <Button size="sm" variant={selected === '@bypass' ? 'default' : 'outline'} disabled={pending !== null} aria-pressed={selected === '@bypass'} onClick={() => void change(route, selected === '@bypass' ? 'direct' : '@bypass', global.index)}>Полный обход</Button>
+                <span className="text-muted-foreground text-xs">Весь трафик напрямую, без правил ресурсов.</span>
+              </div>}
               <div className="text-muted-foreground mb-3 text-sm">
-                {activeDevice && !specific ? 'Как в общей маршрутизации' : selected?.startsWith('@balancer:') ? 'В старой конфигурации выбран Автовыбор. Выберите узел ниже.' : `Выбрано: ${selected === '@selector' ? 'Селектор' : selected === '@nfqws2' ? 'nfqws2 · прямой выход' : selected === 'direct' ? 'Без VPN' : parsed.outbounds.find((outbound) => outbound.tag === selected)?.xkeenDisplayName ?? selected ?? 'не выбрано'}`}
+                {activeDevice && !specific ? 'Как в общей маршрутизации' : selected?.startsWith('@balancer:') ? 'В старой конфигурации выбран Автовыбор. Выберите узел ниже.' : `Выбрано: ${selected === '@bypass' ? 'Полный обход' : selected === '@selector' ? 'Маршрут по умолчанию' : selected === '@nfqws2' ? 'nfqws2 · прямой выход' : selected === 'direct' ? 'Без VPN' : parsed.outbounds.find((outbound) => outbound.tag === selected)?.xkeenDisplayName ?? selected ?? 'не выбрано'}`}
               </div>
               {route === 'Games' && <p className="text-muted-foreground mb-3 text-xs">Правило охватывает указанные домены. Соединения игры с IP-серверами могут идти по общему маршруту.</p>}
               {!collapsedRoutes[route] && route !== 'VPN' && <details className="text-muted-foreground mb-3 text-xs"><summary className="cursor-pointer">Что входит в маршрут</summary><div className="mt-1 break-words">{routeResourceKind === 'ip' ? 'IP-диапазоны' : 'Домены'}: {(routeResourceKind === 'ip' ? global.ip : global.domain)?.join(', ') || 'не заданы'}</div></details>}
@@ -349,7 +353,7 @@ export function XraySelectorsPanel({ config, onSelect, onDeviceSelect, onAddRout
                   onDrop={(event) => { event.preventDefault(); event.stopPropagation(); if (draggedProtocol) moveProtocol(draggedProtocol, tag, orderedCards); setDraggedProtocol(null) }}
                   onDragEnd={(event) => { event.stopPropagation(); setDraggedProtocol(null) }}
                   className={cn('cursor-grab active:cursor-grabbing', draggedProtocol === tag && 'opacity-60')}>
-                  {tag === '@selector' ? <button type="button" disabled={pending !== null} aria-pressed={selected === '@selector'} onClick={() => { if (selected !== '@selector' || (activeDevice && !specific)) void change(route, '@selector', global.index) }} className={cn('flex min-h-22 w-full flex-col justify-between rounded-md border px-3 py-2.5 text-left text-sm', selected === '@selector' ? 'border-blue-400 bg-blue-500/20' : 'border-ring/40 hover:border-blue-400 hover:bg-blue-500/10')}><span className="font-medium">🌐 Селектор</span><span className="text-muted-foreground text-xs">Общий выбор протокола</span></button>
+                  {tag === '@selector' ? <button type="button" disabled={pending !== null} aria-pressed={selected === '@selector'} onClick={() => { if (selected !== '@selector' || (activeDevice && !specific)) void change(route, '@selector', global.index) }} className={cn('flex min-h-22 w-full flex-col justify-between rounded-md border px-3 py-2.5 text-left text-sm', selected === '@selector' ? 'border-blue-400 bg-blue-500/20' : 'border-ring/40 hover:border-blue-400 hover:bg-blue-500/10')}><span className="font-medium">🌐 Маршрут по умолчанию</span><span className="text-muted-foreground text-xs">Общий выбор протокола</span></button>
                     : tag === '@nfqws2' ? <button type="button" disabled={pending !== null} aria-pressed={selected === '@nfqws2'} onClick={() => void change(route, '@nfqws2', global.index)} className={cn('flex min-h-22 w-full flex-col justify-between rounded-md border px-3 py-2.5 text-left text-sm', selected === '@nfqws2' ? 'border-blue-400 bg-blue-500/20' : 'border-ring/40 hover:border-blue-400 hover:bg-blue-500/10')}><span className="font-medium">nfqws2 · zapret2</span><span className="text-muted-foreground text-xs">Прямой WAN через nfqws2 · только {nfqwsCanary?.device}. Сохраните маршрут для применения.</span></button>
                     : tag === '@missing-csqtt' ? <div className="border-ring/30 text-muted-foreground flex min-h-22 flex-col justify-between rounded-md border border-dashed px-3 py-2.5 text-sm"><span className="font-medium">CSQTT</span><span className="text-xs">Локальный выход не настроен</span></div>
                     : primaryByTag.has(tag) ? card(primaryByTag.get(tag)!) : null}

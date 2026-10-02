@@ -30,7 +30,7 @@ async fn sync_capture(content: &str) -> Result<(), String> {
 
 fn global_direct(config: &Value) -> bool {
     config.pointer("/routing/rules").and_then(Value::as_array)
-        .is_some_and(|rules| rules.iter().any(|rule| rule.get("ruleTag").and_then(Value::as_str) == Some("VPN")
+        .is_some_and(|rules| rules.iter().any(|rule| matches!(rule.get("ruleTag").and_then(Value::as_str), Some("VPN" | "VPN|bypass"))
             && rule.get("outboundTag").and_then(Value::as_str) == Some("direct")))
 }
 
@@ -175,9 +175,9 @@ fn direct_device_ips(config: &Value) -> Result<BTreeSet<Ipv4Addr>, String> {
         .ok_or("В JSON нет правил маршрутизации")?;
     for rule in rules {
         let Some(tag) = rule.get("ruleTag").and_then(Value::as_str) else { continue };
-        let Some(ip) = tag.trim_end_matches("|selector").trim_end_matches("|nfqws2")
+        let Some(ip) = tag.trim_end_matches("|selector").trim_end_matches("|nfqws2").trim_end_matches("|split").trim_end_matches("|bypass")
             .strip_prefix("device:").and_then(|tag| tag.strip_suffix(":VPN")) else { continue };
-        if rule.get("outboundTag").and_then(Value::as_str) != Some("direct") { continue }
+        if rule.get("outboundTag").and_then(Value::as_str) != Some("direct") || tag.ends_with("|split") || tag.ends_with("|selector") { continue }
         let parsed = ip.parse::<Ipv4Addr>().map_err(|_| format!("Некорректный IP устройства: {ip}"))?;
         ips.insert(parsed);
     }

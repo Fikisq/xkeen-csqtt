@@ -26,7 +26,7 @@ import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
 import { apiCall, clashFetch } from '../../../lib/api'
 import { fetchClashProxies, useProxiesStore, useSettings, useAppContext } from '../../../lib/store'
-import { defaultMihomoChoices, isMihomoFullRoute, mihomoRouteTags, orderedMihomoRouteTags, readMihomoCustomRoutes, readMihomoDevices } from '../../../lib/mihomoDeviceRouting'
+import { defaultMihomoChoices, readMihomoFullBypass, isMihomoFullRoute, mihomoRouteTags, orderedMihomoRouteTags, readMihomoCustomRoutes, readMihomoDevices } from '../../../lib/mihomoDeviceRouting'
 import { findRoutePresets } from '../../../lib/routePresets'
 import { validDeviceIp, type RouteTag } from '../../../lib/xrayDeviceRouting'
 import { RouteIcon, routeLabel } from '../RouteIcon'
@@ -103,7 +103,7 @@ function isGeneralDirect(proxies: Record<string, ProxyInfo | undefined>, overrid
   return false
 }
 function displayName(name: string): string {
-  if (isGeneralSelector(name)) return 'Селектор'
+  if (isGeneralSelector(name)) return 'Маршрут по умолчанию'
   if (name === 'DIRECT' || isNoVpn(name)) return '🔓 Без VPN'
   return name
 }
@@ -915,7 +915,7 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
     })
   )
   const generalSelector = selectorNames.find((name) => name === 'VPN') ?? selectorNames.find(isGeneralSelector)
-  const globalDirect = !!generalSelector && isGeneralDirect(allProxyData)
+  const globalDirect = !!generalSelector && isGeneralDirect(allProxyData) && readMihomoFullBypass(configContent)
   const activeDevice = devices.find((profile) => profile.ip === deviceIp)
   const activeDeviceDirect = !!activeDevice && isMihomoFullRoute(activeDevice.choices.VPN)
   const orderedSelectorNames = useMemo(() => {
@@ -1101,6 +1101,7 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
             </>}
           </div>)}</div>}
         </div>}
+        {!activeDevice && <Button size="sm" variant={globalDirect ? 'default' : 'outline'} disabled={routePending} onClick={() => void onSelectDraft(defaultChoices.VPN, globalDirect ? 'DIRECT' : '@bypass')}>Полный обход</Button>}
         {globalDirect && <p className="text-muted-foreground text-sm">Общий трафик идёт напрямую. Для отдельных правил и устройств можно выбрать VPN ниже.</p>}
         {!activeDevice && orderedSelectorNames.filter(name => !globalDirect || isGeneralSelector(name)).map((name) => {
           const route = orderedTags.find((tag) => defaultChoices[tag] === name)
@@ -1130,15 +1131,16 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
         {activeDevice && ['VPN', ...orderedTags, ...routeTags.filter((tag) => tag !== 'VPN' && !orderedTags.includes(tag))].filter(route => !activeDeviceDirect || route === 'VPN').map((route) => (
           <section key={route} className="border-border bg-input-background rounded-xl border p-4">
             <div className="mb-2 flex items-center gap-2 text-[15px] font-medium"><RouteIcon route={route} />{routeLabel(route)}<Button size="sm" variant="outline" className="ml-auto" disabled={!!testingGroups[defaultChoices[route]]} onClick={() => void testAll(defaultChoices[route], deviceOptions.filter((name) => name === 'DIRECT' || (!isNoVpn(name) && isRouteOption(name, route === 'VPN', allProxyData))))}> <IconBoltFilled size={16} />{testingGroups[defaultChoices[route]] ? 'Пинг…' : 'Пинг'}</Button></div>
-            <div className="text-muted-foreground mb-3 text-sm">Выбрано: {displayName(activeDevice.choices[route] === defaultChoices[route] ? allProxyData[defaultChoices[route]]?.now ?? activeDevice.choices[route] : activeDevice.choices[route])}</div>
+            {route === 'VPN' && <Button size="sm" className="mb-2" variant={activeDevice.choices.VPN === 'DIRECT' ? 'default' : 'outline'} disabled={devicePending} onClick={() => void changeDevice(activeDevice.ip, route, activeDevice.choices.VPN === 'DIRECT' ? '@direct' : 'DIRECT')}>Полный обход</Button>}
+            <div className="text-muted-foreground mb-3 text-sm">Выбрано: {displayName(activeDevice.choices[route] === '@direct' ? 'DIRECT' : activeDevice.choices[route] === defaultChoices[route] ? allProxyData[defaultChoices[route]]?.now ?? activeDevice.choices[route] : activeDevice.choices[route])}</div>
             <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
               {sortProxyNames(deviceOptions.filter((name) => name === 'DIRECT' || (!isNoVpn(name) && isRouteOption(name, route === 'VPN', allProxyData))), 'default', allProxyData).map((name) => {
                 const proxy = allProxyData[name]
-                const selected = activeDevice.choices[route] === defaultChoices[route] ? allProxyData[defaultChoices[route]]?.now ?? activeDevice.choices[route] : activeDevice.choices[route]
+                const selected = activeDevice.choices[route] === '@direct' ? 'DIRECT' : activeDevice.choices[route] === defaultChoices[route] ? allProxyData[defaultChoices[route]]?.now ?? activeDevice.choices[route] : activeDevice.choices[route]
                 const delay = proxy ? getLastDelay(proxy) : null
                 return <div key={name} role="button" tabIndex={0} aria-pressed={selected === name} aria-disabled={devicePending}
-                  onClick={() => { if (!devicePending && activeDevice.choices[route] !== name) void changeDevice(activeDevice.ip, route, name) }}
-                  onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && !devicePending && activeDevice.choices[route] !== name) { event.preventDefault(); void changeDevice(activeDevice.ip, route, name) } }}
+                  onClick={() => { if (!devicePending && activeDevice.choices[route] !== (route === 'VPN' && name === 'DIRECT' ? '@direct' : name)) void changeDevice(activeDevice.ip, route, route === 'VPN' && name === 'DIRECT' ? '@direct' : name) }}
+                  onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && !devicePending && activeDevice.choices[route] !== (route === 'VPN' && name === 'DIRECT' ? '@direct' : name)) { event.preventDefault(); void changeDevice(activeDevice.ip, route, route === 'VPN' && name === 'DIRECT' ? '@direct' : name) } }}
                   className={cn('relative flex min-h-28 flex-col justify-between rounded-xl border p-3.5 pr-12 text-left text-sm', selected === name ? 'border-blue-400 bg-blue-500/20' : 'border-ring/40 hover:border-blue-400 hover:bg-blue-500/10', devicePending && 'opacity-60')}>
                   <span className="font-medium" title={name}>{proxy ? cardTitle(proxy) : displayName(name)}</span>
                   <span className="flex items-center justify-between gap-2"><span className="text-muted-foreground text-xs">{nodeTransports[name] ?? (proxy ? getProxyTransport(proxy) : 'Прямое соединение')}</span>

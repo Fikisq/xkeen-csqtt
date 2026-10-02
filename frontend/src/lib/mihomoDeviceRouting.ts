@@ -198,6 +198,12 @@ export function prepareMihomoRouteGroups(content: string): string {
   return clean.slice(0, start) + updated + clean.slice(end)
 }
 
+export function readMihomoFullBypass(content: string): boolean {
+  return !/^# xkeen-full-bypass false$/m.test(content)
+}
+export function withMihomoFullBypass(content: string, enabled: boolean): string {
+  return `# xkeen-full-bypass ${enabled}\n` + content.replace(/^# xkeen-full-bypass (?:true|false)\r?\n/gm, '')
+}
 export function isMihomoFullRoute(target: string): boolean {
   return target === 'DIRECT' || /^(?:CSQTT|WDTT[ -]Plus)$/i.test(target) || /без\s*(?:vpn|впн)/i.test(target)
 }
@@ -232,7 +238,7 @@ export function updateMihomoDevice(content: string, ip: string, route: RouteTag 
     if (target) {
       if (/[\r\n,]/.test(target)) throw new Error('Имя подключения содержит недопустимый символ')
       choices[route] = target
-      if (route === 'VPN' && isMihomoFullRoute(target)) for (const tag of mihomoRouteTags(content)) choices[tag] = target
+      if (route === 'VPN' && target !== 'DIRECT' && isMihomoFullRoute(target)) for (const tag of mihomoRouteTags(content)) choices[tag] = target
     }
     profiles.push({ ip, choices })
   }
@@ -240,11 +246,11 @@ export function updateMihomoDevice(content: string, ip: string, route: RouteTag 
   const providers = providerNames(cleanContent)
   const aliases = new Map<string, string>()
   for (const profile of profiles) for (const name of Object.values(profile.choices)) {
-    if (existing.has(name) || aliases.has(name)) continue
+    if (name === '@direct' || existing.has(name) || aliases.has(name)) continue
     if (!providers.length) throw new Error(`Узел ${name} не объявлен в конфигурации Mihomo`)
     aliases.set(name, aliasFor(name))
   }
-  const ruleTarget = (name: string) => aliases.get(name) ?? name
+  const ruleTarget = (name: string) => name === '@direct' ? 'DIRECT' : aliases.get(name) ?? name
   const managed = profiles.map((profile) => {
     const source = `SRC-IP-CIDR,${profile.ip}/32`
     const lines = [`  # ${START} ${profile.ip} ${encodeURIComponent(JSON.stringify(profile.choices))}`]

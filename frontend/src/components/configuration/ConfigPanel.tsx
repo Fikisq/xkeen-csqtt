@@ -43,7 +43,7 @@ import { fetchClashProxies, useProxiesStore, syncClashApiPort, useAppContext, us
 import type { Config } from '../../lib/types'
 import { cn } from '../../lib/utils'
 import { addCustomRoute, addCustomIpRoute, normalizeDevicePriority, baseRuleTag, mergeRouteDomains, removeCustomRoute, renameCustomRoute, replaceRouteResources, reorderXrayRules, updateDeviceRules, updateGlobalRules, type RouteTag, type RoutingRule } from '../../lib/xrayDeviceRouting'
-import { addMihomoCustomRoute, defaultMihomoChoices, isMihomoFullRoute, mihomoRouteTags, readMihomoDevices, removeMihomoCustomRoute, renameMihomoCustomRoute, reorderMihomoRoutes, updateMihomoDevice } from '../../lib/mihomoDeviceRouting'
+import { addMihomoCustomRoute, defaultMihomoChoices, readMihomoFullBypass, withMihomoFullBypass, isMihomoFullRoute, mihomoRouteTags, readMihomoDevices, removeMihomoCustomRoute, renameMihomoCustomRoute, reorderMihomoRoutes, updateMihomoDevice } from '../../lib/mihomoDeviceRouting'
 import { enableXrayRoutingCards } from '../../lib/xraySubscription'
 import { linkProviderToVpn } from '../../lib/mihomoSubscription'
 import { applyEdits, modify, parse as parseJsonc } from 'jsonc-parser'
@@ -680,7 +680,7 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
   async function selectXrayOutbound(file: string, ruleIndex: number, outboundTag: string) {
     await applyXrayRoutingEdit(file, (content) => {
       const parsed = parseJsonc(content)
-      if (!parsed?.routing?.rules?.[ruleIndex] || (outboundTag !== '@selector' && !outboundTag.startsWith('@balancer:') && !parsed.outbounds?.some((item: any) => item.tag === outboundTag))) {
+      if (!parsed?.routing?.rules?.[ruleIndex] || (outboundTag !== '@selector' && outboundTag !== '@bypass' && !outboundTag.startsWith('@balancer:') && !parsed.outbounds?.some((item: any) => item.tag === outboundTag))) {
         throw new Error('Правило или узел больше не существует')
       }
       const route = baseRuleTag(parsed.routing.rules[ruleIndex] as RoutingRule) as RouteTag
@@ -693,7 +693,7 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
     await applyXrayRoutingEdit(file, (content) => {
       const parsed = parseJsonc(content)
       if (!Array.isArray(parsed?.routing?.rules)) throw new Error('Правила Xray не найдены')
-      if (outboundTag && outboundTag !== '@selector' && outboundTag !== '@nfqws2' && !parsed.outbounds?.some((item: any) => item.tag === outboundTag)) throw new Error('Узел больше не существует')
+      if (outboundTag && outboundTag !== '@selector' && outboundTag !== '@bypass' && outboundTag !== '@nfqws2' && !parsed.outbounds?.some((item: any) => item.tag === outboundTag)) throw new Error('Узел больше не существует')
       const rules = updateDeviceRules(parsed.routing.rules as RoutingRule[], ip, route, outboundTag)
       return applyEdits(content, modify(content, ['routing', 'rules'], rules, { formattingOptions: { insertSpaces: true, tabSize: 2 } }))
     }, route === null ? `Правила для ${ip} удалены` : `Маршрутизация ${ip} сохранена`)
@@ -780,12 +780,13 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
   }
   async function selectMihomoDraft(name: string, target: string): Promise<boolean> {
     return editMihomoCustomRoute(content => {
-      const selections = { ...readSelections(content), [name]: target }
+      const actualTarget = target === '@bypass' ? 'DIRECT' : target
+      const selections = { ...readSelections(content), [name]: actualTarget }
       const defaults = defaultMihomoChoices(content)
-      if (name === defaults.VPN && isMihomoFullRoute(target)) for (const group of Object.values(defaults)) {
-        if (group !== 'DIRECT' && group !== target) selections[group] = target
+      if (name === defaults.VPN && (target === '@bypass' || (target !== 'DIRECT' && isMihomoFullRoute(target)))) for (const group of Object.values(defaults)) {
+        if (group !== 'DIRECT' && group !== target) selections[group] = actualTarget
       }
-      return withSelections(content, selections)
+      return withSelections(name === defaults.VPN ? withMihomoFullBypass(content, target === '@bypass') : content, selections)
     }, '')
   }
   async function commitMihomoRouting() {
@@ -816,14 +817,14 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
         return false
       }
       const profiles = readMihomoDevices(content)
-      const ips = profiles.filter(p => direct(p.choices.VPN) && routes.every(route => direct(p.choices[route] === defaults[route] ? defaults[route] : p.choices[route]))).map(p => p.ip)
+      const ips = profiles.filter(p => p.choices.VPN !== '@direct' && direct(p.choices.VPN)).map(p => p.ip)
       const bypass = await apiCall<{success: boolean; error?: string; warning?: string}>('POST', 'mihomo/device-direct', {ips})
       if (!bypass.success) throw new Error(bypass.error || 'Не удалось применить обход устройств')
       let name: string | undefined = proxies.VPN ? 'VPN' : 'Селектор'
       const seen = new Set<string>()
       while (name && !seen.has(name) && name !== 'DIRECT' && !/без\s*(?:vpn|впн)/i.test(name)) { seen.add(name); name = choices[name] ?? proxies[name]?.now }
       const selective = profiles.some(p => !direct(p.choices.VPN) || routes.some(route => !direct(p.choices[route] === defaults[route] ? defaults[route] : p.choices[route])))
-      const global = await apiCall<{success: boolean; error?: string}>('POST', 'mihomo/global-direct', {enabled: !!name && direct(name) && !selective && routes.every(route => direct(defaults[route]))})
+      const global = await apiCall<{success: boolean; error?: string}>('POST', 'mihomo/global-direct', {enabled: readMihomoFullBypass(content) && !!name && direct(name) && !selective && routes.every(route => direct(defaults[route]))})
       if (!global.success) throw new Error(global.error || 'Не удалось применить общий режим')
       await fetchClashProxies(activeClashApiPort ?? '', clashApiSecret, true, activeClashApiUnix)
       return bypass.warning
