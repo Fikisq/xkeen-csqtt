@@ -366,6 +366,17 @@ const parseHysteria2Xray = (uri) => {
     if (params.fm) finalmask = JSON.parse(decodeURIComponent(params.fm))
   } catch { }
 
+  if (params.obfs) {
+    if (params.obfs !== 'salamander') throw new Error(`Маскировка Hysteria2 «${params.obfs}» не поддерживается в Xray`)
+    if (!params['obfs-password']) throw new Error('Для Salamander не указан пароль маскировки')
+    if (!finalmask || typeof finalmask !== 'object' || Array.isArray(finalmask)) throw new Error('Некорректные настройки FinalMask')
+    const masks = finalmask.udp || []
+    if (!Array.isArray(masks)) throw new Error('Некорректный список маскировок FinalMask')
+    if (!masks.some((mask) => mask?.type === 'salamander')) {
+      finalmask.udp = [...masks, { type: 'salamander', settings: { password: params['obfs-password'] } }]
+    }
+  }
+
   const streamSettings = getStreamSettings('hysteria', { ...params, security: params.security || 'tls' })
   streamSettings.hysteriaSettings = {
     auth: decodeURIComponent(url.password ? `${url.username}:${url.password}` : url.username),

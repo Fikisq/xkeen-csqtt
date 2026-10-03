@@ -103,6 +103,17 @@ fn outbound(uri: &str, tag: &str) -> Result<Value, String> {
             if settings["tlsSettings"].is_object() && settings["tlsSettings"]["alpn"].is_null() { settings["tlsSettings"]["alpn"] = json!(["h3"]); }
             settings["finalmask"] = params.get("fm").and_then(|value| serde_json::from_str::<Value>(value).ok())
                 .unwrap_or_else(|| json!({"quicParams": {"congestion": "bbr", "debug": false}}));
+            if let Some(obfs) = get("obfs").filter(|value| !value.is_empty()) {
+                if obfs != "salamander" { return Err("Маскировка Hysteria2 не поддерживается в Xray".into()); }
+                let password = get("obfs-password").filter(|value| !value.is_empty())
+                    .ok_or("Для Salamander не указан пароль маскировки")?;
+                let mask = settings["finalmask"].as_object_mut().ok_or("Некорректные настройки FinalMask")?;
+                let udp = mask.entry("udp").or_insert_with(|| json!([])).as_array_mut()
+                    .ok_or("Некорректный список маскировок FinalMask")?;
+                if !udp.iter().any(|item| item["type"].as_str() == Some("salamander")) {
+                    udp.push(json!({"type": "salamander", "settings": {"password": password}}));
+                }
+            }
             json!({"tag": tag, "protocol": "hysteria", "settings": {"address": host, "port": port, "version": 2}, "streamSettings": settings})
         }
         _ => return Err("Неподдерживаемый протокол в подписке".into()),
