@@ -25,6 +25,7 @@ const CORES = [
 ]
 
 interface CsqttStatus {
+  captcha?: { redirect_uri: string; session_token?: string } | null
   vkApiNotice?: string | null
   installed: boolean
   running: boolean
@@ -73,6 +74,14 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
   const [csqttHashMode, setCsqttHashMode] = useState('auto_js')
   const [csqttObfs, setCsqttObfs] = useState('audio')
   const [csqttTurnTransport, setCsqttTurnTransport] = useState('udp')
+  const [csqttTurnSubnet, setCsqttTurnSubnet] = useState('')
+  const [csqttTurnIpLimit, setCsqttTurnIpLimit] = useState('8')
+  const [csqttCustomTurnIps, setCsqttCustomTurnIps] = useState('')
+  const [csqttBootstrapDns, setCsqttBootstrapDns] = useState('yandex')
+  const [csqttTurnPresets, setCsqttTurnPresets] = useState<{ id: string; title: string; ips: string[] }[]>([])
+  const [pingingTurn, setPingingTurn] = useState(false)
+  const [turnPickerOpen, setTurnPickerOpen] = useState(false)
+  const [turnPings, setTurnPings] = useState<{ id: string; title: string; total: number; answered: number; minMs: number | null; avgMs: number | null; bestIp: string | null }[]>([])
   const [csqttPeer, setCsqttPeer] = useState('')
   const [csqttPassword, setCsqttPassword] = useState('')
   const [csqttVkToken, setCsqttVkToken] = useState('')
@@ -86,12 +95,27 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
   const [csqttHasPassword, setCsqttHasPassword] = useState(false)
   const [csqttHasVkToken, setCsqttHasVkToken] = useState(false)
   const [csqttError, setCsqttError] = useState('')
+  const [captchaResult, setCaptchaResult] = useState('')
   const [savingCsqtt, setSavingCsqtt] = useState(false)
   const [generatingCsqtt, setGeneratingCsqtt] = useState(false)
   const [csqttRestartRequired, setCsqttRestartRequired] = useState(false)
-  const [csqttSavedValues, setCsqttSavedValues] = useState({ hashes: 4, workers: 81, peer: '', hashMode: 'auto_js', obfs: 'audio', turnTransport: 'udp' })
+  const [csqttSavedValues, setCsqttSavedValues] = useState({ hashes: 4, workers: 81, peer: '', hashMode: 'auto_js', obfs: 'audio', turnTransport: 'udp', turnSubnet: '', turnIpLimit: '8', customTurnIps: '', bootstrapDns: 'yandex' })
+  const csqttApkClient = csqttClientVersion === '2.5.0-apk-router'
   const validCsqttNumbers = Number.isInteger(Number(csqttHashes)) && Number(csqttHashes) >= 1 && Number(csqttHashes) <= 6
-    && Number.isInteger(Number(csqttWorkers)) && Number(csqttWorkers) >= 9 && Number(csqttWorkers) <= 126 && Number(csqttWorkers) % 9 === 0
+    && Number.isInteger(Number(csqttWorkers)) && (csqttApkClient
+      ? Number(csqttWorkers) >= 3 && Number(csqttWorkers) <= 99
+      : Number(csqttWorkers) >= 9 && Number(csqttWorkers) <= 126 && Number(csqttWorkers) % 9 === 0)
+
+  async function pingTurnServers() {
+    setPingingTurn(true)
+    setCsqttError('')
+    try {
+      const response = await apiCall<{ success: boolean; results?: typeof turnPings; error?: string }>('POST', 'csqtt/turn-ping')
+      if (!response.success) throw new Error(response.error || 'Не удалось измерить задержку TURN')
+      setTurnPings(response.results ?? [])
+    } catch (error) { setCsqttError(error instanceof Error ? error.message : 'Ошибка замера TURN') }
+    finally { setPingingTurn(false) }
+  }
 
   function parseCsqttLink() {
     try {
@@ -113,7 +137,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
   async function openCsqttSettings() {
     setCsqttError('')
     try {
-      const result = await apiCall<{ success: boolean; hashes?: number; workers?: number; peer?: string; hashMode?: string; obfs?: string; turnTransport?: string; hasPassword?: boolean; hasVkToken?: boolean; hasManualHashes?: boolean; clientVersion?: string; error?: string }>('GET', 'csqtt/settings')
+      const result = await apiCall<{ success: boolean; hashes?: number; workers?: number; peer?: string; hashMode?: string; obfs?: string; turnTransport?: string; turnSubnet?: string; turnIpLimit?: number; customTurnIps?: string; bootstrapDns?: string; turnPresets?: { id: string; title: string; ips: string[] }[]; hasPassword?: boolean; hasVkToken?: boolean; hasManualHashes?: boolean; clientVersion?: string; error?: string }>('GET', 'csqtt/settings')
       if (!result.success || !result.hashes || !result.workers) throw new Error(result.error || 'Не удалось прочитать параметры CSQTT')
       setCsqttHashes(String(result.hashes))
       setCsqttClientVersion(result.clientVersion ?? '2.0')
@@ -122,6 +146,11 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
       setCsqttHashMode(result.hashMode ?? 'auto_js')
       setCsqttObfs(result.obfs ?? 'audio')
       setCsqttTurnTransport(result.turnTransport ?? 'udp')
+      setCsqttTurnSubnet(result.turnSubnet ?? '')
+      setCsqttTurnIpLimit(String(result.turnIpLimit ?? 8))
+      setCsqttCustomTurnIps(result.customTurnIps ?? '')
+      setCsqttBootstrapDns(result.bootstrapDns ?? 'yandex')
+      setCsqttTurnPresets(result.turnPresets ?? [])
       setCsqttPassword('')
       setCsqttVkToken('')
       setCsqttManualHashes('')
@@ -130,7 +159,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
       setCsqttLinkParsed(false)
       setCsqttHasPassword(!!result.hasPassword)
       setCsqttHasVkToken(!!result.hasVkToken)
-      setCsqttSavedValues({ hashes: result.hashes, workers: result.workers, peer: result.peer ?? '', hashMode: result.hashMode ?? 'auto_js', obfs: result.obfs ?? 'audio', turnTransport: result.turnTransport ?? 'udp' })
+      setCsqttSavedValues({ hashes: result.hashes, workers: result.workers, peer: result.peer ?? '', hashMode: result.hashMode ?? 'auto_js', obfs: result.obfs ?? 'audio', turnTransport: result.turnTransport ?? 'udp', turnSubnet: result.turnSubnet ?? '', turnIpLimit: String(result.turnIpLimit ?? 8), customTurnIps: result.customTurnIps ?? '', bootstrapDns: result.bootstrapDns ?? 'yandex' })
       setEditingCsqtt(true)
     } catch (error) { setCsqttError(error instanceof Error ? error.message : 'Ошибка CSQTT') }
   }
@@ -142,11 +171,11 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
       const result = await apiCall<{ success: boolean; error?: string }>('PUT', 'csqtt/settings', {
         hashes: Number(csqttHashes), workers: Number(csqttWorkers), peer: csqttPeer.trim(),
         password: csqttPassword, vkToken: csqttVkToken.trim(), hashMode: csqttHashMode,
-        obfs: csqttObfs, turnTransport: csqttTurnTransport, manualHashes: csqttManualHashes.trim(),
+        obfs: csqttObfs, turnTransport: csqttTurnTransport, turnSubnet: csqttTurnSubnet, turnIpLimit: Number(csqttTurnIpLimit), customTurnIps: csqttCustomTurnIps.trim(), bootstrapDns: csqttBootstrapDns.trim(), manualHashes: csqttManualHashes.trim(),
       })
       if (!result.success) throw new Error(result.error || 'Не удалось сохранить параметры CSQTT')
       setCsqttRestartRequired(true)
-      setCsqttSavedValues({ hashes: Number(csqttHashes), workers: Number(csqttWorkers), peer: csqttPeer.trim(), hashMode: csqttHashMode, obfs: csqttObfs, turnTransport: csqttTurnTransport })
+      setCsqttSavedValues({ hashes: Number(csqttHashes), workers: Number(csqttWorkers), peer: csqttPeer.trim(), hashMode: csqttHashMode, obfs: csqttObfs, turnTransport: csqttTurnTransport, turnSubnet: csqttTurnSubnet, turnIpLimit: csqttTurnIpLimit, customTurnIps: csqttCustomTurnIps.trim(), bootstrapDns: csqttBootstrapDns.trim() })
       if (csqttPassword) setCsqttHasPassword(true)
       if (csqttVkToken) setCsqttHasVkToken(true)
       if (csqttManualHashes.trim()) setCsqttHasManualHashes(true)
@@ -191,6 +220,19 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
     } catch {
       setCsqttStatus(null)
     }
+  }
+
+  async function submitCsqttCaptcha() {
+    setControlPending(true)
+    setCsqttError('')
+    try {
+      const result = await apiCall<{ success: boolean; error?: string }>('POST', 'csqtt/captcha', { result: captchaResult.trim(), session_token: csqttStatus?.captcha?.session_token ?? '' })
+      if (!result.success) throw new Error(result.error || 'Не удалось передать результат капчи')
+      setCaptchaResult('')
+      showToast('Результат капчи передан клиенту')
+      await refreshCsqttStatus()
+    } catch (error) { setCsqttError(error instanceof Error ? error.message : 'Ошибка капчи') }
+    finally { setControlPending(false) }
   }
 
   async function refreshWdttStatus() {
@@ -367,29 +409,52 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
             <label className="min-w-0 text-sm font-medium">Пароль сервера <span className={csqttHasPassword ? 'text-green-400' : 'text-amber-400'}>{csqttHasPassword ? '· сохранён' : '· не сохранён'}</span><Input type="password" autoComplete="new-password" value={csqttPassword} onChange={(event) => setCsqttPassword(event.target.value)} placeholder={csqttHasPassword ? 'Новый пароль (пусто = без изменений)' : 'Введите пароль'} /></label>
             <div className="min-w-0 space-y-2"><label className="text-sm font-medium">VK OAuth access_token <span className={csqttHasVkToken ? 'text-green-400' : 'text-amber-400'}>{csqttHasVkToken ? '· сохранён' : '· не сохранён'}</span><Input type="password" autoComplete="off" value={csqttVkToken} onChange={(event) => setCsqttVkToken(event.target.value)} placeholder={csqttHasVkToken ? 'Новый токен (пусто = без изменений)' : 'Введите токен'} /></label><Button size="sm" variant="outline" onClick={() => { setVkRedirect(''); setVkAuthError(''); setVkAuthOpen(true) }}>Получить токен через VK</Button></div>
             <div className="grid grid-cols-2 gap-2">
-              {csqttClientVersion === '2.1.9' && csqttHashMode === 'auto_js'
+              {csqttClientVersion.startsWith('2.1.9') && csqttHashMode === 'auto_js'
                 ? <label className="min-w-0 text-sm font-medium">Звонки<Input className="mt-1" value="1 · Авто ВК" readOnly /></label>
                 : <label className="min-w-0 text-sm font-medium">Хеши{csqttHashMode === 'auto_api' ? ' · автоматически' : ''}<select className="bg-input-background border-border mt-1 h-9 w-full rounded-md border px-2 text-sm disabled:opacity-50" value={csqttHashes} disabled={csqttHashMode === 'auto_api'} onChange={(event) => setCsqttHashes(event.target.value)}>{Array.from({ length: 6 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}</select></label>}
-              <label className="min-w-0 text-sm font-medium">Потоки<select className="bg-input-background border-border mt-1 h-9 w-full rounded-md border px-2 text-sm" value={csqttWorkers} onChange={(event) => setCsqttWorkers(event.target.value)}>{Array.from({ length: 14 }, (_, i) => <option key={(i + 1) * 9} value={(i + 1) * 9}>{(i + 1) * 9}</option>)}</select></label>
+              <label className="min-w-0 text-sm font-medium">Потоки<select className="bg-input-background border-border mt-1 h-9 w-full rounded-md border px-2 text-sm" value={csqttWorkers} onChange={(event) => setCsqttWorkers(event.target.value)}>{(csqttApkClient ? Array.from({ length: 97 }, (_, i) => i + 3) : Array.from({ length: 14 }, (_, i) => (i + 1) * 9)).map((workers) => <option key={workers} value={workers}>{workers}</option>)}</select></label>
             </div>
           </div>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="relative min-w-0 text-sm font-medium">VK TURN
+              <button type="button" className="bg-input-background border-border mt-1 flex min-h-9 w-full items-center justify-between rounded-md border px-2 py-2 text-left text-sm" disabled={csqttTurnTransport !== 'udp'} aria-expanded={turnPickerOpen} onClick={() => setTurnPickerOpen(!turnPickerOpen)}>
+                <span>{csqttTurnSubnet === 'custom' ? 'Свои IP-адреса' : csqttTurnPresets.find((p) => p.id === csqttTurnSubnet)?.title ?? 'Автоматически · адреса от VK'}{csqttTurnSubnet && csqttTurnSubnet !== 'custom' && ` · ${csqttTurnPresets.find((p) => p.id === csqttTurnSubnet)?.ips.length} IP`}</span><span>⌄</span>
+              </button>
+              {turnPickerOpen && <div className="bg-card border-border absolute left-0 right-0 top-full z-50 mt-1 rounded-md border p-1 shadow-xl">
+                <div className="flex items-center justify-between gap-2 border-b p-2"><span className="text-muted-foreground text-xs">Задержка от роутера · UDP</span><Button size="sm" variant="outline" disabled={pingingTurn} onClick={pingTurnServers}>{pingingTurn ? 'Замер…' : 'Обновить пинг'}</Button></div>
+                <button type="button" className="hover:bg-accent w-full rounded px-2 py-2 text-left" onClick={() => { setCsqttTurnSubnet(''); setTurnPickerOpen(false) }}>Автоматически · адреса от VK</button>
+                {csqttTurnPresets.map((preset) => { const ping = turnPings.find((p) => p.id === preset.id); return <button type="button" key={preset.id} className={`hover:bg-accent flex w-full flex-wrap items-center justify-between gap-1 rounded px-2 py-2 text-left ${csqttTurnSubnet === preset.id ? 'bg-primary/15' : ''}`} onClick={() => { setCsqttTurnSubnet(preset.id); setTurnPickerOpen(false) }}><span>{preset.title} · {preset.ips.length} IP</span><span className="text-xs text-muted-foreground" title={ping ? `Минимум / среднее; ответили ${ping.answered} из ${ping.total}` : 'Нажмите «Обновить пинг»'}>{ping ? ping.minMs === null ? 'Нет ответа' : `${ping.minMs.toFixed(1)} / ${ping.avgMs?.toFixed(1)} мс` : '—'}</span></button> })}
+                <button type="button" className="hover:bg-accent w-full rounded px-2 py-2 text-left" onClick={() => { setCsqttTurnSubnet('custom'); setTurnPickerOpen(false) }}>Свои IP-адреса</button>
+              </div>}
+            </div>
+            {csqttTurnSubnet && <label className="text-sm font-medium">Использовать до IP<Input type="number" min="1" max="256" value={csqttTurnIpLimit} onChange={(event) => setCsqttTurnIpLimit(event.target.value)} /></label>}
+            {csqttTurnSubnet === 'custom' && <label className="text-sm font-medium md:col-span-2">IP серверов TURN<Input value={csqttCustomTurnIps} onChange={(event) => setCsqttCustomTurnIps(event.target.value)} placeholder="IP-адреса через запятую, без портов" /></label>}
+            <label className="text-sm font-medium">DNS для подключения к VK
+              <select className="bg-input-background border-border mt-1 h-9 w-full rounded-md border px-2 text-sm" value={['system', 'yandex', 'cloudflare', 'google'].includes(csqttBootstrapDns) ? csqttBootstrapDns : 'custom'} onChange={(event) => setCsqttBootstrapDns(event.target.value === 'custom' ? '' : event.target.value)}>
+                <option value="yandex">Яндекс</option><option value="system">DNS роутера</option><option value="cloudflare">Cloudflare</option><option value="google">Google</option><option value="custom">Свои DNS</option>
+              </select>
+            </label>
+            {!['system', 'yandex', 'cloudflare', 'google'].includes(csqttBootstrapDns) && <label className="text-sm font-medium">Адреса DNS<Input value={csqttBootstrapDns} onChange={(event) => setCsqttBootstrapDns(event.target.value)} placeholder="Один-два IP через запятую" /></label>}
+          </div>
+          <p className="text-muted-foreground text-xs">Наборы TURN взяты из APK 2.5.0. Выбор набора доступен для UDP; адреса распределяются между потоками. DNS выше используется для подключения к VK и TURN. DNS интернет-трафика выбирается на сервере CSQTT, а сайты и устройства — в маршрутизации роутера.</p>
+          <p className="text-muted-foreground text-xs">Лимит IP ограничивает используемую часть набора. Например, 64 разрешает все 64 адреса; число одновременных подключений задаётся полем «Потоки».</p>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-muted-foreground text-xs">ARM64:</span>
-            <Button size="sm" variant="outline" onClick={() => { setCsqttHashes('1'); setCsqttWorkers('27') }}>{csqttClientVersion === '2.1.9' ? '27 потоков' : '1 / 27'}</Button>
-            <Button size="sm" variant="outline" onClick={() => { setCsqttHashes('2'); setCsqttWorkers('36') }}>{csqttClientVersion === '2.1.9' ? '36 потоков' : '2 / 36'}</Button>
-            <Button size="sm" variant="outline" onClick={() => { setCsqttHashes('1'); setCsqttWorkers('9') }}>{csqttClientVersion === '2.1.9' ? 'Диагностика: 9 потоков' : 'Диагностика 1 / 9'}</Button>
-            <span className="text-muted-foreground text-xs">Потоки 9–126, шаг 9</span>
+            <Button size="sm" variant="outline" onClick={() => { setCsqttHashes('1'); setCsqttWorkers('27') }}>{csqttClientVersion.startsWith('2.1.9') ? '27 потоков' : '1 / 27'}</Button>
+            <Button size="sm" variant="outline" onClick={() => { setCsqttHashes('2'); setCsqttWorkers('36') }}>{csqttClientVersion.startsWith('2.1.9') ? '36 потоков' : '2 / 36'}</Button>
+            <Button size="sm" variant="outline" onClick={() => { setCsqttHashes('1'); setCsqttWorkers('9') }}>{csqttClientVersion.startsWith('2.1.9') ? 'Диагностика: 9 потоков' : 'Диагностика 1 / 9'}</Button>
+            <span className="text-muted-foreground text-xs">{csqttApkClient ? 'Потоки 3–99, шаг 1' : 'Потоки 9–126, шаг 9'}</span>
           </div>
           <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
             <label className="text-sm font-medium">Режим хешей<select className="bg-input-background border-border mt-1 h-9 w-full rounded-md border px-2 text-sm" value={csqttHashMode} onChange={(event) => setCsqttHashMode(event.target.value)}><option value="manual">Ручной</option><option value="auto_api">Авто API</option><option value="auto_js">Авто ВК</option></select></label>
             <label className="text-sm font-medium">Маскировка<select className="bg-input-background border-border mt-1 h-9 w-full rounded-md border px-2 text-sm" value={csqttObfs} onChange={(event) => setCsqttObfs(event.target.value)}><option value="audio">Простая</option><option value="video">Средняя</option></select></label>
-            <label className="text-sm font-medium">Транспорт<select className="bg-input-background border-border mt-1 h-9 w-full rounded-md border px-2 text-sm" value={csqttTurnTransport} onChange={(event) => setCsqttTurnTransport(event.target.value)}><option value="udp">UDP</option><option value="tcp_tls">TCP (TLS при turns:)</option></select></label>
+            <label className="text-sm font-medium">Транспорт<select className="bg-input-background border-border mt-1 h-9 w-full rounded-md border px-2 text-sm" value={csqttTurnTransport} onChange={(event) => { setCsqttTurnTransport(event.target.value); if (event.target.value !== 'udp') setCsqttTurnSubnet('') }}><option value="udp">UDP</option><option value="tcp_tls">TCP (TLS при turns:)</option></select></label>
           </div>
           {csqttHashMode === 'manual' && <div className="space-y-2"><label className="block text-sm font-medium">Ссылки или хеши VK <span className={csqttHasManualHashes ? 'text-green-400' : 'text-amber-400'}>{csqttHasManualHashes ? '· сохранены' : '· не сохранены'}</span><Input type="password" autoComplete="off" value={csqttManualHashes} onChange={(event) => setCsqttManualHashes(event.target.value)} placeholder={csqttHasManualHashes ? 'Новые ссылки через запятую (пусто = без изменений)' : 'До 6 ссылок через запятую'} /></label><Button size="sm" variant="outline" disabled={generatingCsqtt || !validCsqttNumbers || !csqttHasVkToken} onClick={() => void generateCsqttManualHashes()}>{generatingCsqtt ? 'Создание звонков…' : `Создать и заполнить ${csqttHashes} хеш(а)`}</Button><p className="text-muted-foreground text-xs">Нужен сохранённый VK-токен. После генерации сохраните и примените настройки в течение 10 минут; незадействованные звонки завершатся автоматически.</p></div>}
           {csqttHashMode === 'auto_api' && <p className="text-muted-foreground text-xs">Авто API создаст {Math.ceil(Number(csqttWorkers) / 27)} звонка(ов) для {csqttWorkers} потоков: один звонок на каждые 27 потоков. Значение поля «Хеши» в этом режиме не используется. Нужен сохранённый VK-токен.</p>}
-          {csqttClientVersion === '2.1.9' && csqttHashMode === 'auto_js' && <p className="text-muted-foreground text-xs">Авто ВК создаёт один звонок и распределяет потоки по учётным данным этого звонка. Поле «Хеши» не используется.</p>}
-          {csqttError && <p role="alert" className="text-sm text-red-500">{csqttError}</p>}
-          <div className="bg-card sticky bottom-0 flex justify-end gap-2 border-t pt-3 pb-1"><Button variant="outline" onClick={() => setEditingCsqtt(false)}>Назад</Button><Button disabled={savingCsqtt || !validCsqttNumbers || !csqttPeer.trim() || (csqttHashMode === 'manual' && !csqttHasManualHashes && !csqttManualHashes.trim())} onClick={saveCsqttSettings}>Сохранить</Button>{csqttRestartRequired && <Button disabled={savingCsqtt || Number(csqttHashes) !== csqttSavedValues.hashes || Number(csqttWorkers) !== csqttSavedValues.workers || csqttPeer.trim() !== csqttSavedValues.peer || csqttHashMode !== csqttSavedValues.hashMode || csqttObfs !== csqttSavedValues.obfs || csqttTurnTransport !== csqttSavedValues.turnTransport || !!csqttPassword || !!csqttVkToken || !!csqttManualHashes} onClick={restartCsqtt}>Применить</Button>}</div>
+          {csqttClientVersion.startsWith('2.1.9') && csqttHashMode === 'auto_js' && <p className="text-muted-foreground text-xs">Авто ВК создаёт один звонок и распределяет потоки по учётным данным этого звонка. Поле «Хеши» не используется.</p>}
+          {csqttApkClient && csqttHashMode === 'auto_js' && <p className="text-muted-foreground text-xs">Авто ВК использует сохранённый токен; звонки создаёт оригинальный клиент 2.5.0. При обычной остановке ему отправляется команда завершить звонки. После аварийного отключения завершение не гарантируется.</p>}{csqttError && <p role="alert" className="text-sm text-red-500">{csqttError}</p>}
+          <div className="bg-card sticky bottom-0 flex justify-end gap-2 border-t pt-3 pb-1"><Button variant="outline" onClick={() => setEditingCsqtt(false)}>Назад</Button><Button disabled={savingCsqtt || !validCsqttNumbers || !csqttPeer.trim() || (csqttHashMode === 'manual' && !csqttHasManualHashes && !csqttManualHashes.trim())} onClick={saveCsqttSettings}>Сохранить</Button>{csqttRestartRequired && <Button disabled={savingCsqtt || Number(csqttHashes) !== csqttSavedValues.hashes || Number(csqttWorkers) !== csqttSavedValues.workers || csqttPeer.trim() !== csqttSavedValues.peer || csqttHashMode !== csqttSavedValues.hashMode || csqttObfs !== csqttSavedValues.obfs || csqttTurnTransport !== csqttSavedValues.turnTransport || csqttTurnSubnet !== csqttSavedValues.turnSubnet || csqttTurnIpLimit !== csqttSavedValues.turnIpLimit || csqttCustomTurnIps.trim() !== csqttSavedValues.customTurnIps || csqttBootstrapDns.trim() !== csqttSavedValues.bootstrapDns || !!csqttPassword || !!csqttVkToken || !!csqttManualHashes} onClick={restartCsqtt}>Применить</Button>}</div>
         </div> : <div className="space-y-4">
           {CORES.map((core, i) => {
             const isActive = currentCore === core.id
@@ -471,7 +536,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
               {csqttStatus && <Button variant="outline" size="sm" disabled={controlPending} onClick={() => void manageAddon('csqtt', csqttStatus.installed ? 'remove' : 'install')}>{csqttStatus.installed ? 'Удалить' : 'Установить'}</Button>}
             </div>
           </div>
-          {csqttError && <p role="alert" className="text-sm text-red-500">{csqttError}</p>}
+          {csqttStatus?.captcha && <div className="space-y-2 rounded-md border border-amber-500 p-3"><p>VK запросил капчу.</p><a className="text-blue-400 underline" href={csqttStatus.captcha.redirect_uri} target="_blank" rel="noopener noreferrer">Открыть капчу VK</a><p className="text-muted-foreground text-xs">После ручного прохождения вставьте success_token из ответа captchaNotRobot.check (вкладка «Сеть» в инструментах браузера). Автоматическое получение результата из другой вкладки пока не поддерживается.</p><Input type="password" autoComplete="off" value={captchaResult} onChange={(event) => setCaptchaResult(event.target.value)} placeholder="Результат прохождения капчи" /><Button disabled={controlPending || !captchaResult.trim()} onClick={() => void submitCsqttCaptcha()}>Передать результат</Button></div>}{csqttError && <p role="alert" className="text-sm text-red-500">{csqttError}</p>}
           <Separator />
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>

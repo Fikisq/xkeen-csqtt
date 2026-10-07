@@ -12,6 +12,51 @@ use std::time::Duration;
 
 const CONFIG: &str = "/opt/etc/csqtt/csqtt.conf";
 const VK_TOKEN: &str = "/opt/etc/csqtt/vk_token";
+static TURN_PING_GATE: Semaphore = Semaphore::const_new(1);
+
+pub async fn turn_ping() -> Json<Value> {
+    let Ok(_permit) = TURN_PING_GATE.try_acquire() else {
+        return Json(json!({"success": false, "error": "Замер TURN уже выполняется"}));
+    };
+    let presets: Value = serde_json::from_str(include_str!("csqtt_turn_presets.json")).unwrap_or(json!([]));
+    let mut results = Vec::new();
+    for preset in presets.as_array().into_iter().flatten() {
+        let mut pending = tokio::task::JoinSet::new();
+        let mut samples = Vec::new();
+        let mut addresses = preset["ips"].as_array().into_iter().flatten().filter_map(Value::as_str);
+        loop {
+            while pending.len() < 12 {
+                let Some(ip) = addresses.next() else { break };
+                let ip = ip.to_owned();
+                pending.spawn(async move {
+                    let measured = tokio::time::timeout(Duration::from_millis(600), async {
+                        let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await.ok()?;
+                        socket.connect(format!("{ip}:19302")).await.ok()?;
+                        let mut request = [0u8; 20];
+                        request[..8].copy_from_slice(&[0, 1, 0, 0, 0x21, 0x12, 0xa4, 0x42]);
+                        request[8..].copy_from_slice(&uuid::Uuid::new_v4().as_bytes()[..12]);
+                        let start = std::time::Instant::now();
+                        socket.send(&request).await.ok()?;
+                        let mut response = [0u8; 512];
+                        loop {
+                            let n = socket.recv(&mut response).await.ok()?;
+                            if n >= 20 && response[..2] == [1, 1] && response[4..20] == request[4..20] {
+                                return Some(start.elapsed().as_secs_f64() * 1000.0);
+                            }
+                        }
+                    }).await.ok().flatten();
+                    (ip, measured)
+                });
+            }
+            let Some(result) = pending.join_next().await else { break };
+            if let Ok((ip, Some(ms))) = result { samples.push((ip, ms)); }
+        }
+        samples.sort_by(|a, b| a.1.total_cmp(&b.1));
+        let average = if samples.is_empty() { None } else { Some(samples.iter().map(|v| v.1).sum::<f64>() / samples.len() as f64) };
+        results.push(json!({"id": preset["id"], "title": preset["title"], "total": preset["ips"].as_array().map_or(0, Vec::len), "answered": samples.len(), "minMs": samples.first().map(|v| v.1), "avgMs": average, "bestIp": samples.first().map(|v| &v.0)}));
+    }
+    Json(json!({"success": true, "results": results}))
+}
 static CSQTT_GATE: OnceLock<Semaphore> = OnceLock::new();
 
 fn vk_api_notice(running: bool) -> Option<&'static str> {
@@ -55,7 +100,7 @@ fn shell_quote(value: &str) -> String {
 fn number(content: &str, key: &str) -> Option<u32> {
     content.lines().find_map(|line| {
         let value = line.strip_prefix(&format!("{key}="))?;
-        value.trim().trim_matches('"').parse().ok()
+        value.trim().trim_matches('"').trim_matches('\'').parse().ok()
     })
 }
 
@@ -69,6 +114,11 @@ pub async fn settings() -> Json<Value> {
             "hashMode": value(&content, "VK_HASH_MODE").unwrap_or_else(|| "auto_js".into()),
             "obfs": value(&content, "OBFS").unwrap_or_else(|| "audio".into()),
             "turnTransport": value(&content, "TURN_TRANSPORT").unwrap_or_else(|| "udp".into()),
+            "turnSubnet": value(&content, "TURN_SUBNET").unwrap_or_default(),
+            "turnIpLimit": number(&content, "TURN_IP_LIMIT").unwrap_or(8),
+            "customTurnIps": value(&content, "CUSTOM_TURN_IPS").unwrap_or_default(),
+            "bootstrapDns": value(&content, "BOOTSTRAP_DNS").unwrap_or_else(|| "yandex".into()),
+            "turnPresets": serde_json::from_str::<Value>(include_str!("csqtt_turn_presets.json")).unwrap_or(json!([])),
             "hasPassword": value(&content, "PASSWORD").is_some_and(|v| !v.is_empty()),
             "hasVkToken": tokio::fs::metadata(VK_TOKEN).await.is_ok_and(|m| m.len() > 0),
             "hasManualHashes": value(&content, "VK_HASHES").is_some_and(|v| !v.is_empty()),
@@ -91,6 +141,14 @@ pub struct SettingsRequest {
     obfs: Option<String>,
     #[serde(rename = "turnTransport")]
     turn_transport: Option<String>,
+    #[serde(rename = "turnSubnet")]
+    turn_subnet: Option<String>,
+    #[serde(rename = "turnIpLimit")]
+    turn_ip_limit: Option<u32>,
+    #[serde(rename = "customTurnIps")]
+    custom_turn_ips: Option<String>,
+    #[serde(rename = "bootstrapDns")]
+    bootstrap_dns: Option<String>,
     #[serde(rename = "manualHashes")]
     manual_hashes: Option<String>,
 }
@@ -100,8 +158,14 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
     let Ok(_permit) = gate.try_acquire() else {
         return Json(json!({ "success": false, "error": "Сохранение CSQTT уже выполняется" }));
     };
-    if !(1..=6).contains(&request.hashes) || !(9..=126).contains(&request.workers) || request.workers % 9 != 0 {
-        return Json(json!({ "success": false, "error": "Допустимо 1–6 хешей и 9–126 потоков с шагом 9" }));
+    let apk_client = tokio::fs::read_to_string("/opt/etc/csqtt/client-version").await
+        .map(|version| version.trim() == "2.5.0-apk-router").unwrap_or(false);
+    let workers_valid = if apk_client { (3..=99).contains(&request.workers) }
+        else { (9..=126).contains(&request.workers) && request.workers % 9 == 0 };
+    if !(1..=6).contains(&request.hashes) || !workers_valid {
+        let error = if apk_client { "Допустимо 1–6 хешей и 3–99 потоков" }
+            else { "Допустимо 1–6 хешей и 9–126 потоков с шагом 9" };
+        return Json(json!({ "success": false, "error": error }));
     }
     let hash_mode = request.hash_mode.as_deref().unwrap_or("auto_js");
     let obfs = request.obfs.as_deref().unwrap_or("audio");
@@ -116,6 +180,53 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
     };
     if number(&content, "HASHES").is_none() || number(&content, "WORKERS").is_none() {
         return Json(json!({ "success": false, "error": "В конфигурации CSQTT нет параметров HASHES/WORKERS" }));
+    }
+    let turn_subnet = request.turn_subnet.as_deref().map(str::to_owned)
+        .unwrap_or_else(|| value(&content, "TURN_SUBNET").unwrap_or_default());
+    let turn_ip_limit = request.turn_ip_limit.unwrap_or_else(|| number(&content, "TURN_IP_LIMIT").unwrap_or(8));
+    if !(1..=256).contains(&turn_ip_limit) {
+        return Json(json!({ "success": false, "error": "Количество IP TURN должно быть от 1 до 256" }));
+    }
+    let presets: Value = serde_json::from_str(include_str!("csqtt_turn_presets.json")).unwrap_or(json!([]));
+    let custom_turn_ips = if turn_subnet.is_empty() {
+        String::new()
+    } else if turn_subnet == "custom" {
+        request.custom_turn_ips.clone().unwrap_or_else(|| value(&content, "CUSTOM_TURN_IPS").unwrap_or_default())
+    } else if let Some(preset) = presets.as_array().and_then(|items| items.iter().find(|p| p["id"].as_str() == Some(turn_subnet.as_str()))) {
+        preset["ips"].as_array().map(|ips| ips.iter().take(turn_ip_limit as usize).filter_map(Value::as_str).collect::<Vec<_>>().join(",")).unwrap_or_default()
+    } else {
+        return Json(json!({ "success": false, "error": "Неизвестный набор VK TURN" }));
+    };
+    let mut parsed_turn_ips = Vec::new();
+    if custom_turn_ips.len() > 8192 {
+        return Json(json!({ "success": false, "error": "Слишком длинный список IP TURN" }));
+    }
+    for part in custom_turn_ips.split(|c: char| c == ',' || c == ';' || c.is_whitespace()).filter(|s| !s.is_empty()) {
+        let Ok(ip) = part.parse::<std::net::IpAddr>() else {
+            return Json(json!({ "success": false, "error": "Для TURN укажите IP-адреса без портов и CIDR" }));
+        };
+        if ip.is_unspecified() || ip.is_multicast() || ip.is_loopback() {
+            return Json(json!({ "success": false, "error": "Недопустимый адрес TURN" }));
+        }
+        if !parsed_turn_ips.contains(&ip) { parsed_turn_ips.push(ip); }
+    }
+    if parsed_turn_ips.len() > 256 || (!turn_subnet.is_empty() && parsed_turn_ips.is_empty()) {
+        return Json(json!({ "success": false, "error": "Укажите от 1 до 256 адресов TURN" }));
+    }
+    if !parsed_turn_ips.is_empty() && turn_transport != "udp" {
+        return Json(json!({ "success": false, "error": "Выбор IP TURN доступен для транспорта UDP" }));
+    }
+    parsed_turn_ips.truncate(turn_ip_limit as usize);
+    let custom_turn_ips = parsed_turn_ips.iter().map(ToString::to_string).collect::<Vec<_>>().join(",");
+    let bootstrap_dns = request.bootstrap_dns.clone().unwrap_or_else(|| value(&content, "BOOTSTRAP_DNS").unwrap_or_else(|| "yandex".into()));
+    if !matches!(bootstrap_dns.as_str(), "system" | "yandex" | "cloudflare" | "google") {
+        let ips: Vec<_> = bootstrap_dns.split(',').map(str::trim).collect();
+        if apk_client && ips.iter().any(|ip| ip.parse::<std::net::Ipv4Addr>().is_err()) {
+            return Json(json!({ "success": false, "error": "DNS для клиента из APK: укажите один-два IPv4 адреса" }));
+        }
+        if ips.is_empty() || ips.len() > 2 || ips.iter().any(|ip| ip.parse::<std::net::IpAddr>().map_or(true, |ip| ip.is_unspecified() || ip.is_multicast())) {
+            return Json(json!({ "success": false, "error": "DNS для VK: выберите провайдера или укажите один-два IP через запятую" }));
+        }
     }
     let peer = request.peer.as_deref().unwrap_or("").trim();
     if !peer.is_empty() {
@@ -170,6 +281,11 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
     }).collect::<Vec<_>>().join("\n") + "\n";
     if !content.lines().any(|line| line.starts_with("VK_HASHES=")) {
         updated.push_str(&format!("VK_HASHES={}\n", shell_quote(&manual_hashes)));
+    }
+    for (key, val) in [("TURN_SUBNET", turn_subnet), ("TURN_IP_LIMIT", turn_ip_limit.to_string()), ("CUSTOM_TURN_IPS", custom_turn_ips), ("BOOTSTRAP_DNS", bootstrap_dns)] {
+        let prefix = format!("{key}=");
+        updated = updated.lines().filter(|line| !line.starts_with(&prefix)).collect::<Vec<_>>().join("\n") + "\n";
+        updated.push_str(&format!("{key}={}\n", shell_quote(&val)));
     }
     let backup = format!("{CONFIG}.codex-prev");
     if write_private(&backup, content.as_bytes()).await.is_err() {
@@ -260,6 +376,7 @@ fn starter_running() -> bool {
             command.split(|byte| *byte == 0).any(|arg| {
                 arg.ends_with(b"/csqtt-client") || arg.ends_with(b"/csqtt-run.sh")
                     || arg.ends_with(b"/csqtt-run-219.sh")
+                    || arg.ends_with(b"/csqtt-run-250.sh")
             })
         })
     })
@@ -314,5 +431,35 @@ pub async fn status() -> Json<Value> {
         .is_some_and(|age| age < std::time::Duration::from_secs(900));
     let diagnostic = if !ready && log_recent { last_diagnostic() } else { None };
     let client_version = std::fs::read_to_string("/opt/etc/csqtt/client-version").ok().map(|v| v.trim().to_string()).unwrap_or_else(|| "2.0".into());
-    Json(json!({ "installed": installed, "running": running, "interface": interface, "ready": ready, "diagnostic": diagnostic, "clientVersion": client_version, "vkApiNotice": vk_api_notice(running) }))
+    Json(json!({ "installed": installed, "running": running, "interface": interface, "ready": ready, "diagnostic": diagnostic, "clientVersion": client_version, "vkApiNotice": vk_api_notice(running), "captcha": if running { captcha_state() } else { None } }))
+}
+
+fn captcha_state() -> Option<Value> {
+    let bytes = std::fs::read("/opt/csqtt250/captcha.json").ok()?;
+    if bytes.len() > 16384 { return None; }
+    let value: Value = serde_json::from_slice(&bytes).ok()?;
+    let url = reqwest::Url::parse(value["redirect_uri"].as_str()?).ok()?;
+    let host = url.host_str()?;
+    if url.scheme() != "https" || !["vk.com", "vk.ru"].iter().any(|suffix| host == *suffix || host.ends_with(&format!(".{suffix}"))) { return None; }
+    Some(value)
+}
+
+#[derive(Deserialize)]
+pub struct CaptchaReply { result: String, session_token: String }
+
+pub async fn captcha_reply(Json(request): Json<CaptchaReply>) -> Json<Value> {
+    let gate = CSQTT_GATE.get_or_init(|| Semaphore::new(1));
+    let Ok(_permit) = gate.try_acquire() else { return Json(json!({"success":false,"error":"Операция CSQTT уже выполняется"})); };
+    let Some(current) = captcha_state() else { return Json(json!({"success":false,"error":"Нет активной капчи"})); };
+    if !client_running() || current["session_token"].as_str().unwrap_or("") != request.session_token || request.result.is_empty() || request.result.len() > 3500 || request.result.bytes().any(|b| b <= 32 || b == 127 || b == b'|') {
+        return Json(json!({"success":false,"error":"Капча устарела или результат некорректен"}));
+    }
+    use std::os::unix::fs::{OpenOptionsExt, FileTypeExt};
+    let fifo = "/opt/etc/csqtt/bootstrap.fifo";
+    if !std::fs::symlink_metadata(fifo).is_ok_and(|m| m.file_type().is_fifo()) { return Json(json!({"success":false,"error":"Канал CSQTT недоступен"})); }
+    let outcome = std::fs::OpenOptions::new().write(true).custom_flags(0x800 | 0x20000).open(fifo).and_then(|mut file| {
+        use std::io::Write;
+        file.write_all(format!("CAPTCHA_RESULT|{}\n", request.result).as_bytes())
+    });
+    Json(match outcome { Ok(()) => json!({"success":true}), Err(_) => json!({"success":false,"error":"Клиент не принял результат капчи"}) })
 }

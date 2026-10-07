@@ -4,7 +4,7 @@ owns_pid() {
     case "$1" in ''|*[!0-9]*) return 1 ;; esac
     [ -r "/proc/$1/cmdline" ] || return 1
     case "$(tr '\000' ' ' < "/proc/$1/cmdline")" in
-        *"$DIR/csqtt-client"*|*"$DIR/csqtt-run.sh"*|*"$DIR/csqtt-run-219.sh"*) return 0 ;;
+        *"$DIR/csqtt-client"*|*"$DIR/csqtt-run.sh"*|*"$DIR/csqtt-run-219.sh"*|*"$DIR/csqtt-run-250.sh"*) return 0 ;;
     esac
     return 1
 }
@@ -16,20 +16,49 @@ owns_tun_helper_pid() {
     esac
     return 1
 }
+owns_native_events_pid() {
+    case "$1" in ''|*[!0-9]*) return 1 ;; esac
+    [ -r "/proc/$1/cmdline" ] || return 1
+    case "$(tr '\000' ' ' < "/proc/$1/cmdline")" in
+        *"$DIR/csqtt-native-events"*) return 0 ;;
+    esac
+    return 1
+}
+owns_dns_loop_pid() {
+    case "$1" in ''|*[!0-9]*) return 1 ;; esac
+    [ -r "/proc/$1/cmdline" ] || return 1
+    case "$(tr '\000' ' ' < "/proc/$1/cmdline")" in
+        *"$DIR/csqtt-run-250.sh"*) return 0 ;;
+    esac
+    return 1
+}
 case "$1" in
     start)
         printf 'Starting CSQTT: '
         if [ -f "/var/run/csqtt.pid" ] && owns_pid "$(cat "/var/run/csqtt.pid")"; then
             echo "уже запущен"; exit 0
         fi
+        version=$(tr -d '\r' < "$DIR/client-version" 2>/dev/null | tr -d '[:space:]')
+        case "$version" in
+            2.1.9|2.1.9-router250.1|2.1.9-router250.2)
+                RUN_SCRIPT="$DIR/csqtt-run-219.sh"
+                ;;
+            2.5.0-apk-router)
+                RUN_SCRIPT="$DIR/csqtt-run-250.sh"
+                mode=$( . "$DIR/csqtt.conf" && printf '%s' "${VK_HASH_MODE:-auto_js}" ) || exit 1
+                case "$mode" in
+                    manual|auto_api|auto_js) ;;
+                    *) echo "Неизвестный режим VK" >&2; exit 1 ;;
+                esac
+                ;;
+            *) echo "Неподдерживаемая версия CSQTT: ${version:-не указана}" >&2; exit 1 ;;
+        esac
+        [ -x "$RUN_SCRIPT" ] || { echo "не найден исполняемый сценарий CSQTT" >&2; exit 1; }
         if [ -s "$DIR/vk_api_calls" ] || [ -s "$DIR/vk_api_calls.stale" ] || [ -f "$DIR/vk_api_calls.uncertain" ]; then
             "$DIR/csqtt-api-calls.sh" stop || { echo "прежние звонки Auto API не закрыты" >&2; exit 1; }
         fi
         "$DIR/csqtt-js-calls.sh" || { echo "прежний звонок Auto VK не закрыт" >&2; exit 1; }
         rm -f "$DIR/stopped"
-        version=$(tr -d '\r' < "$DIR/client-version" 2>/dev/null | tr -d '[:space:]')
-        [ "$version" = 2.1.9 ] || { echo "Нужен клиент CSQTT 2.1.9 (найден: ${version:-не указан})" >&2; exit 1; }
-        RUN_SCRIPT="$DIR/csqtt-run-219.sh"
         nohup "$RUN_SCRIPT" >>"$DIR/csqtt.log" 2>&1 &
         echo $! > "/var/run/csqtt.pid"
         echo "OK (PID $(cat "/var/run/csqtt.pid"))"
@@ -53,7 +82,7 @@ case "$1" in
                     wait "$WRITER" 2>/dev/null || true
                 else
                     case "$(tr '\000' ' ' < "/proc/$PID/cmdline")" in
-                        *"$DIR/csqtt-run-219.sh"*) kill -TERM "$PID" 2>/dev/null ;;
+                        *"$DIR/csqtt-run-219.sh"*|*"$DIR/csqtt-run-250.sh"*) kill -TERM "$PID" 2>/dev/null ;;
                         *) kill -INT "$PID" 2>/dev/null ;;
                     esac
                 fi
@@ -76,10 +105,36 @@ case "$1" in
             "$DIR/csqtt-api-calls.sh" stop || { echo "звонки Auto API не завершены" >&2; cleanup_failed=1; }
         fi
         KEEP_MANUAL_STAGE=${KEEP_MANUAL_STAGE:-0} /opt/bin/vk-manual-hashes.sh stop csqtt || { echo "ручные звонки VK не завершены" >&2; cleanup_failed=1; }
+        if [ -f "$DIR/csqtt-dns-loop.pid" ]; then
+            DNS_LOOP_PID=$(cat "$DIR/csqtt-dns-loop.pid")
+            if owns_dns_loop_pid "$DNS_LOOP_PID"; then
+                kill -TERM "$DNS_LOOP_PID" 2>/dev/null
+                d=0
+                while owns_dns_loop_pid "$DNS_LOOP_PID" && [ "$d" -lt 10 ]; do
+                    sleep 1; d=$((d + 1))
+                done
+                if owns_dns_loop_pid "$DNS_LOOP_PID"; then
+                    echo "цикл DNS ещё завершает работу; правила не очищены" >&2
+                    cleanup_failed=1
+                else
+                    rm -f "$DIR/csqtt-dns-loop.pid"
+                fi
+            else
+                rm -f "$DIR/csqtt-dns-loop.pid"
+            fi
+        fi
+        if [ ! -f "$DIR/csqtt-dns-loop.pid" ] && [ -x "$DIR/csqtt-dns-sync.sh" ]; then
+            "$DIR/csqtt-dns-sync.sh" clear || { echo "собственные правила DNS не очищены" >&2; cleanup_failed=1; }
+        fi
         if [ -f "$DIR/csqtt-tun-fd.pid" ]; then
             HELPER_PID=$(cat "$DIR/csqtt-tun-fd.pid")
             owns_tun_helper_pid "$HELPER_PID" && kill "$HELPER_PID" 2>/dev/null
             rm -f "$DIR/csqtt-tun-fd.pid"
+        fi
+        if [ -f "$DIR/csqtt-native-events.pid" ]; then
+            ADAPTER_PID=$(cat "$DIR/csqtt-native-events.pid")
+            owns_native_events_pid "$ADAPTER_PID" && kill "$ADAPTER_PID" 2>/dev/null
+            rm -f "$DIR/csqtt-native-events.pid"
         fi
         [ "$cleanup_failed" -eq 0 ] || exit 1
         echo "OK"

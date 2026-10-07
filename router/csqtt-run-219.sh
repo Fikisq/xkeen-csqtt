@@ -20,8 +20,13 @@ set -- "$DIR/csqtt-client" \
     --client-ids "$CLIENT_IDS" \
     --obfs "$OBFS" \
     --turn-transport "$TURN_TRANSPORT" \
-    --captcha-mode "$CAPTCHA_MODE" \
+    --captcha-mode "${CSQTT_CAPTCHA_MODE:-$CAPTCHA_MODE}" \
     --tun-uds csqtt_router_tun_uds
+
+set -- "$@" --bootstrap-dns "${BOOTSTRAP_DNS:-yandex}"
+if [ -n "${CUSTOM_TURN_IPS:-}" ]; then
+    set -- "$@" --custom-turn-ips "$CUSTOM_TURN_IPS"
+fi
 
 case "${VK_HASH_MODE:-auto_js}" in
     manual)
