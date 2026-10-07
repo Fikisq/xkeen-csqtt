@@ -1,5 +1,12 @@
 #!/bin/sh
 DIR=/opt/etc/wdtt-plus
+# Preserve an explicit stop during Entware boot; direct starts still work.
+if [ "${1:-}" = start ] && [ -f "$DIR/stopped" ]; then
+    boot_parent=$(tr '\000' ' ' < "/proc/${PPID:-0}/cmdline" 2>/dev/null)
+    case "$boot_parent" in
+        */rc.unslung*) echo 'WDTT Plus: сохранено остановленное состояние'; exit 0 ;;
+    esac
+fi
 PID_FILE=/var/run/wdtt-plus.pid
 owns_pid() {
     case "$1" in ''|*[!0-9]*) return 1 ;; esac

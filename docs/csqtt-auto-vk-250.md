@@ -27,3 +27,9 @@ Automatic browser capture of the captcha result is not implemented. If a challen
 The original native interface does not expose proven durable created-call IDs. Graceful native cleanup is supported, but a crash, forced kill or power loss cannot guarantee call cleanup. Join hashes must never be written into the older actual-call-ID cleanup file. VK rate limits, account restrictions and invalid tokens remain service-side conditions.
 
 Separately, WDTT was returned to the backed-up v20-router.1 and restarted at the user's request. Xray and routing were untouched. The router.2 changes reduced allocation in a microbenchmark but did not improve the user's bandwidth/CPU measurements and are not the installed client.
+
+## Persistent stopped state and storage cleanup (2026-10-07)
+
+Both add-on init scripts now respect the stopped marker when invoked by Entware rc.unslung during boot. Explicit panel/CLI start still clears the marker and starts normally. An isolated mock verified both paths; live shell syntax checks passed. Deployment preserved Xray PID 27446 and the hashes of both add-on configs, Xray config and bypass lists. No router reboot or service restart was performed.
+
+Installer, diagnostic and backup duplicates under /opt/tmp were copied to E:/cudy/xkeen-lab/backups/router-opt-tmp-20261007 and all 113 regular files were SHA-256 verified before removal. Flash use fell from 85% to 53%, leaving about 80 MiB free. Historical /opt/tmp backup directories referenced above are now stored on E:; current init-script backups are in E:/cudy/xkeen-lab/backups/addon-autostart-20261007.

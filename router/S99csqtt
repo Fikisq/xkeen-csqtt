@@ -1,5 +1,13 @@
 #!/bin/sh
 DIR="/opt/etc/csqtt"
+# Entware's boot sweep must preserve an explicit stop from the panel.
+# A direct start (panel or CLI) still clears the marker in the start branch.
+if [ "${1:-}" = start ] && [ -f "$DIR/stopped" ]; then
+    boot_parent=$(tr '\000' ' ' < "/proc/${PPID:-0}/cmdline" 2>/dev/null)
+    case "$boot_parent" in
+        */rc.unslung*) echo 'CSQTT: сохранено остановленное состояние'; exit 0 ;;
+    esac
+fi
 owns_pid() {
     case "$1" in ''|*[!0-9]*) return 1 ;; esac
     [ -r "/proc/$1/cmdline" ] || return 1
