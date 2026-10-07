@@ -16,8 +16,8 @@ mkdir -p "$ROOT/package" "$ROOT/tmp" "$ROOT/go-cache" "$ROOT/go-mod-cache"
 export GOCACHE="$ROOT/go-cache" GOMODCACHE="$ROOT/go-mod-cache" GOTMPDIR="$ROOT/tmp"
 export GOOS=linux GOARCH=arm64 CGO_ENABLED=0
 (cd "$ROOT/source/go_client" && go build -p 2 -trimpath -ldflags='-s -w' -o "$ROOT/package/client" .)
-printf 'v20-router.1\n' > "$ROOT/package/client-version"
+printf 'v20-router.2\n' > "$ROOT/package/client-version"
 cp "$ROOT/source/LICENSE" "$ROOT/package/LICENSE.WDTT-Plus"
 cp "$SCRIPT_DIR/wdtt-plus-run.sh" "$SCRIPT_DIR/wdtt-plus-watchdog.sh" "$SCRIPT_DIR/wdtt-plus-calls.sh" "$SCRIPT_DIR/S99wdtt-plus" "$ROOT/package/"
 (cd "$ROOT/package" && sha256sum client client-version wdtt-plus-run.sh wdtt-plus-watchdog.sh wdtt-plus-calls.sh S99wdtt-plus LICENSE.WDTT-Plus > SHA256SUMS)
-echo "Built upstream $PIN with the documented router SOCKS capacity patch"
+echo "Built upstream $PIN with router SOCKS capacity and packet-processing optimizations"

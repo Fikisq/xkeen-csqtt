@@ -1,3 +1,111 @@
+diff --git a/go_client/dispatcher.go b/go_client/dispatcher.go
+index 66e2901..3268c51 100644
+--- a/go_client/dispatcher.go
++++ b/go_client/dispatcher.go
+@@ -22,23 +22,23 @@ func isWireGuardUserDataPacket(packet []byte) bool {
+ 
+ var pktPool = sync.Pool{
+ 	New: func() interface{} {
+-		return make([]byte, 2048)
++		return new([2048]byte)
+ 	},
+ }
+ 
+ func getPktBuf(size int) []byte {
+-	b := pktPool.Get().([]byte)
+-	if cap(b) < size {
+-		b = make([]byte, size)
++	if size > 2048 {
++		return make([]byte, size)
+ 	}
+-	return b[:size]
++	return pktPool.Get().(*[2048]byte)[:size]
+ }
+ 
+ func putPktBuf(b []byte) {
+-	if cap(b) < 2048 {
++	if cap(b) != 2048 {
+ 		return
+ 	}
+-	pktPool.Put(b[:cap(b)])
++	// A pointer fits in the interface without allocating a boxed slice header.
++	pktPool.Put((*[2048]byte)(b[:2048]))
+ }
+ 
+ const (
+diff --git a/go_client/router_buffers_test.go b/go_client/router_buffers_test.go
+new file mode 100644
+index 0000000..a20e083
+--- /dev/null
++++ b/go_client/router_buffers_test.go
+@@ -0,0 +1,22 @@
++package main
++
++import "testing"
++
++func TestRouterPacketPoolSizes(t *testing.T) {
++	for _, size := range []int{0, 1, 32, 1500, 2048, 4096} {
++		b := getPktBuf(size)
++		if len(b) != size { t.Fatalf("size %d: got %d", size, len(b)) }
++		if size > 0 { b[size-1] = 7 }
++		putPktBuf(b)
++	}
++	putPktBuf(make([]byte, 10))
++}
++
++func BenchmarkRouterPacketPool(b *testing.B) {
++	b.ReportAllocs()
++	for i := 0; i < b.N; i++ {
++		packet := getPktBuf(1500)
++		packet[0] = 4
++		putPktBuf(packet)
++	}
++}
+diff --git a/go_client/session.go b/go_client/session.go
+index 809bf04..e4233f1 100644
+--- a/go_client/session.go
++++ b/go_client/session.go
+@@ -1148,9 +1148,15 @@ func RunSession(
+ 				log.Printf("[HEALTH] сервер ответил на keepalive")
+ 			}
+ 		}
++		readDeadline := time.Time{}
+ 		for {
+ 			pkt := getPktBuf(2048)
+-			_ = dtlsConn.SetReadDeadline(time.Now().Add(sessionReadTimeout))
++			now := time.Now()
++			// Refresh at half the timeout instead of resetting DTLS timers on every packet.
++			if readDeadline.Sub(now) < sessionReadTimeout/2 {
++				readDeadline = now.Add(sessionReadTimeout)
++				_ = dtlsConn.SetReadDeadline(readDeadline)
++			}
+ 			n, readErr := dtlsConn.Read(pkt)
+ 			if readErr != nil {
+ 				putPktBuf(pkt)
+@@ -1169,14 +1175,16 @@ func RunSession(
+ 				slot.queue.received.Add(uint64(n))
+ 			}
+ 
+-			if _, policyErr := parseConfigResponse(string(pkt[:n])); policyErr != nil {
+-				if maxWorkers, limited := workerPolicyLimit(policyErr); limited {
+-					select {
+-					case policyLimitCh <- maxWorkers:
+-					default:
++			if n >= len("POLICY:max_workers=") && string(pkt[:len("POLICY:max_workers=")]) == "POLICY:max_workers=" {
++				if _, policyErr := parseConfigResponse(string(pkt[:n])); policyErr != nil {
++					if maxWorkers, limited := workerPolicyLimit(policyErr); limited {
++						select {
++						case policyLimitCh <- maxWorkers:
++						default:
++						}
++						putPktBuf(pkt)
++						return
+ 					}
+-					putPktBuf(pkt)
+-					return
+ 				}
+ 			}
+ 
 diff --git a/go_client/socks5_server.go b/go_client/socks5_server.go
 index b65c604..15eed0c 100644
 --- a/go_client/socks5_server.go
@@ -41,3 +149,19 @@ index b65c604..15eed0c 100644
  		}()
  	}
  }
+diff --git a/go_client/update_metadata.go b/go_client/update_metadata.go
+index f0125e2..7f80fc3 100644
+--- a/go_client/update_metadata.go
++++ b/go_client/update_metadata.go
+@@ -169,6 +169,11 @@ func (d *Dispatcher) enqueueUpdateRelayRequest(workers []*WorkerSlot, request []
+ }
+ 
+ func (d *Dispatcher) handleUpdateMetadataResponse(packet []byte) bool {
++	// Control messages are ASCII; ordinary WireGuard datagrams start with 1..4.
++	// Avoid copying each data packet to a heap-allocated string.
++	if len(packet) == 0 || packet[0] < 'A' || packet[0] > 'Z' {
++		return false
++	}
+ 	value := string(packet)
+ 	rawAPKChunk := strings.HasPrefix(value, updateAPKChunkResponsePrefix)
+ 	encodedControlResponse := strings.HasPrefix(value, updateMetadataResponsePrefix) ||
