@@ -109,12 +109,7 @@ function displayName(name: string): string {
   return name
 }
 function cardTitle(proxy: ProxyInfo): string {
-  const type = proxy.type.toLowerCase()
-  if (/^wdtt/i.test(proxy.name)) return 'Локальный SOCKS5 · TCP / UDP'
-  const protocol = type === 'vless' ? 'VLESS' : type === 'hysteria2' || type === 'hy2' ? 'Hysteria2' : type === 'tuic' ? 'TUIC' : null
-  if (!protocol) return displayName(proxy.name)
-  const flag = proxy.name.match(/[\u{1F1E6}-\u{1F1FF}]{2}/u)?.[0]
-  return `${flag ? flag + ' ' : ''}${protocol}`
+  return displayName(proxy.name)
 }
 function isProtocolProxy(proxy?: ProxyInfo): boolean {
   return !!proxy && ['vless', 'hysteria2', 'hy2', 'tuic'].includes(proxy.type.toLowerCase())

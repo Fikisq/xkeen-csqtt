@@ -22,8 +22,11 @@ interface Outbound {
 
 function countryFlag(outbound: Outbound): string {
   const name = `${outbound.xkeenDisplayName ?? ''} ${outbound.tag}`.toLowerCase()
+  const flag = name.match(/[\u{1F1E6}-\u{1F1FF}]{2}/u)?.[0]
+  if (flag) return `${flag} `
   if (/🇫🇮|finland|финлянд/.test(name)) return '🇫🇮 '
   if (/🇳🇱|netherlands|нидерланд|(?:^|[-_])nl\d?/.test(name)) return '🇳🇱 '
+  if (/poland|польш|(?:^|[-_])pl\d?/.test(name)) return '🇵🇱 '
   return ''
 }
 
@@ -33,7 +36,8 @@ function outboundTitle(outbound: Outbound): string {
   if (outbound.tag === 'wdtt-plus') return 'WDTT Plus'
   if (outbound.protocol === 'freedom') return '🔓 Без VPN'
   const protocol = /^(hysteria|hysteria2)$/i.test(outbound.protocol) ? 'Hysteria2' : outbound.protocol.toUpperCase()
-  return `${countryFlag(outbound)}${protocol}`
+  const name = outbound.xkeenDisplayName?.trim() || outbound.tag || protocol
+  return /[\u{1F1E6}-\u{1F1FF}]{2}/u.test(name) ? name : `${countryFlag(outbound)}${name}`
 }
 
 function outboundTransport(outbound: Outbound): string {
