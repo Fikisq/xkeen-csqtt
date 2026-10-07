@@ -3,7 +3,10 @@ use base64::Engine;
 use serde_json::{json, Value};
 use std::{collections::{HashMap, HashSet}, time::Duration};
 
-use crate::{configs, controller, logger::log, subscription::{self, SubscriptionRequest}, types::AppState};
+use crate::{configs, logger::log, subscription::{self, SubscriptionRequest}, types::AppState};
+
+#[path = "xray_subscription_live.rs"]
+pub(crate) mod live;
 
 const CONFIG: &str = "/opt/etc/xray/configs/00_config.json";
 const BACKUP: &str = "/opt/etc/xkeen/xray-subscription-before-auto.json";
@@ -187,19 +190,36 @@ async fn refresh(state: &AppState, apply: bool, diagnostics: &mut Vec<String>) -
     let files = configs::xray_files_with_replacement(CONFIG, &updated).await;
     configs::validate_core("xray", &files).await.map_err(|_| "Новая подписка не прошла проверку Xray")?;
     if !apply { return Ok(true); }
+    let active = state.core.read().is_ok_and(|core| core.name == "xray");
+    let update = if active {
+        match live::prepare(&previous, &config).await {
+            Ok(update) => Some(update),
+            Err(error) => {
+                write_private("/opt/etc/xkeen/xray-subscription-pending.json", &updated).await
+                    .map_err(|_| "Не удалось сохранить отложенное обновление")?;
+                return Err(error);
+            }
+        }
+    } else { None };
     let backup = format!("{BACKUP}.tmp");
     write_private(&backup, &original).await.map_err(|_| "Не удалось сохранить резервную копию")?;
     tokio::fs::rename(&backup, BACKUP).await.map_err(|_| "Не удалось сохранить резервную копию")?;
     let temp = format!("{CONFIG}.auto.tmp");
     write_private(&temp, &updated).await.map_err(|_| "Не удалось записать новые узлы")?;
-    tokio::fs::rename(&temp, CONFIG).await.map_err(|_| "Не удалось заменить узлы")?;
-    if state.core.read().is_ok_and(|core| core.name == "xray") {
-        if let Err(error) = controller::soft_restart("xray").await {
-            let _ = write_private(CONFIG, &original).await;
-            let _ = controller::soft_restart("xray").await;
-            return Err(format!("Xray не запустился после обновления: {error}"));
+    if let Some(update) = &update {
+        if let Err(error) = update.apply(&config).await {
+            let recovery = update.rollback(&previous).await;
+            let _ = tokio::fs::remove_file(&temp).await;
+            return Err(if recovery.is_ok() { error } else {
+                format!("{error}; API-откат не подтверждён, нужен ручной разбор. Перезапуск не выполнялся")
+            });
         }
     }
+    if tokio::fs::rename(&temp, CONFIG).await.is_err() {
+        if let Some(update) = &update { let _ = update.rollback(&previous).await; }
+        return Err("Не удалось сохранить узлы; автоматический перезапуск запрещён".into());
+    }
+    let _ = tokio::fs::remove_file("/opt/etc/xkeen/xray-subscription-pending.json").await;
     Ok(true)
 }
 

@@ -47,6 +47,7 @@ pub async fn settings() -> Json<Value> {
     let (server, dtls_port) = peer.rsplit_once(':').unwrap_or(("", ""));
     Json(json!({
         "success": true,
+        "clientVersion": std::fs::read_to_string(format!("{DIR}/client-version")).unwrap_or_else(|_| "v18".into()).trim(),
         "server": server,
         "dtlsPort": dtls_port.parse::<u16>().ok(),
         "wgPort": value(&content, "WG_PORT").and_then(|v| v.parse::<u16>().ok()),
@@ -207,7 +208,8 @@ pub async fn status() -> Json<Value> {
         .and_then(|content| serde_json::from_str::<Value>(&content).ok())
         .and_then(|config| config.get("outbounds")?.as_array().cloned())
         .is_some_and(|outbounds| outbounds.iter().any(|item| item.get("tag").and_then(Value::as_str) == Some("wdtt-plus")));
-    Json(json!({"installed": installed, "running": running, "ready": ready, "attached": attached, "healthAgeSeconds": health_age, "proxy": "127.0.0.1:1088", "clientVersion": "v18"}))
+    let version = std::fs::read_to_string(format!("{DIR}/client-version")).unwrap_or_else(|_| "v18".into());
+    Json(json!({"installed": installed, "running": running, "ready": ready, "attached": attached, "healthAgeSeconds": health_age, "proxy": "127.0.0.1:1088", "clientVersion": version.trim()}))
 }
 
 #[derive(Deserialize)]

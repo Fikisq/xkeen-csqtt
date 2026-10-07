@@ -1,5 +1,5 @@
 #!/bin/sh
-# WDTT Plus v18 native Go client in local SOCKS5+UDP mode.
+# WDTT Plus v20 native Go client in local SOCKS5+UDP mode.
 set -eu
 DIR=/opt/etc/wdtt-plus
 . "$DIR/wdtt-plus.conf"
@@ -25,7 +25,8 @@ PAYLOAD=$(/opt/bin/jq -Rs --arg vk_hashes "$HASHES" \
     base64 | tr -d '\n=' | tr '+/' '-_')
 FIFO="$DIR/startup.fifo"
 [ -p "$FIFO" ] || mkfifo "$FIFO"
-printf 'START_CONFIG|%s\n' "$PAYLOAD" > "$FIFO" &
+# Keep a writer open; avoid a blocked writer if validation fails before exec.
+exec 3<> "$FIFO"
 set -- --peer "$PEER" --device-id "$DEVICE_ID" --n "$WORKERS" \
     --listen 127.0.0.1:9089 --mode socks5 \
     --socks-listen 127.0.0.1:1088 --socks-udp=true \
@@ -47,4 +48,7 @@ if [ "${RT_NETWORK:-0}" = 1 ]; then
             --rt-masque-accept-tos=true
     fi
 fi
+printf 'START_CONFIG|%s\n' "$PAYLOAD" >&3
+# ARM64 router limits affect only this child, not the network service.
+export GOMAXPROCS=2
 exec "$DIR/wdtt-plus-client" "$@" < "$FIFO"

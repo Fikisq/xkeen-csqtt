@@ -1,5 +1,4 @@
 use crate::configs::{validate_core, xray_files_with_replacement};
-use crate::controller;
 use crate::device_bypass;
 use crate::nfqws2;
 use crate::types::AppState;
@@ -27,6 +26,8 @@ fn routing_api_enabled(config: &Value) -> bool {
 }
 
 async fn replace_live_rules(config: &Value) -> Result<(), String> {
+    let runtime = crate::xray_subscription_refresh::live::runtime_config(config).await?;
+    let config = &runtime;
     let routing = config.get("routing").ok_or("В JSON нет маршрутизации")?;
     let input = serde_json::to_vec(&json!({ "routing": routing })).map_err(|e| e.to_string())?;
     let mut command = Command::new("/opt/sbin/xray");
@@ -47,6 +48,7 @@ async fn replace_live_rules(config: &Value) -> Result<(), String> {
 
 pub async fn apply_routes(State(state): State<AppState>, Json(request): Json<ApplyRoutesRequest>) -> Json<Value> {
     let _guard = ROUTE_LOCK.get_or_init(|| Mutex::new(())).lock().await;
+    let _config_guard = state.app_config_lock.lock().await;
     if state.core.read().unwrap().name != "xray" || request.file != CONFIG_FILE {
         return Json(json!({ "success": false, "error": "Доступен только активный Xray 00_config.json" }));
     }
@@ -84,12 +86,12 @@ pub async fn apply_routes(State(state): State<AppState>, Json(request): Json<App
         return Json(json!({ "success": false, "error": format!("Проверка Xray не пройдена: {}", error.chars().take(200).collect::<String>()) }));
     }
     if let Err(error) = replace_live_rules(&new_config).await {
-        // AddRule can time out after Xray has accepted some rules. Restart from
-        // the still-saved config so the live rules cannot diverge from disk.
-        let recovery = controller::run_init_command(&state, &["restart", "on"]).await;
+        // Restore through the same API. Never turn a failed rule update into a
+        // household-wide process/firewall restart.
+        let recovery = replace_live_rules(&old_config).await;
         let detail = match recovery {
             Ok(()) => format!("{error}. Прежняя маршрутизация восстановлена; повторите сохранение"),
-            Err(recovery_error) => format!("{error}. Восстановление Xray не удалось: {recovery_error}"),
+            Err(recovery_error) => format!("{error}. API-откат не подтверждён: {recovery_error}. Автоматический перезапуск запрещён"),
         };
         return Json(json!({ "success": false, "error": detail }));
     }

@@ -24,6 +24,8 @@ pub struct XraySetupReq {
     subscription_url: Option<String>,
     subscription_allow_lan: Option<bool>,
     subscriptions: Option<Vec<XraySubscriptionEntry>>,
+    #[serde(default, rename = "liveApply")]
+    live_apply: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -245,6 +247,29 @@ pub async fn put_xray_setup(State(state): State<AppState>, Json(req): Json<XrayS
         return Json(serde_json::json!({ "success": false, "error": "Конфигурация Xray не прошла проверку. Смотрите журнал панели" }));
     }
 
+    let previous = tokio::fs::read_to_string(XRAY_SETUP_FILE).await.unwrap_or_default();
+    let live_update = if req.live_apply && state.core.read().is_ok_and(|core| core.name == "xray") {
+        let parsed = serde_json::from_str::<serde_json::Value>(&previous)
+            .and_then(|old| serde_json::from_str::<serde_json::Value>(&req.content).map(|new| (old, new)));
+        let Ok((old, new)) = parsed else {
+            return Json(serde_json::json!({"success": false, "error": "Нужны корректные старая и новая конфигурации"}));
+        };
+        let mut before = old.clone();
+        let mut after = new.clone();
+        for config in [&mut before, &mut after] {
+            if let Some(object) = config.as_object_mut() { object.remove("outbounds"); object.remove("routing"); }
+        }
+        let protected = |config: &serde_json::Value| config["routing"]["rules"].as_array().into_iter().flatten()
+            .filter(|rule| rule["ruleTag"].as_str().is_some_and(|tag| tag.starts_with("device:192.168.0.4:")))
+            .cloned().collect::<Vec<_>>();
+        if before != after || protected(&old) != protected(&new) {
+            return Json(serde_json::json!({"success": false, "error": "Обновление подписки не должно менять общие настройки или правила 192.168.0.4"}));
+        }
+        match crate::xray_subscription_refresh::live::prepare(&old, &new).await {
+            Ok(update) => Some((update, old, new)),
+            Err(error) => return Json(serde_json::json!({"success": false, "error": error})),
+        }
+    } else { None };
     let temp_file = format!("{}.{}.tmp", XRAY_SETUP_FILE, uuid::Uuid::new_v4());
     if let Err(e) = tokio::fs::write(&temp_file, &req.content).await {
         _ = tokio::fs::remove_file(&temp_file).await;
@@ -256,7 +281,15 @@ pub async fn put_xray_setup(State(state): State<AppState>, Json(req): Json<XrayS
             return Json(serde_json::json!({ "success": false, "error": format!("Не удалось сохранить права Xray JSON: {}", e) }));
         }
     }
+    if let Some((update, old, new)) = &live_update {
+        if let Err(error) = update.apply(new).await {
+            let recovery = update.rollback(old).await;
+            _ = tokio::fs::remove_file(&temp_file).await;
+            return Json(serde_json::json!({"success": false, "error": if recovery.is_ok() { error } else { format!("{error}. API-откат не подтверждён; автоматический перезапуск запрещён") }}));
+        }
+    }
     if let Err(e) = tokio::fs::rename(&temp_file, XRAY_SETUP_FILE).await {
+        if let Some((update, old, _)) = &live_update { _ = update.rollback(old).await; }
         _ = tokio::fs::remove_file(&temp_file).await;
         return Json(serde_json::json!({ "success": false, "error": format!("Не удалось сохранить Xray JSON: {}", e) }));
     }

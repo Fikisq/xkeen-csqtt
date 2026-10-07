@@ -49,24 +49,15 @@ export function XraySubscriptionsModal({ open, onOpenChange, onApplied }: Props)
   async function save(nextContent: string, nextEntries: SubscriptionEntry[], successText: string) {
     let saved = false
     try {
-      const put = await apiCall<{ success: boolean; error?: string; warning?: string }>('PUT', 'xray-config', { content: nextContent, subscriptions: nextEntries })
+      const put = await apiCall<{ success: boolean; error?: string; warning?: string }>('PUT', 'xray-config', { content: nextContent, subscriptions: nextEntries, liveApply: state.currentCore === 'xray' })
       saved = !!put.success
       if (!put.success || put.warning) throw new Error(put.error || put.warning || 'Xray не принял конфигурацию')
-      if (state.currentCore === 'xray') {
-        dispatch({ type: 'SET_SERVICE_STATUS', status: 'pending', pendingText: 'Обновление Xray...' })
-        const restart = await apiCall<{ success: boolean; error?: string }>('POST', 'control', { action: 'hardRestart', core: 'xray' })
-        if (!restart.success) throw new Error(restart.error || 'Xray не перезапустился')
-        const status = await apiCall<{ success: boolean; running: boolean }>('GET', 'control')
-        if (!status.success || !status.running) throw new Error('Xray не запустился после изменения подписок')
-        dispatch({ type: 'SET_SERVICE_STATUS', status: 'running' })
-      }
       setContent(nextContent); setEntries(nextEntries); setConfirmDelete(null)
       await onApplied()
       showToast(successText)
     } catch (cause) {
       if (saved) {
-        const rollback = await apiCall<{ success: boolean }>('PUT', 'xray-config', { content, subscriptions: entries }).catch(() => null)
-        if (rollback?.success && state.currentCore === 'xray') await apiCall('POST', 'control', { action: 'hardRestart', core: 'xray' }).catch(() => null)
+        await apiCall<{ success: boolean }>('PUT', 'xray-config', { content, subscriptions: entries, liveApply: state.currentCore === 'xray' }).catch(() => null)
       }
       if (state.currentCore === 'xray') {
         const status = await apiCall<{ success: boolean; running: boolean }>('GET', 'control').catch(() => null)
@@ -119,7 +110,7 @@ export function XraySubscriptionsModal({ open, onOpenChange, onApplied }: Props)
   return <Dialog open={open} onOpenChange={(next) => { if (!busy) onOpenChange(next) }}>
     <DialogContent className="max-h-[90dvh] max-w-[min(94vw,700px)]! overflow-y-auto">
       <DialogHeader><DialogTitle>Подписки Xray</DialogTitle></DialogHeader>
-      <p className="text-muted-foreground text-sm">Узлы обновляются отдельно для каждой ссылки. Правила маршрутизации сохраняются. Изменение узлов активного Xray кратко перезапускает ядро.</p>
+      <p className="text-muted-foreground text-sm">Узлы обновляются отдельно для каждой ссылки. Правила маршрутизации сохраняются. Узлы активного Xray обновляются через локальный API без перезапуска. Если API недоступен, текущая сеть сохраняется.</p>
       <div className="space-y-2">
         {entries.length === 0 && !loading && <p className="text-muted-foreground text-sm">Подписок пока нет.</p>}
         {entries.map((entry, index) => <div key={entry.id} className="border-border flex flex-wrap items-center gap-2 rounded-lg border p-3">

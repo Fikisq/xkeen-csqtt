@@ -9,6 +9,7 @@ import { useAppContext } from '../../lib/store'
 
 interface Settings {
   success: boolean
+  clientVersion?: string
   server?: string
   dtlsPort?: number
   wgPort?: number
@@ -31,6 +32,7 @@ export function WdttPlusSettings({ onBack, onRefresh }: { onBack: () => void; on
   const [dtlsPort, setDtlsPort] = useState('56000')
   const [wgPort, setWgPort] = useState('56001')
   const [workers, setWorkers] = useState('27')
+  const [clientVersion, setClientVersion] = useState('')
   const [hashesCount, setHashesCount] = useState('4')
   const [manualHashes, setManualHashes] = useState('')
   const [hasManualHashes, setHasManualHashes] = useState(false)
@@ -51,6 +53,7 @@ export function WdttPlusSettings({ onBack, onRefresh }: { onBack: () => void; on
       if (result.dtlsPort) setDtlsPort(String(result.dtlsPort))
       if (result.wgPort) setWgPort(String(result.wgPort))
       if (result.workers) setWorkers(String(result.workers))
+      setClientVersion(result.clientVersion ?? 'v18')
       setHashesCount(String(result.hashesCount ?? 4))
       setHasManualHashes(!!result.hasManualHashes)
       setHasPassword(!!result.hasPassword)
@@ -103,7 +106,7 @@ export function WdttPlusSettings({ onBack, onRefresh }: { onBack: () => void; on
   }
 
   return <div className="space-y-3">
-    <p className="text-muted-foreground text-xs">Клиент WDTT Plus v18 открывает локальный SOCKS5 с UDP для Xray. Панель не создаёт звонки VK: вставьте уже полученные ссылки или хеши.</p>
+    <p className="text-muted-foreground text-xs">Клиент WDTT Plus {clientVersion} открывает локальный SOCKS5 с UDP для Xray. Панель не создаёт звонки VK: вставьте уже полученные ссылки или хеши.</p>
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
       <label className="text-sm font-medium">Сервер<Input className="mt-1" value={server} onChange={(event) => setServer(event.target.value)} placeholder="31.77.146.181" /></label>
       <label className="text-sm font-medium">DTLS-порт сервера<Input className="mt-1" inputMode="numeric" value={dtlsPort} onChange={(event) => setDtlsPort(event.target.value)} /></label>
@@ -121,10 +124,10 @@ export function WdttPlusSettings({ onBack, onRefresh }: { onBack: () => void; on
     <div className="border-border space-y-3 rounded-md border p-3 text-sm">
       <Field orientation="horizontal">
         <FieldContent>
-          <FieldLabel htmlFor="wdtt-rt-network">Сеть РТ: сначала TURN/TLS и TURN/TCP, затем UDP</FieldLabel>
+          <FieldLabel htmlFor="wdtt-rt-network">TCP/TLS: без внешнего UDP и HTTP/3</FieldLabel>
           <FieldDescription className="text-xs">Настройки TURN ниже применяются только при включённом режиме.</FieldDescription>
         </FieldContent>
-        <Switch id="wdtt-rt-network" size="sm" checked={rtNetwork} onCheckedChange={setRtNetwork} aria-label="Сеть РТ" />
+        <Switch id="wdtt-rt-network" size="sm" checked={rtNetwork} onCheckedChange={setRtNetwork} aria-label="TCP/TLS" />
       </Field>
       {rtNetwork && <>
         <label className="block font-medium">SNI белого списка для TURN/TLS<Input className="mt-1" value={turnSni} onChange={(event) => setTurnSni(event.target.value)} placeholder="Необязательно · example.com" /></label>

@@ -1,0 +1,43 @@
+diff --git a/go_client/socks5_server.go b/go_client/socks5_server.go
+index b65c604..15eed0c 100644
+--- a/go_client/socks5_server.go
++++ b/go_client/socks5_server.go
+@@ -9,6 +9,7 @@ import (
+ 	"errors"
+ 	"fmt"
+ 	"io"
++	"log"
+ 	"net"
+ 	"net/netip"
+ 	"strings"
+@@ -163,7 +164,9 @@ func runSocks5Server(
+ 	}
+ 
+ 	var clients sync.WaitGroup
+-	clientSlots := make(chan struct{}, 64)
++	// A browser speed test probes many servers concurrently. Keep enough
++	// capacity for those short connections alongside normal household traffic.
++	clientSlots := make(chan struct{}, 256)
+ 	defer clients.Wait()
+ 	for {
+ 		client, err := listener.Accept()
+@@ -176,6 +179,7 @@ func runSocks5Server(
+ 		select {
+ 		case clientSlots <- struct{}{}:
+ 		default:
++			log.Printf("[SOCKS5] предел одновременных клиентов достигнут (%d)", cap(clientSlots))
+ 			_ = client.Close()
+ 			continue
+ 		}
+@@ -186,7 +190,10 @@ func runSocks5Server(
+ 			defer client.Close()
+ 			stopClosingClient := context.AfterFunc(serverCtx, func() { _ = client.Close() })
+ 			defer stopClosingClient()
+-			_ = server.serveClient(serverCtx, client)
++			if err := server.serveClient(serverCtx, client); err != nil &&
++				!errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
++				log.Printf("[SOCKS5] соединение закрыто: %v", err)
++			}
+ 		}()
+ 	}
+ }
