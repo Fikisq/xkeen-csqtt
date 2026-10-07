@@ -89,7 +89,14 @@ stop_native_client() {
         if owns_native_child && [ "${VK_HASH_MODE:-}" = auto_js ]; then
             # APK protocol: finish native-owned calls before stopping the core.
             # The supervisor, not the native child, receives the service signal.
-            printf 'FINISH_VK_CALLS\nSTOP\n' >&3
+            (printf 'FINISH_VK_CALLS\nSTOP\n' >&3) &
+            CONTROL_WRITER=$!
+            w=0
+            while kill -0 "$CONTROL_WRITER" 2>/dev/null && [ "$w" -lt 3 ]; do
+                sleep 1; w=$((w + 1))
+            done
+            kill -0 "$CONTROL_WRITER" 2>/dev/null && kill "$CONTROL_WRITER" 2>/dev/null || true
+            wait "$CONTROL_WRITER" 2>/dev/null || true
             n=0
             while owns_native_child && [ "$n" -lt 60 ]; do
                 sleep 1; n=$((n + 1))

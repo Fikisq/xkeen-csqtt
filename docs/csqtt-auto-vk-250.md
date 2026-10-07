@@ -17,6 +17,7 @@ Automatic browser capture of the captcha result is not implemented. If a challen
 
 - TypeScript and frontend build passed; ARM64 panel and native-event adapter built successfully.
 - Shell syntax checks passed. An isolated WSL mock verified bootstrap decoding, open FIFO, finish-before-stop command order and supervisor exit. No real VK request was made by this test.
+- An isolated test of the ARM64 event helper on the actual router verified CAPTCHA_REQUEST persistence and CAPTCHA_DONE cleanup using synthetic events. It did not create calls, change routing or contact VK. Stop command writing is bounded separately so a full control FIFO cannot prevent the shutdown grace timer from starting.
 - Panel, launcher, service and adapter installed with backups on the router and E:. The original CSQTT executable was not replaced, and the current manual/Auto API selection was not changed. Existing Xray PID 27446 and protected router files were preserved during installation; Office device 192.168.0.4 remains direct/full bypass.
 - The user changed router configuration during preparation; installation preserved the latest config instead of restoring an older snapshot.
 - Auto VK account authentication, a real captcha, native call completion and end-to-end traffic in this mode have not been verified with the user's account. UI availability and build/mock results do not establish those outcomes.

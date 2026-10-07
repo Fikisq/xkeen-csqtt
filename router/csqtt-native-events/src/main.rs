@@ -184,7 +184,7 @@ impl State {
         let line = std::str::from_utf8(line).map_err(|_| "non-UTF8 log line")?.trim_end_matches('\r');
         let Some(event) = line.strip_prefix("__CSQTT_EVENT__|") else { return Ok(()); };
         let (kind, payload) = event.split_once('|').ok_or("missing event payload")?;
-        if kind != "CONFIG" && kind != "ROUTING" { return Ok(()); }
+        if !matches!(kind, "CONFIG" | "ROUTING" | "CAPTCHA_REQUEST" | "CAPTCHA_DONE" | "STOPPED") { return Ok(()); }
         let value: Value = serde_json::from_str(payload).map_err(|_| "malformed native event JSON")?;
         match kind {
             "CONFIG" => {
