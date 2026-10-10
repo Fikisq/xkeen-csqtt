@@ -184,6 +184,24 @@ fn direct_device_ips(config: &Value) -> Result<BTreeSet<Ipv4Addr>, String> {
     Ok(ips)
 }
 
+fn capture_device_ips(config: &Value, direct: &BTreeSet<Ipv4Addr>) -> BTreeSet<Ipv4Addr> {
+    config.pointer("/routing/rules").and_then(Value::as_array).into_iter().flatten()
+        .filter_map(|rule| {
+            let tag = rule.get("ruleTag").and_then(Value::as_str).unwrap_or("");
+            let ip = tag.strip_prefix("device:").and_then(|s| s.split(':').next())?.parse::<Ipv4Addr>().ok()?;
+            (!direct.contains(&ip) && (rule.get("balancerTag").is_some()
+                || rule.get("outboundTag").and_then(Value::as_str).is_some_and(|s| s != "direct"))).then_some(ip)
+        }).collect()
+}
+
+pub(crate) fn needs_sync(old: &Value, new: &Value) -> Result<bool, String> {
+    let old_direct = direct_device_ips(old)?;
+    let new_direct = direct_device_ips(new)?;
+    Ok(old_direct != new_direct
+        || global_direct(old) != global_direct(new)
+        || capture_device_ips(old, &old_direct) != capture_device_ips(new, &new_direct))
+}
+
 fn read_macs(content: &str) -> BTreeSet<String> {
     content.lines().filter_map(|line| {
         let mac = line.split('#').next()?.trim().to_ascii_lowercase();
@@ -329,13 +347,7 @@ pub async fn apply_for_config(config: &Value) -> Result<PreviousBypass, String> 
     }
     let capture = fs::read_to_string(CAPTURE_FILE).await.unwrap_or_default();
     let direct = direct_device_ips(config)?;
-    let mut capture_ips = BTreeSet::new();
-    for rule in config.pointer("/routing/rules").and_then(Value::as_array).into_iter().flatten() {
-        let tag = rule.get("ruleTag").and_then(Value::as_str).unwrap_or("");
-        if let Some(ip) = tag.strip_prefix("device:").and_then(|s| s.split(':').next()).and_then(|s| s.parse::<Ipv4Addr>().ok()) {
-            if !direct.contains(&ip) && (rule.get("balancerTag").is_some() || rule.get("outboundTag").and_then(Value::as_str).is_some_and(|s| s != "direct")) { capture_ips.insert(ip); }
-        }
-    }
+    let capture_ips = capture_device_ips(config, &direct);
     let next_capture = capture_ips.iter().map(|ip| format!("{ip}\n")).collect::<String>();
     if let Err(error) = sync_capture(&next_capture).await {
         _ = sync_capture(&capture).await;

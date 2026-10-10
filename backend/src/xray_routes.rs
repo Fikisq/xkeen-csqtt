@@ -95,15 +95,24 @@ pub async fn apply_routes(State(state): State<AppState>, Json(request): Json<App
         };
         return Json(json!({ "success": false, "error": detail }));
     }
-    let previous_bypass = match device_bypass::apply_for_config(&new_config).await {
-        Ok(previous) => previous,
+    let bypass_changed = match device_bypass::needs_sync(&old_config, &new_config) {
+        Ok(changed) => changed,
         Err(error) => {
             _ = replace_live_rules(&old_config).await;
             return Json(json!({ "success": false, "error": error }));
         }
     };
+    let previous_bypass = if bypass_changed {
+        match device_bypass::apply_for_config(&new_config).await {
+            Ok(previous) => Some(previous),
+            Err(error) => {
+                _ = replace_live_rules(&old_config).await;
+                return Json(json!({ "success": false, "error": error }));
+            }
+        }
+    } else { None };
     if let Err(error) = nfqws2::sync_transition(&old_config, &new_config).await {
-        device_bypass::restore(&previous_bypass).await;
+        if let Some(previous) = &previous_bypass { device_bypass::restore(previous).await; }
         _ = replace_live_rules(&old_config).await;
         return Json(json!({ "success": false, "error": error }));
     }
@@ -117,7 +126,7 @@ pub async fn apply_routes(State(state): State<AppState>, Json(request): Json<App
     if let Err(error) = write_result {
         _ = tokio::fs::remove_file(&temporary).await;
         _ = nfqws2::sync_transition(&new_config, &old_config).await;
-        device_bypass::restore(&previous_bypass).await;
+        if let Some(previous) = &previous_bypass { device_bypass::restore(previous).await; }
         _ = replace_live_rules(&old_config).await;
         return Json(json!({ "success": false, "error": format!("Не удалось сохранить JSON: {error}") }));
     }
