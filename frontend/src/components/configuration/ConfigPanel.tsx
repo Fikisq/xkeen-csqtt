@@ -59,6 +59,7 @@ const ProvidersModal = lazyLoad(() => import('../modals/Providers'), 'ProvidersM
 const BackupsModal = lazyLoad(() => import('../modals/Backups'), 'BackupsModal')
 const SelectorsPanel = lazyLoad(() => import('./mihomo/Selectors'), 'SelectorsPanel')
 const XraySelectorsPanel = lazyLoad(() => import('./xray/Selectors'), 'XraySelectorsPanel')
+const XrayDeviceRoutingTable = lazyLoad(() => import('./xray/XrayDeviceRoutingTable'), 'XrayDeviceRoutingTable')
 const CodeMirrorEditorLazy = lazyLoad(() => import('./CodeMirror'), 'CodeMirrorEditor')
 
 const BackupsModalContainer = memo(function BackupsModalContainer({
@@ -304,10 +305,10 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
 
   const [isEditorMounted, setIsEditorMounted] = useState(false)
 
-  const [activePanel, setActivePanel] = useState<'selectors' | 'connections' | 'config'>('selectors')
+  const [activePanel, setActivePanel] = useState<'selectors' | 'connections' | 'device130' | 'config'>('selectors')
   const [mountedPanels, setMountedPanels] = useState<Set<string>>(() => new Set(['selectors']))
   const [mode, setMode] = useState<ClashMode>('rule')
-  const [routingDraft, setRoutingDraft] = useState<{ file: string; base: string; content: string } | null>(null)
+  const [routingDraft, setRoutingDraft] = useState<{ file: string; base: string; content: string; preserveOrder?: boolean } | null>(null)
   const [routingSaving, setRoutingSaving] = useState(false)
   useEffect(() => {
     if (!routingDraft) return
@@ -624,7 +625,7 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
     try { return Array.isArray(parseJsonc(config.savedContent)?.routing?.rules) } catch { return false }
   }) : undefined
 
-  async function applyXrayRoutingEdit(file: string, edit: (content: string) => string, successMessage: string, commit = false): Promise<boolean> {
+  async function applyXrayRoutingEdit(file: string, edit: (content: string) => string, successMessage: string, commit = false, preserveOrder = false): Promise<boolean> {
     if (routingSaving) return false
     if (configs.some((config) => config.isDirty)) { showToast('Сначала сохраните изменения в редакторе', 'error'); return false }
     const config = configs.find((item) => item.file === file)
@@ -634,9 +635,10 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
       if (routingDraft && (routingDraft.file !== file || routingDraft.base !== config.savedContent)) throw new Error('Конфигурация изменилась. Скачайте черновик и отмените его перед повторным применением')
       const edited = edit(routingDraft?.content ?? config.savedContent)
       const parsed = parseJsonc(edited)
-      const content = applyEdits(edited, modify(edited, ['routing', 'rules'], normalizeDevicePriority(parsed.routing.rules), { formattingOptions: { insertSpaces: true, tabSize: 2 } }))
+      const keepOrder = preserveOrder || !!routingDraft?.preserveOrder
+      const content = keepOrder ? edited : applyEdits(edited, modify(edited, ['routing', 'rules'], normalizeDevicePriority(parsed.routing.rules), { formattingOptions: { insertSpaces: true, tabSize: 2 } }))
       if (!commit) {
-        setRoutingDraft(content === config.savedContent ? null : { file, base: config.savedContent, content })
+        setRoutingDraft(content === config.savedContent ? null : { file, base: config.savedContent, content, preserveOrder: keepOrder })
         return true
       }
       if (content === config.savedContent) return true
@@ -676,6 +678,21 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
       showToast(error instanceof Error ? error.message : 'Не удалось переключить Xray', 'error')
       return false
     } finally { setRoutingSaving(false) }
+  }
+
+  async function editDevice130Routing(change: (rules: RoutingRule[]) => RoutingRule[]): Promise<boolean> {
+    if (!xraySelectorsConfig) return false
+    return applyXrayRoutingEdit(xraySelectorsConfig.file, content => {
+      const parsed = parseJsonc(content)
+      const before: RoutingRule[] = parsed?.routing?.rules
+      if (!Array.isArray(before)) throw new Error('Правила Xray не найдены')
+      const own = (rule: RoutingRule) => baseRuleTag(rule).startsWith('device:192.168.0.130:')
+      const after = change(before)
+      if (!Array.isArray(after)) throw new Error('Не удалось изменить правила устройства')
+      if (JSON.stringify(before.filter(rule => !own(rule))) !== JSON.stringify(after.filter(rule => !own(rule)))) throw new Error('Правила других устройств и общие маршруты изменять нельзя')
+      if (after.some(rule => own(rule) && (rule.type !== 'field' || JSON.stringify(rule.sourceIP) !== '["192.168.0.130"]'))) throw new Error('Правило должно относиться только к 192.168.0.130')
+      return applyEdits(content, modify(content, ['routing', 'rules'], after, { formattingOptions: { insertSpaces: true, tabSize: 2 } }))
+    }, 'Правило 0.130 добавлено в черновик', false, true)
   }
 
   async function selectXrayOutbound(file: string, ruleIndex: number, outboundTag: string) {
@@ -942,7 +959,7 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
                   <Tabs
                     value={currentPanel}
                     onValueChange={(value) => {
-                      const panel = value as 'config' | 'selectors' | 'connections'
+                      const panel = value as 'config' | 'selectors' | 'connections' | 'device130'
                       setActivePanel(panel)
                       setMountedPanels((prev) => (prev.has(panel) ? prev : new Set([...prev, panel])))
                     }}
@@ -952,6 +969,9 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
                       <TabsTrigger value="selectors" className="p-0 text-sm font-semibold md:text-lg" disabled={!isRunning}>
                         Селекторы
                       </TabsTrigger>
+                      {currentCore === 'xray' && hasXraySelectors && <TabsTrigger value="device130" className="p-0 text-sm font-semibold md:text-lg" disabled={!isRunning}>
+                        Маршрутизация 0.130
+                      </TabsTrigger>}
                       {isMihomo && (
                         <TabsTrigger value="connections" className="p-0 text-sm font-semibold md:text-lg" disabled={!isRunning}>
                           Соединения
@@ -1119,6 +1139,21 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
               <LazyBoundary>
                 <XraySelectorsPanel config={routingDraft?.file === xraySelectorsConfig.file ? { ...xraySelectorsConfig, savedContent: routingDraft.content } : xraySelectorsConfig} onSelect={selectXrayOutbound} onDeviceSelect={selectXrayDevice} onAddRoute={addXrayRoute} onAddIpRoute={addXrayIpRoute} onEditResources={editXrayRouteResources} onRemoveRoute={removeXrayRoute} onRenameRoute={renameXrayRoute} onExtendRoute={extendXrayRoute} onReorder={reorderXrayRouting} />
               </LazyBoundary>
+                </div>
+              </div>
+            )}
+
+            {currentCore === 'xray' && hasXraySelectors && xraySelectorsConfig && currentPanel === 'device130' && (
+              <div className="flex flex-col">
+                {routingToolbar}
+                <div className={cn('relative min-h-0 flex-1', routingSaving && 'pointer-events-none opacity-60')}>
+                  <LazyBoundary>
+                    <XrayDeviceRoutingTable
+                      content={routingDraft?.file === xraySelectorsConfig.file ? routingDraft.content : xraySelectorsConfig.savedContent}
+                      onChange={editDevice130Routing}
+                      onError={message => showToast(message, 'error')}
+                    />
+                  </LazyBoundary>
                 </div>
               </div>
             )}
