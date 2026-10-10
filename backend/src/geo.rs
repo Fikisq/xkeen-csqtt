@@ -36,6 +36,101 @@ struct GeoCategoryResponse {
     categories: Vec<GeoCategory>,
 }
 
+#[derive(Serialize)]
+struct GeoRecord {
+    kind: &'static str,
+    value: String,
+}
+
+#[derive(Serialize)]
+struct GeoRecordsResponse {
+    total: usize,
+    entries: Vec<GeoRecord>,
+}
+
+fn decode_geo_record(mut data: &[u8], is_ip: bool) -> Option<GeoRecord> {
+    let (mut record_type, mut value, mut prefix) = (0, &[][..], 0u64);
+    while data.has_remaining() {
+        let (field, wire) = decode_key(&mut data).ok()?;
+        match (field, wire) {
+            (1, WireType::Varint) if !is_ip => record_type = decode_varint(&mut data).ok()?,
+            (1, WireType::LengthDelimited) if is_ip => value = read_len_delim(&mut data)?,
+            (2, WireType::LengthDelimited) if !is_ip => value = read_len_delim(&mut data)?,
+            (2, WireType::Varint) if is_ip => prefix = decode_varint(&mut data).ok()?,
+            _ => skip_field(wire, field, &mut data, DecodeContext::default()).ok()?,
+        }
+    }
+    if is_ip {
+        let address = match value.len() {
+            4 if prefix <= 32 => std::net::Ipv4Addr::from(<[u8; 4]>::try_from(value).ok()?).to_string(),
+            16 if prefix <= 128 => std::net::Ipv6Addr::from(<[u8; 16]>::try_from(value).ok()?).to_string(),
+            _ => return None,
+        };
+        Some(GeoRecord { kind: "CIDR", value: format!("{address}/{prefix}") })
+    } else {
+        let kind = match record_type { 0 => "KEYWORD", 1 => "REGEXP", 2 => "DOMAIN", 3 => "FULL", _ => return None };
+        Some(GeoRecord { kind, value: std::str::from_utf8(value).ok()?.to_string() })
+    }
+}
+
+pub async fn get_geo_records(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+    let file = params.get("file").cloned().unwrap_or_default();
+    let kind = params.get("kind").cloned().unwrap_or_default();
+    let category = params.get("category").cloned().unwrap_or_default();
+    let filter = params.get("filter").cloned().unwrap_or_default().to_lowercase();
+    let offset = params.get("offset").and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+    let result = task::spawn_blocking(move || -> Result<GeoRecordsResponse, String> {
+        if file.len() > 100 || !file.ends_with(".dat") || file.starts_with('.')
+            || !file.bytes().all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c))
+            || !["domain", "ip"].contains(&kind.as_str()) || category.is_empty() || category.len() > 100 || filter.len() > 200 {
+            return Err("Некорректные параметры базы".into());
+        }
+        let path = Path::new(XRAY_ASSET_DIR).join(file);
+        if !std::fs::symlink_metadata(&path).map_err(|_| "База не установлена")?.file_type().is_file() {
+            return Err("Нужен обычный файл базы".into());
+        }
+        let data = unsafe { MmapOptions::new().map(&File::open(path).map_err(|e| e.to_string())?) }.map_err(|e| e.to_string())?;
+        let is_ip = kind == "ip";
+        if !(if is_ip { detect_geo_file_type(&data).1 } else { detect_geo_file_type(&data).0 }) {
+            return Err("База не соответствует типу ресурсов".into());
+        }
+        let mut buf = &data[..];
+        let mut total = 0;
+        let mut entries = Vec::new();
+        while buf.has_remaining() {
+            let (field, wire) = decode_key(&mut buf).map_err(|e| e.to_string())?;
+            if field != 1 || wire != WireType::LengthDelimited {
+                skip_field(wire, field, &mut buf, DecodeContext::default()).map_err(|e| e.to_string())?;
+                continue;
+            }
+            let mut group = read_len_delim(&mut buf).ok_or("Повреждённая категория")?;
+            let mut name = "";
+            while group.has_remaining() {
+                let (item_field, item_wire) = decode_key(&mut group).map_err(|e| e.to_string())?;
+                match (item_field, item_wire) {
+                    (1, WireType::LengthDelimited) => name = std::str::from_utf8(read_len_delim(&mut group).ok_or("Повреждённое имя")?).map_err(|e| e.to_string())?,
+                    (2, WireType::LengthDelimited) => {
+                        let payload = read_len_delim(&mut group).ok_or("Повреждённая запись")?;
+                        if !name.eq_ignore_ascii_case(&category) { continue; }
+                        if let Some(record) = decode_geo_record(payload, is_ip) {
+                            if !filter.is_empty() && !record.value.to_lowercase().contains(&filter) { continue; }
+                            if total >= offset && entries.len() < 100 { entries.push(record); }
+                            total += 1;
+                        }
+                    }
+                    _ => skip_field(item_wire, item_field, &mut group, DecodeContext::default()).map_err(|e| e.to_string())?,
+                }
+            }
+            if name.eq_ignore_ascii_case(&category) { break; }
+        }
+        Ok(GeoRecordsResponse { total, entries })
+    }).await.map_err(|e| e.to_string()).and_then(|result| result);
+    match result {
+        Ok(data) => Json(ApiResponse { success: true, error: None, data: Some(data) }),
+        Err(error) => Json(ApiResponse::<GeoRecordsResponse> { success: false, error: Some(error), data: None }),
+    }
+}
+
 // Validate every protobuf category and record before making a file visible to Xray.
 fn validate_uploaded_geo(data: &[u8], is_ip: bool) -> Result<(), String> {
     let mut list = data;

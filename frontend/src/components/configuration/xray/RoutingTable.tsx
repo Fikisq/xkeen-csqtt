@@ -4,7 +4,7 @@ import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { IconPencil, IconTrash, IconPlus, IconGripVertical, IconFolder } from '@tabler/icons-react'
-import { useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { GeoDatabasePicker } from '@/components/configuration/GeoDatabasePicker'
 
 // Типы для правила маршрутизации в стиле 3x-ui
@@ -35,6 +35,14 @@ interface RoutingTableProps {
   canDelete?: (rule: RoutingRule) => boolean
   canReorder?: (rule: RoutingRule) => boolean
   canToggle?: (rule: RoutingRule) => boolean
+  toolbarAction?: ReactNode
+  disabled?: boolean
+  latencies?: Record<string, { ms?: number; error?: string }>
+  onPing?: (tag: string) => void
+  pingPending?: string | null
+  showTitle?: boolean
+  onImportFile?: (file: File) => Promise<void>
+  onExportRules?: () => void
 }
 
 export function RoutingTable({
@@ -49,12 +57,21 @@ export function RoutingTable({
   canDelete = () => true,
   canReorder = () => true,
   canToggle = () => true,
+  toolbarAction,
+  disabled = false,
+  latencies = {},
+  onPing,
+  pingPending = null,
+  showTitle = true,
+  onImportFile,
+  onExportRules,
 }: RoutingTableProps) {
   const [editingRule, setEditingRule] = useState<RoutingRule | null>(null)
   const [isAddingNew, setIsAddingNew] = useState(false)
   const [showDomainPicker, setShowDomainPicker] = useState(false)
   const [showIpPicker, setShowIpPicker] = useState(false)
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
+  const importInput = useRef<HTMLInputElement>(null)
 
   const emptyRule: RoutingRule = {
     id: '',
@@ -62,7 +79,7 @@ export function RoutingTable({
     description: '',
     network: '',
     inboundTag: [],
-    outboundTag: outbounds[0]?.tag || 'direct',
+    outboundTag: '',
     domain: [],
     ip: [],
     port: '',
@@ -86,7 +103,8 @@ export function RoutingTable({
   }
 
   const saveRule = () => {
-    if (!editingRule) return
+    if (!editingRule || disabled) return
+    if (isAddingNew && (!editingRule.description.trim() || (!editingRule.domain.length && !editingRule.ip.length) || !editingRule.outboundTag)) return
 
     if (isAddingNew) {
       onAddRule(editingRule)
@@ -101,20 +119,32 @@ export function RoutingTable({
     setEditingRule({ ...editingRule, ...updates })
   }
 
+  const addRuleButton = <Button onClick={openAddDialog} size="sm">
+    <IconPlus data-icon="inline-start" />
+    Добавить правило
+  </Button>
+
   return (
     <div className="space-y-4 text-foreground">
       {/* Заголовок и кнопка добавления */}
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="text-lg font-semibold">{deviceMode ? 'Правила устройства' : 'Маршрутизация'}</h3>
-        <Button onClick={openAddDialog} size="sm">
-          <IconPlus data-icon="inline-start" />
-          Добавить правило
-        </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        {!deviceMode && showTitle && <h3 className="text-lg font-semibold">Маршрутизация</h3>}
+        {!disabled && addRuleButton}
+        {onImportFile && <>
+          <input ref={importInput} type="file" accept=".json,application/json" className="hidden" aria-label="Файл правил для импорта" onChange={event => {
+            const file = event.target.files?.[0]
+            event.target.value = ''
+            if (file) void onImportFile(file)
+          }} />
+          <Button size="sm" variant="outline" disabled={disabled} onClick={() => importInput.current?.click()}>Импорт</Button>
+        </>}
+        {onExportRules && <Button size="sm" variant="outline" onClick={onExportRules}>Экспорт</Button>}
+        <div className="ml-auto flex flex-wrap items-center gap-2">{toolbarAction}</div>
       </div>
 
       {/* Таблица правил */}
-      <div className="border-border bg-card overflow-x-auto rounded-xl border">
-        <table className="w-full min-w-[980px] table-fixed text-sm">
+      <div className={cn('border-border bg-card overflow-x-auto rounded-xl border', disabled && 'opacity-45')} aria-disabled={disabled}>
+        <table className="w-full min-w-[980px] table-fixed text-base">
           <thead className="bg-input-background border-border border-b">
             <tr>
               <th className="w-14 px-3 py-3 text-left font-medium">#</th>
@@ -143,12 +173,12 @@ export function RoutingTable({
                     !rule.enabled && 'opacity-60',
                     draggedIndex === index && 'opacity-50'
                   )}
-                  draggable={canReorder(rule)}
-                  onDragStart={(event) => { if (canReorder(rule)) setDraggedIndex(index); else event.preventDefault() }}
+                  draggable={!disabled && canReorder(rule)}
+                  onDragStart={(event) => { if (!disabled && canReorder(rule)) setDraggedIndex(index); else event.preventDefault() }}
                   onDragEnd={() => setDraggedIndex(null)}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={() => {
-                    if (draggedIndex !== null && draggedIndex !== index && canReorder(rule) && canReorder(rules[draggedIndex])) {
+                    if (!disabled && draggedIndex !== null && draggedIndex !== index && canReorder(rule) && canReorder(rules[draggedIndex])) {
                       onReorder(draggedIndex, index)
                     }
                     setDraggedIndex(null)
@@ -157,7 +187,7 @@ export function RoutingTable({
                   <td className="px-3 py-3">
                     <div className="flex items-center gap-1.5">
                       <IconGripVertical className={cn('text-muted-foreground size-4', canReorder(rule) ? 'cursor-grab' : 'opacity-30')} />
-                      <span className="text-muted-foreground text-xs">{index + 1}</span>
+                      <span className="text-muted-foreground text-sm">{index + 1}</span>
                     </div>
                   </td>
                   <td className="px-3 py-3">
@@ -165,6 +195,7 @@ export function RoutingTable({
                       <Button
                         size="icon-xs"
                         variant="outline"
+                        disabled={disabled}
                         onClick={() => openEditDialog(rule)}
                         title="Редактировать"
                       >
@@ -173,6 +204,7 @@ export function RoutingTable({
                       {canDelete(rule) && <Button
                         size="icon-xs"
                         variant="outline"
+                        disabled={disabled}
                         onClick={() => onDeleteRule(rule.id)}
                         title="Удалить"
                       >
@@ -181,18 +213,18 @@ export function RoutingTable({
                     </div>
                   </td>
                   <td className="px-3 py-3">
-                    <Switch size="sm" checked={rule.enabled} disabled={!canToggle(rule)} onCheckedChange={() => onToggleEnabled(rule.id)} aria-label={`${rule.enabled ? 'Выключить' : 'Включить'} ${rule.description}`} />
+                    <Switch size="sm" checked={rule.enabled} disabled={disabled || !canToggle(rule)} onCheckedChange={() => onToggleEnabled(rule.id)} aria-label={`${rule.enabled ? 'Выключить' : 'Включить'} ${rule.description}`} />
                   </td>
                   <td className="px-3 py-3">
                     <span className="text-foreground">{rule.description || '—'}</span>
                   </td>
                   <td className="px-3 py-3">
-                    <span className="text-muted-foreground text-xs uppercase">
+                    <span className="text-muted-foreground text-sm uppercase">
                       {rule.network || 'tcp,udp'}
                     </span>
                   </td>
                   <td className="px-3 py-3">
-                    <div className="text-muted-foreground flex flex-col gap-0.5 break-words text-xs">
+                    <div className="text-muted-foreground flex flex-col gap-0.5 break-words text-sm">
                       {rule.domain.length > 0 && (
                         <div>
                           <span className="text-foreground font-medium">DOMAIN:</span>{' '}
@@ -211,12 +243,15 @@ export function RoutingTable({
                     </div>
                   </td>
                   {!deviceMode && <td className="px-3 py-3">
-                    <span className="text-muted-foreground text-xs">
+                    <span className="text-muted-foreground text-sm">
                       {rule.inboundTag.join(', ') || '—'}
                     </span>
                   </td>}
                   <td className="px-3 py-3">
-                    <span className="text-primary break-words text-xs font-medium">{outbounds.find(out => out.tag === rule.outboundTag)?.label || rule.outboundTag}</span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-primary break-words text-sm font-medium">{outbounds.find(out => out.tag === rule.outboundTag)?.label || rule.outboundTag}</span>
+                      {onPing && outbounds.some(out => out.tag === rule.outboundTag) && <button type="button" className={cn('rounded px-1 text-[11px] tabular-nums hover:bg-primary/10', latencies[rule.outboundTag]?.ms !== undefined ? 'text-green-400' : latencies[rule.outboundTag]?.error ? 'text-red-400' : 'text-muted-foreground')} disabled={pingPending !== null} onClick={() => onPing(rule.outboundTag)} title={latencies[rule.outboundTag]?.error || 'Проверить задержку'} aria-label={`Пинг ${rule.outboundTag}`}>{pingPending === rule.outboundTag ? '…' : latencies[rule.outboundTag]?.ms !== undefined ? `${latencies[rule.outboundTag].ms} мс` : latencies[rule.outboundTag]?.error ? '✕' : 'Пинг'}</button>}
+                    </div>
                   </td>
                 </tr>
               ))
@@ -227,30 +262,32 @@ export function RoutingTable({
 
       {/* Модальное окно редактирования */}
       <Dialog open={editingRule !== null} onOpenChange={(open) => !open && closeDialog()}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-[760px]">
           <DialogHeader>
             <DialogTitle>{isAddingNew ? '+ Маршрутизация' : 'Редактировать правило'}</DialogTitle>
           </DialogHeader>
 
           {editingRule && (
-            <div className="space-y-4">
+            <div className="space-y-4 text-base">
               {/* Включить */}
               {!deviceMode && <div className="flex items-center gap-2">
                 <label className="flex cursor-pointer items-center gap-2">
                   <input
                     type="checkbox"
                     checked={editingRule.enabled}
+                    disabled={!isAddingNew && !canToggle(editingRule)}
                     onChange={(e) => updateEditingRule({ enabled: e.target.checked })}
                     className="accent-primary size-4"
                   />
-                  <span className="text-sm font-medium">Включить</span>
+                  <span className="text-base font-medium">Включить</span>
                 </label>
               </div>}
 
               {/* Комментарий */}
               <div>
-                <label className="text-muted-foreground mb-1.5 block text-sm">Комментарий</label>
+                <label className="text-muted-foreground mb-1.5 block text-base">Комментарий</label>
                 <Input
+                  className="text-base"
                   value={editingRule.description}
                   onChange={(e) => updateEditingRule({ description: e.target.value })}
                   disabled={deviceMode && !isAddingNew}
@@ -260,11 +297,11 @@ export function RoutingTable({
 
               {/* Сеть */}
               <div>
-                <label className="text-muted-foreground mb-1.5 block text-sm">Сеть</label>
+                <label className="text-muted-foreground mb-1.5 block text-base">Сеть</label>
                 <select
                   value={editingRule.network}
                   onChange={(e) => updateEditingRule({ network: e.target.value as any })}
-                  className="bg-input-background hover:bg-input-background-hover border-input h-9 w-full rounded-md border px-2.5 text-[13px] shadow-xs outline-none"
+                  className="bg-input-background hover:bg-input-background-hover border-input h-10 w-full rounded-md border px-2.5 text-base shadow-xs outline-none"
                 >
                   <option value="">tcp,udp</option>
                   <option value="tcp">tcp</option>
@@ -275,7 +312,7 @@ export function RoutingTable({
 
               {/* Домены */}
               <div>
-                <label className="text-muted-foreground mb-1.5 block text-sm">Домен</label>
+                <label className="text-muted-foreground mb-1.5 block text-base">Домен</label>
                 <div className="relative">
                   <Input
                     value={editingRule.domain.join(', ')}
@@ -288,7 +325,7 @@ export function RoutingTable({
                       })
                     }
                     placeholder="google.com, geosite:youtube"
-                    className="pr-10"
+                    className="pr-10 text-base"
                   />
                   <button
                     type="button"
@@ -303,7 +340,7 @@ export function RoutingTable({
 
               {/* IP */}
               <div>
-                <label className="text-muted-foreground mb-1.5 block text-sm">IP</label>
+                <label className="text-muted-foreground mb-1.5 block text-base">IP</label>
                 <div className="relative">
                   <Input
                     value={editingRule.ip.join(', ')}
@@ -316,7 +353,7 @@ export function RoutingTable({
                       })
                     }
                     placeholder="0.0.0.0/8, geoip:cloudflare"
-                    className="pr-10"
+                    className="pr-10 text-base"
                   />
                   <button
                     type="button"
@@ -331,8 +368,9 @@ export function RoutingTable({
 
               {/* Порт */}
               <div>
-                <label className="text-muted-foreground mb-1.5 block text-sm">Порт</label>
+                <label className="text-muted-foreground mb-1.5 block text-base">Порт</label>
                 <Input
+                  className="text-base"
                   value={editingRule.port}
                   onChange={(e) => updateEditingRule({ port: e.target.value })}
                   placeholder="53,443,1000-2000"
@@ -341,10 +379,11 @@ export function RoutingTable({
 
               {/* Теги входящих */}
               {!deviceMode && <div>
-                <label className="text-muted-foreground mb-1.5 block text-sm">
+                <label className="text-muted-foreground mb-1.5 block text-base">
                   Теги входящих
                 </label>
                 <Input
+                  className="text-base"
                   value={editingRule.inboundTag.join(', ')}
                   onChange={(e) =>
                     updateEditingRule({
@@ -360,20 +399,24 @@ export function RoutingTable({
 
               {/* Тег исходящего */}
               <div>
-                <label className="text-muted-foreground mb-1.5 block text-sm">
+                <label className="text-muted-foreground mb-1.5 block text-base">
                   Тег исходящего
                 </label>
+                <div className="flex items-center gap-2">
                 <select
                   value={editingRule.outboundTag}
                   onChange={(e) => updateEditingRule({ outboundTag: e.target.value })}
-                  className="bg-input-background hover:bg-input-background-hover border-input h-9 w-full rounded-md border px-2.5 text-[13px] shadow-xs outline-none"
+                  className="bg-input-background hover:bg-input-background-hover border-input h-10 min-w-0 flex-1 rounded-md border px-2.5 text-base shadow-xs outline-none"
                 >
+                  <option value="" disabled>Выберите исходящее</option>
                   {outbounds.map((out) => (
                     <option key={out.tag} value={out.tag}>
-                      {out.label || out.tag}
+                      {out.label || out.tag}{latencies[out.tag]?.ms !== undefined ? ` · ${latencies[out.tag].ms} мс` : ''}
                     </option>
                   ))}
                 </select>
+                {onPing && outbounds.some(out => out.tag === editingRule.outboundTag) && <Button size="sm" variant="outline" disabled={pingPending !== null} onClick={() => onPing(editingRule.outboundTag)}>{pingPending === editingRule.outboundTag ? 'Проверка…' : latencies[editingRule.outboundTag]?.ms !== undefined ? `${latencies[editingRule.outboundTag].ms} мс` : 'Пинг'}</Button>}
+                </div>
               </div>
             </div>
           )}
@@ -382,7 +425,7 @@ export function RoutingTable({
             <Button variant="outline" onClick={closeDialog}>
               Закрыть
             </Button>
-            <Button onClick={saveRule}>
+            <Button onClick={saveRule} disabled={disabled || isAddingNew && (!editingRule?.description.trim() || (!editingRule?.domain.length && !editingRule?.ip.length) || !editingRule?.outboundTag)}>
               {isAddingNew ? 'Создать' : 'Сохранить'}
             </Button>
           </DialogFooter>
@@ -391,40 +434,38 @@ export function RoutingTable({
 
       {/* Picker доменов */}
       <Dialog open={showDomainPicker} onOpenChange={setShowDomainPicker}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] overflow-y-auto sm:max-w-[1100px]">
           <DialogHeader>
-            <DialogTitle>Категории geo-баз</DialogTitle>
+            <DialogTitle>Домены</DialogTitle>
           </DialogHeader>
           {editingRule && (
             <GeoDatabasePicker
               kind="domain"
               resources={editingRule.domain}
               onChange={(domains) => updateEditingRule({ domain: domains })}
-              onPick={() => setShowDomainPicker(false)}
             />
           )}
           <DialogFooter>
-            <Button onClick={() => setShowDomainPicker(false)}>Применить</Button>
+            <Button onClick={() => setShowDomainPicker(false)}>Готово</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Picker IP */}
       <Dialog open={showIpPicker} onOpenChange={setShowIpPicker}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] overflow-y-auto sm:max-w-[1100px]">
           <DialogHeader>
-            <DialogTitle>Категории geo-баз</DialogTitle>
+            <DialogTitle>IP-адреса</DialogTitle>
           </DialogHeader>
           {editingRule && (
             <GeoDatabasePicker
               kind="ip"
               resources={editingRule.ip}
               onChange={(ips) => updateEditingRule({ ip: ips })}
-              onPick={() => setShowIpPicker(false)}
             />
           )}
           <DialogFooter>
-            <Button onClick={() => setShowIpPicker(false)}>Применить</Button>
+            <Button onClick={() => setShowIpPicker(false)}>Готово</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -445,7 +445,6 @@ async fn main() {
     };
     version::start_update_checker(state.clone());
     xray_subscription_refresh::start(state.clone());
-    mihomo_subscription_refresh::start(state.clone());
     nfqws2::start_reconciler();
 
     if let Some(ref _token) = state.rci_token {
@@ -522,6 +521,7 @@ async fn main() {
         .route("/api/update", post(updater::post_update))
         .route("/api/geo", get(geo::get_geo))
         .route("/api/geo/categories", get(geo::get_geosite_categories))
+        .route("/api/geo/records", get(geo::get_geo_records))
         .route("/api/geo/site", get(geo::get_geosite))
         .route("/api/geo/ip", get(geo::get_geoip))
         .route("/api/auth/logout", post(auth::post_logout))

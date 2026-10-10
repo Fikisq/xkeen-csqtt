@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { IconBox, IconCpu, IconDownload, IconLogout, IconPlayerPlayFilled, IconPlayerStopFilled, IconRefresh, IconSettings } from '@tabler/icons-react'
+import { IconCpu, IconDownload, IconLogout, IconPlayerPlayFilled, IconPlayerStopFilled, IconRefresh, IconSettings } from '@tabler/icons-react'
 import { useEffect } from 'react'
 import { apiCall, capitalize } from '../../lib/api'
 import { syncClashApiPort, useAppContext } from '../../lib/store'
@@ -214,19 +214,6 @@ export function StatusBar({
             <Tooltip>
               <TooltipTrigger render={<Button variant="outline" onClick={() => onOpenUpdate(currentCore)} aria-label={`Версии ${capitalize(currentCore)}`}><IconDownload className="size-4" /><span className="hidden text-xs sm:inline">Версии</span></Button>} />
               <TooltipContent>Установить или обновить {capitalize(currentCore)}</TooltipContent>
-            </Tooltip>
-          )}
-          {isConfigsLoading || !version ? (
-            <Skeleton className="h-9 w-18.75" />
-          ) : (
-            <Tooltip>
-              <TooltipTrigger render={
-                <Button variant="outline" className="pointer-events-none text-xs tracking-wider" aria-label="Версия панели XKeen UI">
-                  <IconBox data-icon="inline-start" className="size-4.5" />
-                  {version}
-                </Button>
-              } />
-              <TooltipContent>Версия XKeen UI</TooltipContent>
             </Tooltip>
           )}
           {isConfigsLoading || !version ? (

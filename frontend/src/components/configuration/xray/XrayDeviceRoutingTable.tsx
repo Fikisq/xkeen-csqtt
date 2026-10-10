@@ -1,41 +1,40 @@
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { parse as parseJsonc } from 'jsonc-parser'
 import { Button } from '@/components/ui/button'
 import { RoutingTable, type RoutingRule as TableRule } from './RoutingTable'
 import { outboundTitle } from './Selectors'
-import { baseRuleTag, customRouteName, type RoutingRule as XrayRule } from '@/lib/xrayDeviceRouting'
+import { useOutboundLatency } from './useOutboundLatency'
+import { baseRuleTag, customRouteName, isFullBypass, type RoutingRule as XrayRule } from '@/lib/xrayDeviceRouting'
 
-const DEVICE_IP = '192.168.0.130'
-const PREFIX = `device:${DEVICE_IP}:`
-const DISABLED_PREFIX = `disabled:${PREFIX}`
-const FALLBACK = `${PREFIX}VPN`
 const DISABLED_SOURCE = '192.0.2.255'
 
-function isDisabled(rule: XrayRule): boolean { return baseRuleTag(rule).startsWith(DISABLED_PREFIX) }
+function prefix(ip: string): string { return `device:${ip}:` }
+function fallback(ip: string): string { return `${prefix(ip)}VPN` }
+function isDisabled(rule: XrayRule): boolean { return baseRuleTag(rule).startsWith('disabled:device:') }
 function ownName(rule: XrayRule): string { return baseRuleTag(rule).replace(/^disabled:/, '') }
 
-function isOwn(rule: XrayRule): boolean {
+function isOwn(rule: XrayRule, ip: string): boolean {
   const disabled = isDisabled(rule)
-  return ownName(rule).startsWith(PREFIX) && Array.isArray(rule.sourceIP) && rule.sourceIP.length === 1 && rule.sourceIP[0] === (disabled ? DISABLED_SOURCE : DEVICE_IP)
+  return ownName(rule).startsWith(prefix(ip)) && Array.isArray(rule.sourceIP) && rule.sourceIP.length === 1 && rule.sourceIP[0] === (disabled ? DISABLED_SOURCE : ip)
 }
 
-function label(rule: XrayRule): string {
-  const name = ownName(rule).slice(PREFIX.length)
+function label(rule: XrayRule, ip: string): string {
+  const name = ownName(rule).slice(prefix(ip).length)
   return name === 'VPN' ? 'Маршрут по умолчанию' : customRouteName(name)
 }
 
-function destination(rule: XrayRule): string {
-  if (ownName(rule) === FALLBACK && rule.ruleTag?.endsWith('|bypass')) return '@bypass'
+function destination(rule: XrayRule, ip: string): string {
+  if (ownName(rule) === fallback(ip) && isFullBypass(rule)) return '@bypass'
   return rule.balancerTag ? `@balancer:${rule.balancerTag}` : rule.outboundTag ?? ''
 }
 
-function toTable(rule: XrayRule, index: number): TableRule {
+function toTable(rule: XrayRule, index: number, ip: string): TableRule {
   return {
-    id: String(index), enabled: !isDisabled(rule), description: label(rule),
+    id: String(index), enabled: !isDisabled(rule), description: label(rule, ip),
     network: (rule.network ?? '') as TableRule['network'], inboundTag: [],
-    outboundTag: destination(rule), domain: rule.domain ?? [], ip: rule.ip ?? [],
+    outboundTag: destination(rule, ip), domain: rule.domain ?? [], ip: rule.ip ?? [],
     port: typeof rule.port === 'string' ? rule.port : '',
-    sourcePort: '', sourceIP: [DEVICE_IP],
+    sourcePort: '', sourceIP: [ip],
   }
 }
 
@@ -52,12 +51,12 @@ function validate(row: TableRule, outbounds: Set<string>, balancers: Set<string>
   if (row.port && !/^\d{1,5}(?:-\d{1,5})?(?:,\d{1,5}(?:-\d{1,5})?)*$/.test(row.port)) throw new Error('Неверный формат порта')
 }
 
-function updateOwn(rule: XrayRule, row: TableRule): XrayRule {
+function updateOwn(rule: XrayRule, row: TableRule, ip: string): XrayRule {
   const disabled = isDisabled(rule)
   const name = ownName(rule)
-  const suffix = name === FALLBACK && row.outboundTag === '@bypass' ? '|bypass' : name === FALLBACK && row.outboundTag === 'direct' ? '|split' : ''
+  const suffix = name === fallback(ip) && row.outboundTag === '@bypass' ? '|bypass' : name === fallback(ip) && row.outboundTag === 'direct' ? '|split' : ''
   return {
-    ...rule, ruleTag: (disabled ? 'disabled:' : '') + name + suffix, sourceIP: [disabled ? DISABLED_SOURCE : DEVICE_IP],
+    ...rule, ruleTag: (disabled ? 'disabled:' : '') + name + suffix, sourceIP: [disabled ? DISABLED_SOURCE : ip],
     outboundTag: undefined, balancerTag: undefined,
     network: row.network || 'tcp,udp',
     domain: row.domain.length ? row.domain : undefined,
@@ -68,23 +67,31 @@ function updateOwn(rule: XrayRule, row: TableRule): XrayRule {
 }
 
 type Props = {
+  deviceIp?: string
   content: string
   onChange: (change: (rules: XrayRule[]) => XrayRule[], immediate?: boolean) => Promise<boolean>
   onError: (message: string) => void
+  utilities?: ReactNode
+  onImportFile?: (file: File) => Promise<void>
+  onExportRules?: () => void
 }
 
-export function XrayDeviceRoutingTable({ content, onChange, onError }: Props) {
+export function XrayDeviceRoutingTable({ deviceIp = '192.168.0.130', content, onChange, onError, utilities, onImportFile, onExportRules }: Props) {
+  const DEVICE_IP = deviceIp
+  const PREFIX = prefix(deviceIp)
+  const FALLBACK = fallback(deviceIp)
+  const { latencies, pingPending, ping } = useOutboundLatency()
   const parsed = useMemo(() => parseJsonc(content), [content])
   const rules: XrayRule[] = Array.isArray(parsed?.routing?.rules) ? parsed.routing.rules : []
-  const own = rules.map((rule, index) => ({ rule, index })).filter(({ rule }) => isOwn(rule))
+  const own = rules.map((rule, index) => ({ rule, index })).filter(({ rule }) => isOwn(rule, DEVICE_IP))
   const outbounds: Array<{ tag: string; protocol: string; label: string }> = Array.isArray(parsed?.outbounds)
-    ? parsed.outbounds.filter((out: any) => typeof out?.tag === 'string').map((out: any) => ({ tag: out.tag, protocol: out.protocol ?? '', label: out.tag === 'direct' ? 'Напрямую (с правилами)' : outboundTitle(out) })) : []
+    ? parsed.outbounds.filter((out: any) => typeof out?.tag === 'string').map((out: any) => ({ tag: out.tag, protocol: out.protocol ?? '', label: out.tag === 'direct' ? 'direct' : out.tag === 'block' ? 'blocked' : outboundTitle(out) })) : []
   const balancers: string[] = Array.isArray(parsed?.routing?.balancers)
     ? parsed.routing.balancers.map((item: any) => item?.tag).filter((tag: unknown): tag is string => typeof tag === 'string') : []
   const destinations = [...outbounds, ...balancers.map(tag => ({ tag: `@balancer:${tag}`, protocol: 'balancer', label: `Автовыбор: ${tag}` })), { tag: '@bypass', protocol: 'freedom', label: '🔓 Полный обход без VPN' }]
   const availableOutbounds = new Set(outbounds.map(out => out.tag))
   const availableBalancers = new Set(balancers)
-  const fullBypass = own.some(({ rule }) => baseRuleTag(rule) === FALLBACK && rule.ruleTag?.endsWith('|bypass'))
+  const fullBypass = own.some(({ rule }) => baseRuleTag(rule) === FALLBACK && isFullBypass(rule))
 
   const run = (change: (rules: XrayRule[]) => XrayRule[], immediate = true) => {
     void onChange(change, immediate).catch(error => onError(error instanceof Error ? error.message : 'Не удалось изменить правило'))
@@ -95,15 +102,15 @@ export function XrayDeviceRoutingTable({ content, onChange, onError }: Props) {
       if (isNew) {
         const name = `custom:${encodeURIComponent(row.description.trim())}`
         if (current.some(rule => baseRuleTag(rule) === PREFIX + name)) throw new Error('Правило с таким названием уже есть')
-        const created: XrayRule = updateOwn({ type: 'field', ruleTag: PREFIX + name, sourceIP: [DEVICE_IP] }, row)
+        const created: XrayRule = updateOwn({ type: 'field', ruleTag: PREFIX + name, sourceIP: [DEVICE_IP] }, row, DEVICE_IP)
         const insert = current.findIndex(rule => baseRuleTag(rule) === FALLBACK)
-        if (insert < 0) throw new Error('Сначала создайте отдельный маршрут для 0.130')
+        if (insert < 0) throw new Error(`Сначала создайте отдельный маршрут для ${deviceIp}`)
         return [...current.slice(0, insert), created, ...current.slice(insert)]
       }
-      if (!current[index] || !isOwn(current[index])) throw new Error('Правило изменилось. Обновите страницу')
-      const changed = current.map((rule, position) => position === index ? updateOwn(rule, row) : rule)
+      if (!current[index] || !isOwn(current[index], DEVICE_IP)) throw new Error('Правило изменилось. Обновите страницу')
+      const changed = current.map((rule, position) => position === index ? updateOwn(rule, row, DEVICE_IP) : rule)
       if (ownName(current[index]) !== FALLBACK) return changed
-      const positions = changed.map((rule, position) => isOwn(rule) ? position : -1).filter(position => position >= 0)
+      const positions = changed.map((rule, position) => isOwn(rule, DEVICE_IP) ? position : -1).filter(position => position >= 0)
       const block = positions.map(position => changed[position])
       const fallback = changed[index]
       const services = block.filter(rule => rule !== fallback)
@@ -126,7 +133,7 @@ export function XrayDeviceRoutingTable({ content, onChange, onError }: Props) {
     return [...current.slice(0, firstGlobal), ...copies, ...current.slice(firstGlobal)]
   })
   const toggleFullBypass = () => run(current => {
-    const positions = current.map((rule, index) => isOwn(rule) ? index : -1).filter(index => index >= 0)
+    const positions = current.map((rule, index) => isOwn(rule, DEVICE_IP) ? index : -1).filter(index => index >= 0)
     const block = positions.map(index => current[index])
     const vpn = block.find(rule => ownName(rule) === FALLBACK)
     if (!vpn) throw new Error('Маршрут по умолчанию не найден')
@@ -139,27 +146,25 @@ export function XrayDeviceRoutingTable({ content, onChange, onError }: Props) {
   if (!rules.length) return <div className="text-muted-foreground p-4 text-sm">Маршруты Xray не найдены.</div>
   if (!own.length) return (
     <div className="border-border bg-card m-3 rounded-xl border p-5">
-      <h3 className="text-foreground text-base font-semibold">Маршрутизация 192.168.0.130</h3>
+      <h3 className="text-foreground text-base font-semibold">Маршрутизация {deviceIp}</h3>
       <p className="text-muted-foreground my-3 text-sm">У устройства пока нет собственных правил. Создайте копию общих маршрутов и настройте её в отдельной таблице.</p>
-      <Button onClick={create}>Создать правила для 0.130</Button>
+      <Button onClick={create}>Создать правила для {deviceIp}</Button>
     </div>
   )
 
   return <div className="p-3">
-    <div className="border-border bg-input-background mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 text-sm">
-      <div><span className="text-foreground font-semibold">192.168.0.130</span><span className="text-muted-foreground ml-2">Только правила этого устройства · изменения применяются сразу.</span></div>
-      <Button size="sm" variant={fullBypass ? 'default' : 'outline'} aria-pressed={fullBypass} onClick={toggleFullBypass}>🔓 Полный обход без VPN: {fullBypass ? 'включён' : 'выключен'}</Button>
-    </div>
-    {fullBypass && <p className="text-muted-foreground mb-3 text-xs">Весь трафик 0.130 идёт напрямую. Правила ниже сохраняются, но не применяются, пока включён полный обход.</p>}
-    <p className="text-muted-foreground mb-3 text-xs">Удаление правила здесь возвращает для этой категории общее правило. Маршрут по умолчанию остаётся, чтобы у 0.130 был отдельный выбор выхода.</p>
     <RoutingTable
-      deviceMode rules={own.map(({ rule, index }) => toTable(rule, index))}
+      deviceMode rules={own.map(({ rule, index }) => toTable(rule, index, DEVICE_IP))}
+      disabled={fullBypass}
+      latencies={latencies} pingPending={pingPending} onPing={tag => void ping(tag)}
+      toolbarAction={<><Button size="sm" variant={fullBypass ? 'default' : 'outline'} aria-pressed={fullBypass} onClick={toggleFullBypass}>🔓 Полный обход без VPN: {fullBypass ? 'включён' : 'выключен'}</Button>{utilities}</>}
+      onImportFile={onImportFile} onExportRules={onExportRules}
       outbounds={destinations} inbounds={[]}
       onAddRule={row => edit(-1, row, true)}
       onEditRule={(id, row) => edit(Number(id), row, false)}
-      onDeleteRule={id => run(current => current.filter((rule, index) => index !== Number(id) || !isOwn(rule)))}
+      onDeleteRule={id => run(current => current.filter((rule, index) => index !== Number(id) || !isOwn(rule, DEVICE_IP)))}
       onReorder={(from, to) => run(current => {
-        const positions = current.map((rule, index) => isOwn(rule) ? index : -1).filter(index => index >= 0)
+        const positions = current.map((rule, index) => isOwn(rule, DEVICE_IP) ? index : -1).filter(index => index >= 0)
         const selected = positions.map(index => current[index])
         if (selected[from] == null || selected[to] == null || ownName(selected[from]) === FALLBACK || ownName(selected[to]) === FALLBACK) return current
         const [moving] = selected.splice(from, 1)
@@ -167,7 +172,7 @@ export function XrayDeviceRoutingTable({ content, onChange, onError }: Props) {
         return current.map((rule, index) => positions.includes(index) ? selected[positions.indexOf(index)] : rule)
       })}
       onToggleEnabled={id => run(current => current.map((rule, index) => {
-        if (index !== Number(id) || !isOwn(rule) || ownName(rule) === FALLBACK) return rule
+        if (index !== Number(id) || !isOwn(rule, DEVICE_IP) || ownName(rule) === FALLBACK) return rule
         return isDisabled(rule)
           ? { ...rule, ruleTag: rule.ruleTag?.replace(/^disabled:/, ''), sourceIP: [DEVICE_IP] }
           : { ...rule, ruleTag: `disabled:${rule.ruleTag}`, sourceIP: [DISABLED_SOURCE] }

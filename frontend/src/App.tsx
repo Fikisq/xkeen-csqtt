@@ -26,7 +26,6 @@ const TemplateModal = lazyLoad(() => import('./components/modals/Templates'), 'T
 const SettingsModal = lazyLoad(() => import('./components/modals/Settings'), 'SettingsModal')
 const GeoScanModal = lazyLoad(() => import('./components/modals/GeoScan'), 'GeoScanModal')
 const XraySubscriptionsModal = lazyLoad(() => import('./components/modals/XraySubscriptions'), 'XraySubscriptionsModal')
-const MihomoSubscriptionsModal = lazyLoad(() => import('./components/modals/MihomoSubscriptions'), 'MihomoSubscriptionsModal')
 
 function useThemeMode(theme: ThemeMode) {
   useEffect(() => {
@@ -49,7 +48,7 @@ interface ModalManagerProps {
   onAddToConfig: (content: string, type: string, position: 'start' | 'end') => void
   onImportTemplate: (url: string) => Promise<void>
   openModal: (modal: string) => void
-  onOpenSubscriptions: (core: string) => void
+  onOpenSubscriptions: () => void
 }
 
 const ModalManager = memo(function ModalManager({
@@ -126,8 +125,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const [logOpen, setLogOpen] = useState(false)
   const [xraySubscriptionsOpen, setXraySubscriptionsOpen] = useState(false)
   const mountXraySubscriptions = useLazyMount(xraySubscriptionsOpen)
-  const [mihomoSubscriptionsOpen, setMihomoSubscriptionsOpen] = useState(false)
-  const mountMihomoSubscriptions = useLazyMount(mihomoSubscriptionsOpen)
   const editorRef = useRef<CodeMirrorRef | null>(null)
   const configActionsRef = useRef<{ switchTab: (index: number) => void; getActiveIndex: () => number }>({
     switchTab: () => { },
@@ -507,7 +504,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   return (
     <div className="bg-muted dark:bg-background flex min-h-dvh flex-col">
       <main className="flex flex-1 flex-col">
-        <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-3 px-3 py-3">
+        <div className="mx-auto flex w-full max-w-[1800px] flex-1 flex-col gap-3 px-3 py-3">
           <StatusBar
             onOpenCoreManage={() => openModal('showCoreManageModal')}
             onOpenSettings={() => openModal('showSettingsModal')}
@@ -522,8 +519,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             editorRef={editorRef}
             configActionsRef={configActionsRef}
             onOpenImport={() => openModal('showImportModal')}
-            onOpenXraySubscriptions={() => setXraySubscriptionsOpen(true)}
-            onOpenMihomoSubscriptions={() => setMihomoSubscriptionsOpen(true)}
             onOpenTemplate={() => openModal('showTemplateModal')}
             onOpenGeoScan={() => openModal('showGeoScanModal')}
             onOpenBackups={() => openModal('showBackupsModal')}
@@ -547,10 +542,9 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         onAddToConfig={addToConfig}
         onImportTemplate={importTemplate}
         openModal={openModal}
-        onOpenSubscriptions={(core) => core === 'xray' ? setXraySubscriptionsOpen(true) : setMihomoSubscriptionsOpen(true)}
+        onOpenSubscriptions={() => setXraySubscriptionsOpen(true)}
       />
       {mountXraySubscriptions && <LazyBoundary><XraySubscriptionsModal open={xraySubscriptionsOpen} onOpenChange={setXraySubscriptionsOpen} onApplied={() => loadConfigs(undefined, false, true)} /></LazyBoundary>}
-      {mountMihomoSubscriptions && <LazyBoundary><MihomoSubscriptionsModal open={mihomoSubscriptionsOpen} onOpenChange={setMihomoSubscriptionsOpen} onApplied={() => loadConfigs(undefined, false, true)} /></LazyBoundary>}
     </div>
   )
 }

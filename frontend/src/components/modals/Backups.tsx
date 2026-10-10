@@ -269,7 +269,7 @@ export function BackupsModal({ open, onOpenChange, onRefreshConfigs }: Props) {
               <IconBox size={27} className="text-chart-2" /> Бэкапы конфигураций
             </DialogTitle>
             <DialogDescription>
-              «Создать бэкап» сохранит текущие файлы XKeen, XKeen UI, Xray и Mihomo в архив на роутере. Работу ядер это не изменит. Восстановление перезапишет выбранные конфигурации.
+              «Создать бэкап» сохранит настройки панели, файлы XKeen и конфигурацию Xray с правилами и подписками в архив на роутере. Геобазы .dat и исполняемые файлы в архив не входят. Восстановление перезапишет выбранные конфигурации.
             </DialogDescription>
           </DialogHeader>
 

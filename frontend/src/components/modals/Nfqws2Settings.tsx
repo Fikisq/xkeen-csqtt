@@ -28,6 +28,15 @@ interface CheckResult {
   results?: Array<{ protocol: 'tcp' | 'h3'; url: string; ok: boolean; status?: number; error?: string }>
 }
 
+type ProbeResult = NonNullable<CheckResult['results']>[number]
+
+function probeStatus(item?: ProbeResult) {
+  if (!item) return <span className="text-muted-foreground">—</span>
+  return <span className={item.ok ? 'text-green-400' : 'text-amber-400'} title={item.error || undefined}>
+    {item.ok ? `✓ ${item.status ? `HTTP ${item.status}` : 'Ответ есть'}` : `○ ${item.error || 'Нет ответа'}`}
+  </span>
+}
+
 export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRefresh: () => void }) {
   const { showToast } = useAppContext()
   const [mode, setMode] = useState<'tcp' | 'tcp-quic'>('tcp-quic')
@@ -91,6 +100,13 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
     }
   }
 
+  const siteRows = [...new Set(report?.results?.map(item => item.url) ?? [])].map(url => ({
+    url,
+    name: url.includes('youtube') ? 'YouTube' : url.includes('discord') ? 'Discord' : url.includes('instagram') ? 'Instagram' : url,
+    tcp: report?.results?.find(item => item.url === url && item.protocol === 'tcp'),
+    quic: report?.results?.find(item => item.url === url && item.protocol === 'h3'),
+  }))
+
   return <div className="space-y-4">
     {loading ? <p className="text-muted-foreground text-sm">Загрузка настроек…</p> : <>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -126,10 +142,17 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
       </div>}
       {report?.results && <div className="rounded-md border p-3 text-sm">
         <p className="font-medium">Проверка сайтов {report.checkedAt ? `· ${new Date(report.checkedAt).toLocaleTimeString('ru-RU')}` : ''}</p>
-        <div className="mt-2 grid gap-1.5 sm:grid-cols-2">{report.results.map((item) => {
-          const site = item.url.includes('youtube') ? 'YouTube' : item.url.includes('discord') ? 'Discord' : 'Instagram'
-          return <div key={`${item.protocol}:${item.url}`} className="flex gap-2 text-xs"><span className={item.ok ? 'text-green-400' : 'text-amber-400'}>{item.ok ? '●' : '○'}</span><span>{site} · {item.protocol === 'h3' ? 'HTTP/3' : 'TCP'}: {item.ok ? `ответ ${item.status}` : item.error || 'нет ответа'}</span></div>
-        })}</div>
+        <div className="mt-2 overflow-x-auto rounded-md border">
+          <table className="w-full min-w-[650px] table-fixed text-left text-sm">
+            <thead className="bg-input-background text-foreground"><tr><th className="w-[18%] px-3 py-2 font-medium">Ресурс</th><th className="w-[27%] px-3 py-2 font-medium">TCP</th><th className="w-[27%] px-3 py-2 font-medium">QUIC</th><th className="w-[28%] px-3 py-2 font-medium">TCP + QUIC</th></tr></thead>
+            <tbody>{siteRows.map(row => <tr key={row.url} className="border-t align-top">
+              <th scope="row" className="px-3 py-2 font-medium">{row.name}</th>
+              <td className="break-words px-3 py-2">{probeStatus(row.tcp)}</td>
+              <td className="break-words px-3 py-2">{probeStatus(row.quic)}</td>
+              <td className="px-3 py-2">{!row.tcp || !row.quic ? <span className="text-muted-foreground">—</span> : row.tcp.ok && row.quic.ok ? <span className="text-green-400">✓ Оба доступны</span> : <span className="text-amber-400">○ Не оба доступны</span>}</td>
+            </tr>)}</tbody>
+          </table>
+        </div>
         {report.candidates && <div className="mt-3 space-y-1 border-t pt-3">
           <p className="text-xs font-medium">Автоподбор · {report.candidates.length} проверок</p>
           {report.candidates.map((item) => {

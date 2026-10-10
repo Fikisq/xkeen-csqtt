@@ -40,7 +40,7 @@ export function outboundTitle(outbound: Outbound): string {
   return /[\u{1F1E6}-\u{1F1FF}]{2}/u.test(name) ? name : `${countryFlag(outbound)}${name}`
 }
 
-function outboundTransport(outbound: Outbound): string {
+export function outboundTransport(outbound: Outbound): string {
   if (outbound.tag === 'nfqws-direct') return 'Прямой WAN через nfqws2'
   if (/csqtt/i.test(outbound.tag)) return 'Интерфейс csqtt0'
   if (outbound.tag === 'wdtt-plus') return 'Локальный SOCKS5 · TCP / UDP'
