@@ -51,6 +51,7 @@ interface NfqwsStatus {
   scope: string
   strategyMode: 'tcp' | 'tcp-quic'
   verifiedTransport: 'tcp' | 'tcp-quic' | 'none' | 'unmeasured'
+  lastCheck?: { tcpSites?: number; http3Sites?: number; results?: Array<{ protocol: 'tcp' | 'h3'; ok: boolean }> } | null
   blocking: Record<string, string>
 }
 
@@ -563,7 +564,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
               <div className="flex items-center gap-3">
                 <span className="text-sm font-medium">nfqws2 · zapret2</span>
                 {nfqwsStatus && <Badge variant="outline" className={nfqwsStatus.running ? 'rounded-sm border-none bg-green-500/10 px-2 text-xs text-green-400' : 'rounded-sm border-none bg-amber-500/10 px-2 text-xs text-amber-400'}>{nfqwsStatus.running ? nfqwsStatus.mode === 'global' ? 'Активен' : 'Пробный режим' : nfqwsStatus.installed ? 'Остановлен' : 'Не установлен'}</Badge>}
-                {nfqwsStatus?.installed && <Badge variant="outline" className={nfqwsStatus.running && ['tcp', 'tcp-quic'].includes(nfqwsStatus.verifiedTransport) ? 'rounded-sm border-green-500/30 bg-green-500/10 px-2 text-xs text-green-400' : 'rounded-sm border-amber-500/30 bg-amber-500/10 px-2 text-xs text-amber-400'}>{nfqwsStatus.verifiedTransport === 'tcp-quic' ? 'TCP + QUIC · проверено' : nfqwsStatus.verifiedTransport === 'tcp' ? 'TCP · проверено' : `${nfqwsStatus.strategyMode === 'tcp' ? 'TCP' : 'TCP + QUIC'} · не проверено`}</Badge>}
+                {nfqwsStatus?.installed && <Badge variant="outline" className={nfqwsStatus.running && nfqwsStatus.lastCheck ? 'rounded-sm border-green-500/30 bg-green-500/10 px-2 text-xs text-green-400' : 'rounded-sm border-amber-500/30 bg-amber-500/10 px-2 text-xs text-amber-400'}>{nfqwsStatus.lastCheck ? `TCP ${nfqwsStatus.lastCheck.tcpSites ?? nfqwsStatus.lastCheck.results?.filter(item => item.protocol === 'tcp' && item.ok).length ?? 0}/3 · QUIC ${nfqwsStatus.lastCheck.http3Sites ?? nfqwsStatus.lastCheck.results?.filter(item => item.protocol === 'h3' && item.ok).length ?? 0}/3` : `${nfqwsStatus.strategyMode === 'tcp' ? 'TCP' : 'TCP + QUIC'} · не проверено`}</Badge>}
               </div>
             </div>
             <div className="ml-auto flex flex-wrap gap-2">

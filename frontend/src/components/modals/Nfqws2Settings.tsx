@@ -21,10 +21,14 @@ interface CheckResult {
   checkedAt?: string
   mode?: 'tcp' | 'tcp-quic'
   selectedVariant?: number
+  selectedQuicVariant?: number | null
   tcpWorking?: boolean
   quicWorking?: boolean
+  tcpSites?: number
+  http3Sites?: number
+  siteCount?: number
   verifiedTransport?: 'tcp' | 'tcp-quic' | 'none'
-  candidates?: Array<{ variant: number; mode: 'tcp' | 'tcp-quic'; tcpSites?: number; http3Sites?: number; error?: string }>
+  candidates?: Array<{ variant: number; quicVariant?: number; phase?: 'tcp' | 'quic'; mode: 'tcp' | 'tcp-quic'; tcpSites?: number; http3Sites?: number; error?: string }>
   results?: Array<{ protocol: 'tcp' | 'h3'; url: string; ok: boolean; status?: number; error?: string }>
 }
 
@@ -77,7 +81,7 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
       }
       setReport(result.check ?? null)
       onRefresh()
-      showToast(result.check?.verifiedTransport === 'tcp-quic' ? 'Стратегия сохранена: TCP + HTTP/3 проверены' : 'Стратегия сохранена: TCP проверен')
+      showToast(`Стратегия сохранена: TCP ${result.check?.tcpSites ?? '—'}/3, HTTP/3 ${result.check?.http3Sites ?? '—'}/3`)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Ошибка nfqws2')
     } finally {
@@ -118,7 +122,7 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
         </label>
         <div className="rounded-md border p-3 text-sm">
           <div className="font-medium">Настроено: {source === 'custom' ? customArgs.split('\n').some((line) => line.trim() === '--filter-udp=443') ? 'TCP + QUIC' : 'TCP' : mode === 'tcp' ? 'TCP' : 'TCP + QUIC'}</div>
-          <div className="text-muted-foreground text-xs">{report?.success ? `Последняя проверка: TCP ${report.tcpWorking ? 'доступен' : 'нет ответа'}, HTTP/3 ${report.quicWorking ? 'доступен' : 'нет ответа'}` : 'Транспорт считается рабочим только после ответа сайта через диагностическую очередь.'}</div>
+          <div className="text-muted-foreground text-xs">{report?.success ? `Последняя проверка: TCP ${report.tcpSites ?? report.results?.filter(item => item.protocol === 'tcp' && item.ok).length ?? 0}/3, HTTP/3 ${report.http3Sites ?? report.results?.filter(item => item.protocol === 'h3' && item.ok).length ?? 0}/3` : 'Транспорт считается рабочим только после ответа сайта через диагностическую очередь.'}</div>
         </div>
       </div>
       <p className="text-muted-foreground text-xs">{settings?.scope}</p>
@@ -135,7 +139,7 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
       </label>}
       {source === 'preset' && <div className="rounded-md border p-3">
         <p className="text-sm font-medium">Параметры выбранной стратегии</p>
-        <p className="text-muted-foreground text-xs">Пул содержит шесть сочетаний: три набора TCP-параметров с QUIC и без него. Они собираются и проверяются в отдельной очереди. Каждые 10 минут роутер проверяет выбранный вариант; после двух неудачных проверок повторяет подбор. Если подходящего варианта нет, текущий сохраняется.</p>
+        <p className="text-muted-foreground text-xs">Автоподбор проверяет четыре варианта TCP, затем два варианта QUIC с лучшим TCP. Проверки идут в отдельной очереди. Каждые 10 минут роутер проверяет выбранную стратегию; после двух неудач повторяет подбор. Если рабочей замены нет, текущая стратегия сохраняется.</p>
         <div className="text-muted-foreground mt-2 text-xs">TCP</div>
         <pre className="overflow-x-auto whitespace-pre-wrap break-all text-xs">{settings?.tcpLua.join('\n')}</pre>
         {mode === 'tcp-quic' && <><div className="text-muted-foreground mt-2 text-xs">QUIC</div><pre className="overflow-x-auto whitespace-pre-wrap break-all text-xs">{settings?.quicLua}</pre></>}
@@ -156,11 +160,11 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
         {report.candidates && <div className="mt-3 space-y-1 border-t pt-3">
           <p className="text-xs font-medium">Автоподбор · {report.candidates.length} проверок</p>
           {report.candidates.map((item) => {
-            const selected = item.variant === report.selectedVariant && item.mode === report.mode
-            const name = ['Комбинация TLS', 'Fake TLS', 'Multisplit'][item.variant] ?? `Вариант ${item.variant + 1}`
-            return <div key={`${item.variant}:${item.mode}`} className={`flex flex-wrap justify-between gap-x-3 rounded px-2 py-1 text-xs ${selected ? 'bg-green-500/10 text-green-400' : 'text-muted-foreground'}`}>
-              <span>{selected ? '✓ ' : ''}{name} · {item.mode === 'tcp-quic' ? 'TCP + QUIC' : 'TCP'}</span>
-              <span>{item.error ? 'проверка не удалась' : `TCP ${item.tcpSites ?? 0}/3 · HTTP/3 ${item.http3Sites ?? 0}/3`}</span>
+            const selected = item.variant === report.selectedVariant && (item.mode === 'tcp' ? report.mode === 'tcp' : item.quicVariant === report.selectedQuicVariant && report.mode === 'tcp-quic')
+            const name = ['TLS + Multisplit', 'Fake TLS', 'Multisplit', 'Fake TLS + Multidisorder'][item.variant] ?? `Вариант ${item.variant + 1}`
+            return <div key={`${item.variant}:${item.mode}:${item.quicVariant ?? 0}`} className={`flex flex-wrap justify-between gap-x-3 rounded px-2 py-1 text-xs ${selected ? 'bg-green-500/10 text-green-400' : 'text-muted-foreground'}`}>
+              <span>{selected ? '✓ ' : ''}{name} · {item.mode === 'tcp-quic' ? `QUIC ${item.quicVariant === 1 ? '6' : '11'} повторов` : 'TCP'}</span>
+              <span title={item.error}>{item.error ? 'проверка не удалась' : `TCP ${item.tcpSites ?? 0}/3 · HTTP/3 ${item.http3Sites ?? 0}/3`}</span>
             </div>
           })}
         </div>}

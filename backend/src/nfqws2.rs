@@ -38,7 +38,14 @@ const TCP_LUA: [&str; 2] = [
     "--lua-desync=fake:blob=tls_clienthello:tls_mod=rnd,dupsid,sni=fonts.google.com:tcp_seq=10000:strategy=1",
     "--lua-desync=multisplit:pos=1,midsld:seqovl=1:seqovl_pattern=tls_clienthello:tcp_ts_up:strategy=1",
 ];
-const QUIC_LUA: &str = "--lua-desync=fake:blob=quic_initial:repeats=11";
+const TCP_ALTERNATE: [&str; 2] = [
+    "--lua-desync=fake:blob=tls_clienthello:tcp_md5:tcp_seq=-10000",
+    "--lua-desync=multidisorder:pos=1,midsld",
+];
+const QUIC_LUA: [&str; 2] = [
+    "--lua-desync=fake:blob=quic_initial:repeats=11",
+    "--lua-desync=fake:blob=quic_initial:repeats=6",
+];
 
 fn active_source(custom: &str) -> &'static str {
     if custom.trim().is_empty() { "preset" }
@@ -46,15 +53,16 @@ fn active_source(custom: &str) -> &'static str {
     else { "custom" }
 }
 
-fn preset_args(variant: usize, mode: &str) -> String {
+fn preset_args(variant: usize, mode: &str, quic_variant: usize) -> String {
     let mut lines = vec!["--filter-tcp=443", "--payload=tls_client_hello"];
     match variant {
         1 => lines.push(TCP_LUA[0]),
         2 => lines.push(TCP_LUA[1]),
+        3 => lines.extend(TCP_ALTERNATE),
         _ => lines.extend(TCP_LUA),
     }
     if mode == "tcp-quic" {
-        lines.extend(["--new", "--filter-udp=443", "--payload=quic_initial", QUIC_LUA]);
+        lines.extend(["--new", "--filter-udp=443", "--payload=quic_initial", QUIC_LUA[quic_variant.min(QUIC_LUA.len() - 1)]]);
     }
     format!("{}\n", lines.join("\n"))
 }
@@ -104,7 +112,7 @@ fn settings_json() -> Value {
         "customArgs": custom_args,
         "strategyName": format!("{} · {}", if active_source(&custom_args) == "preset" { "Автоподбор" } else { "Своя" }, if mode == "tcp" { "TCP" } else { "TCP + QUIC" }),
         "tcpLua": if custom_args.trim().is_empty() { TCP_LUA.to_vec() } else { custom_args.lines().filter(|line| line.starts_with("--lua-desync=") && !line.contains("quic_initial")).collect::<Vec<_>>() },
-        "quicLua": QUIC_LUA,
+        "quicLua": if custom_args.trim().is_empty() { QUIC_LUA[0] } else { custom_args.lines().find(|line| line.contains("quic_initial") && line.starts_with("--lua-desync=")).unwrap_or(QUIC_LUA[0]) },
         "lastCheck": active_check(),
         "globalReady": global_ready,
         "scope": if global_ready {
@@ -174,7 +182,9 @@ pub fn start_reconciler() {
             if failures < 2 { continue; }
             failures = 0;
             let Ok((report, next_mode, next_args)) = scan_preset().await else { continue; };
-            if !healthy_report(&report, &next_mode) || (next_mode == current_mode && next_args == current_args) { continue; }
+            if (current_mode == "tcp-quic" && next_mode == "tcp")
+                || !healthy_report(&report, &next_mode)
+                || (next_mode == current_mode && next_args == current_args) { continue; }
             _ = apply_checked(&next_mode, &next_args, true, &report).await;
         }
     });
@@ -254,7 +264,7 @@ async fn run_probe(source: &str, mode: &str, custom: &str) -> Result<Value, Stri
     tokio::fs::write(PROBE_CANDIDATE, custom).await.map_err(|e| e.to_string())?;
     tokio::fs::set_permissions(PROBE_CANDIDATE, std::fs::Permissions::from_mode(0o600)).await.map_err(|e| e.to_string())?;
     let script_source = if custom.trim().is_empty() { "preset" } else { "custom" };
-    let output = tokio::time::timeout(Duration::from_secs(105), Command::new(PROBE_SCRIPT)
+    let output = tokio::time::timeout(Duration::from_secs(40), Command::new(PROBE_SCRIPT)
         .args(["check", script_source, mode, PROBE_CANDIDATE]).kill_on_drop(true).output()).await;
     _ = tokio::fs::remove_file(PROBE_CANDIDATE).await;
     let output = match output {
@@ -262,7 +272,7 @@ async fn run_probe(source: &str, mode: &str, custom: &str) -> Result<Value, Stri
         Ok(Err(error)) => return Err(format!("Не удалось запустить проверку: {error}")),
         Err(_) => {
             _ = Command::new(PROBE_SCRIPT).arg("cleanup").output().await;
-            return Err("Проверка превысила 105 секунд".into());
+            return Err("Проверка превысила 40 секунд".into());
         }
     };
     if !output.status.success() {
@@ -272,9 +282,12 @@ async fn run_probe(source: &str, mode: &str, custom: &str) -> Result<Value, Stri
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
         .filter(|item| item.get("protocol").and_then(Value::as_str).is_some_and(|protocol| matches!(protocol, "tcp" | "h3")))
         .collect();
-    if results.len() < 3 { return Err("Проверка не вернула результаты сайтов".into()); }
-    let tcp_working = results.iter().any(|item| item["protocol"] == "tcp" && item["ok"] == true);
-    let quic_working = results.iter().any(|item| item["protocol"] == "h3" && item["ok"] == true);
+    let expected = if mode == "tcp-quic" { 6 } else { 3 };
+    if results.len() != expected { return Err("Проверка не вернула результаты всех сайтов".into()); }
+    let tcp_sites = results.iter().filter(|item| item["protocol"] == "tcp" && item["ok"] == true).count();
+    let http3_sites = results.iter().filter(|item| item["protocol"] == "h3" && item["ok"] == true).count();
+    let tcp_working = tcp_sites >= 2;
+    let quic_working = http3_sites > 0;
     Ok(json!({
         "success": true,
         "source": source,
@@ -283,47 +296,67 @@ async fn run_probe(source: &str, mode: &str, custom: &str) -> Result<Value, Stri
         "checkedAt": chrono::Utc::now().to_rfc3339(),
         "tcpWorking": tcp_working,
         "quicWorking": quic_working,
+        "tcpSites": tcp_sites,
+        "http3Sites": http3_sites,
+        "siteCount": 3,
         "verifiedTransport": if tcp_working && quic_working { "tcp-quic" } else if tcp_working { "tcp" } else { "none" },
         "results": results,
     }))
 }
 
 fn healthy_report(report: &Value, mode: &str) -> bool {
-    let Some(results) = report.get("results").and_then(Value::as_array) else { return false; };
-    let tcp_sites = results.iter().filter(|item| item["protocol"] == "tcp" && item["ok"] == true).count();
-    let youtube_h3 = results.iter().any(|item| item["protocol"] == "h3" && item["ok"] == true
-        && item["url"].as_str().is_some_and(|url| url.contains("youtube.com")));
-    tcp_sites >= 2 && (mode == "tcp" || youtube_h3)
+    let tcp_sites = report["tcpSites"].as_u64().unwrap_or(0);
+    let http3_sites = report["http3Sites"].as_u64().unwrap_or(0);
+    tcp_sites >= 2 && (mode == "tcp" || http3_sites >= 1)
 }
 
 async fn scan_preset() -> Result<(Value, String, String), String> {
-    let mut best: Option<(i32, Value, String, String)> = None;
+    let started = Instant::now();
+    let mut best_tcp: Option<(usize, Value)> = None;
     let mut summary = Vec::new();
-    for variant in 0..3 {
-        for mode in ["tcp-quic", "tcp"] {
-            let args = preset_args(variant, mode);
-            match run_probe("preset", mode, &args).await {
-                Ok(report) => {
-                    let tcp = report["results"].as_array().into_iter().flatten()
-                        .filter(|item| item["protocol"] == "tcp" && item["ok"] == true).count() as i32;
-                    let h3 = report["results"].as_array().into_iter().flatten()
-                        .filter(|item| item["protocol"] == "h3" && item["ok"] == true).count() as i32;
-                    // Prefer working TCP + HTTP/3, while keeping site coverage in the score.
-                    let score = tcp * 10 + h3 * 11;
-                    summary.push(json!({"variant": variant, "mode": mode, "tcpSites": tcp, "http3Sites": h3}));
-                    if best.as_ref().is_none_or(|(old, _, _, _)| score > *old) {
-                        best = Some((score, report, mode.into(), args));
-                    }
+    // TCP and QUIC have separate NFQUEUE profiles. Choose TCP first, then vary only QUIC.
+    for variant in 0..4 {
+        if started.elapsed() > Duration::from_secs(150) { break; }
+        let args = preset_args(variant, "tcp", 0);
+        match run_probe("preset", "tcp", &args).await {
+            Ok(report) => {
+                let tcp = report["tcpSites"].as_u64().unwrap_or(0);
+                summary.push(json!({"variant": variant, "phase": "tcp", "mode": "tcp", "tcpSites": tcp, "http3Sites": 0}));
+                if best_tcp.as_ref().is_none_or(|(_, old)| tcp > old["tcpSites"].as_u64().unwrap_or(0)) {
+                    best_tcp = Some((variant, report));
                 }
-                Err(error) => summary.push(json!({"variant": variant, "mode": mode, "error": error})),
             }
+            Err(error) => summary.push(json!({"variant": variant, "phase": "tcp", "mode": "tcp", "error": error})),
         }
     }
-    let (_, mut report, mode, args) = best.ok_or("Ни один вариант стратегии не удалось проверить")?;
-    let selected_variant = (0..3).find(|variant| preset_args(*variant, &mode) == args).unwrap_or(0);
+    let (tcp_variant, tcp_report) = best_tcp.ok_or("Ни один вариант TCP не удалось проверить")?;
+    if !healthy_report(&tcp_report, "tcp") { return Err("Ни один вариант не дал ответ хотя бы от двух сайтов по TCP".into()); }
+    let mut best: Option<(u64, usize, Value)> = None;
+    for quic_variant in 0..QUIC_LUA.len() {
+        if started.elapsed() > Duration::from_secs(150) { break; }
+        let args = preset_args(tcp_variant, "tcp-quic", quic_variant);
+        match run_probe("preset", "tcp-quic", &args).await {
+            Ok(report) => {
+                let tcp = report["tcpSites"].as_u64().unwrap_or(0);
+                let h3 = report["http3Sites"].as_u64().unwrap_or(0);
+                summary.push(json!({"variant": tcp_variant, "quicVariant": quic_variant, "phase": "quic", "mode": "tcp-quic", "tcpSites": tcp, "http3Sites": h3}));
+                if healthy_report(&report, "tcp-quic") {
+                    let score = tcp * 10 + h3 * 6;
+                    if best.as_ref().is_none_or(|(old, _, _)| score > *old) { best = Some((score, quic_variant, report)); }
+                }
+            }
+            Err(error) => summary.push(json!({"variant": tcp_variant, "quicVariant": quic_variant, "phase": "quic", "mode": "tcp-quic", "error": error})),
+        }
+    }
+    let (mut report, mode, args, selected_quic) = if let Some((_, quic_variant, report)) = best {
+        (report, "tcp-quic", preset_args(tcp_variant, "tcp-quic", quic_variant), Some(quic_variant))
+    } else {
+        (tcp_report, "tcp", preset_args(tcp_variant, "tcp", 0), None)
+    };
     report["candidates"] = json!(summary);
-    report["selectedVariant"] = json!(selected_variant);
-    Ok((report, mode, args))
+    report["selectedVariant"] = json!(tcp_variant);
+    report["selectedQuicVariant"] = json!(selected_quic);
+    Ok((report, mode.into(), args))
 }
 
 async fn persist_check(report: &Value) -> Result<(), String> {
@@ -433,8 +466,11 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
             Err(error) => return Json(json!({"success": false, "error": error})),
         }
     };
-    if check["tcpWorking"] != true {
-        return Json(json!({"success": false, "error": "Ни одна стратегия не дала ответа по TCP; прежняя сохранена", "check": check}));
+    if request.source == "preset" && profile() == "tcp-quic" && next_mode == "tcp" {
+        return Json(json!({"success": false, "error": "Подбор не подтвердил QUIC. Текущая стратегия TCP + QUIC сохранена", "check": check}));
+    }
+    if !healthy_report(&check, &next_mode) {
+        return Json(json!({"success": false, "error": "Проверка не подтвердила TCP и выбранный транспорт QUIC; прежняя стратегия сохранена", "check": check}));
     }
     if let Err(error) = apply_checked(&next_mode, &next_custom, request.source == "preset", &check).await {
         return Json(json!({"success": false, "error": error}));
