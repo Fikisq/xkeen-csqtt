@@ -680,7 +680,7 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
     } finally { setRoutingSaving(false) }
   }
 
-  async function editDevice130Routing(change: (rules: RoutingRule[]) => RoutingRule[], immediate = false): Promise<boolean> {
+  async function editDevice130Routing(change: (rules: RoutingRule[]) => RoutingRule[], immediate = true): Promise<boolean> {
     if (!xraySelectorsConfig) return false
     return applyXrayRoutingEdit(xraySelectorsConfig.file, content => {
       const parsed = parseJsonc(content)
@@ -1145,7 +1145,7 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
 
             {currentCore === 'xray' && hasXraySelectors && xraySelectorsConfig && currentPanel === 'device130' && (
               <div className="flex flex-col">
-                {routingToolbar}
+                {activeRoutingDraft && routingToolbar}
                 <div className={cn('relative min-h-0 flex-1', routingSaving && 'pointer-events-none opacity-60')}>
                   <LazyBoundary>
                     <XrayDeviceRoutingTable

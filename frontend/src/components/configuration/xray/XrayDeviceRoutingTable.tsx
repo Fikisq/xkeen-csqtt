@@ -86,16 +86,11 @@ export function XrayDeviceRoutingTable({ content, onChange, onError }: Props) {
   const availableBalancers = new Set(balancers)
   const fullBypass = own.some(({ rule }) => baseRuleTag(rule) === FALLBACK && rule.ruleTag?.endsWith('|bypass'))
 
-  const run = (change: (rules: XrayRule[]) => XrayRule[], immediate = false) => {
+  const run = (change: (rules: XrayRule[]) => XrayRule[], immediate = true) => {
     void onChange(change, immediate).catch(error => onError(error instanceof Error ? error.message : 'Не удалось изменить правило'))
   }
   const edit = (index: number, row: TableRule, isNew: boolean) => {
     try { validate(row, availableOutbounds, availableBalancers, isNew) } catch (error) { onError((error as Error).message); return }
-    const old = !isNew && rules[index] ? toTable(rules[index], index) : null
-    const onlyOutputChanged = !!old && row.outboundTag !== old.outboundTag
-      && row.network === old.network && row.port === old.port
-      && JSON.stringify(row.domain) === JSON.stringify(old.domain)
-      && JSON.stringify(row.ip) === JSON.stringify(old.ip)
     run(current => {
       if (isNew) {
         const name = `custom:${encodeURIComponent(row.description.trim())}`
@@ -114,7 +109,7 @@ export function XrayDeviceRoutingTable({ content, onChange, onError }: Props) {
       const services = block.filter(rule => rule !== fallback)
       const ordered = row.outboundTag === '@bypass' ? [fallback, ...services] : [...services, fallback]
       return changed.map((rule, position) => positions.includes(position) ? ordered[positions.indexOf(position)] : rule)
-    }, onlyOutputChanged)
+    })
   }
   const create = () => run(current => {
     if (current.some(rule => baseRuleTag(rule) === FALLBACK)) return current
@@ -152,7 +147,7 @@ export function XrayDeviceRoutingTable({ content, onChange, onError }: Props) {
 
   return <div className="p-3">
     <div className="border-border bg-input-background mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3 text-sm">
-      <div><span className="text-foreground font-semibold">192.168.0.130</span><span className="text-muted-foreground ml-2">Только правила этого устройства.</span></div>
+      <div><span className="text-foreground font-semibold">192.168.0.130</span><span className="text-muted-foreground ml-2">Только правила этого устройства · изменения применяются сразу.</span></div>
       <Button size="sm" variant={fullBypass ? 'default' : 'outline'} aria-pressed={fullBypass} onClick={toggleFullBypass}>🔓 Полный обход без VPN: {fullBypass ? 'включён' : 'выключен'}</Button>
     </div>
     {fullBypass && <p className="text-muted-foreground mb-3 text-xs">Весь трафик 0.130 идёт напрямую. Правила ниже сохраняются, но не применяются, пока включён полный обход.</p>}
