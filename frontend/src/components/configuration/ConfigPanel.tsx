@@ -680,7 +680,7 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
     } finally { setRoutingSaving(false) }
   }
 
-  async function editDevice130Routing(change: (rules: RoutingRule[]) => RoutingRule[]): Promise<boolean> {
+  async function editDevice130Routing(change: (rules: RoutingRule[]) => RoutingRule[], immediate = false): Promise<boolean> {
     if (!xraySelectorsConfig) return false
     return applyXrayRoutingEdit(xraySelectorsConfig.file, content => {
       const parsed = parseJsonc(content)
@@ -692,7 +692,7 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
       if (JSON.stringify(before.filter(rule => !own(rule))) !== JSON.stringify(after.filter(rule => !own(rule)))) throw new Error('Правила других устройств и общие маршруты изменять нельзя')
       if (after.some(rule => own(rule) && (rule.type !== 'field' || JSON.stringify(rule.sourceIP) !== (baseRuleTag(rule).startsWith('disabled:') ? '["192.0.2.255"]' : '["192.168.0.130"]')))) throw new Error('Правило должно относиться только к 192.168.0.130')
       return applyEdits(content, modify(content, ['routing', 'rules'], after, { formattingOptions: { insertSpaces: true, tabSize: 2 } }))
-    }, 'Правило 0.130 добавлено в черновик', false, true)
+    }, immediate && !routingDraft ? 'Маршрут 0.130 применён' : 'Правило 0.130 добавлено в черновик', immediate && !routingDraft, true)
   }
 
   async function selectXrayOutbound(file: string, ruleIndex: number, outboundTag: string) {
