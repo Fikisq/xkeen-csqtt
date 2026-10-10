@@ -229,7 +229,7 @@ pub async fn clear_changed_device_connections(old: &Value, new: &Value) -> Optio
 async fn clear_device_connections(ips: BTreeSet<Ipv4Addr>) -> Option<String> {
     if ips.is_empty() { return None }
     let Some(binary) = ["/opt/sbin/conntrack", "/opt/bin/conntrack"].into_iter().find(|path| Path::new(path).is_file()) else {
-        return Some("Маршруты применены. Для сброса старых соединений установите conntrack или переподключите сеть изменённого устройства".into())
+        return Some("Маршруты применены к новым соединениям. Для автоматического сброса старых соединений на роутере нужен conntrack; перезагрузка устройства не требуется".into())
     };
     for ip in ips {
         let output = tokio::time::timeout(std::time::Duration::from_secs(4), Command::new(binary)
@@ -237,7 +237,7 @@ async fn clear_device_connections(ips: BTreeSet<Ipv4Addr>) -> Option<String> {
         match output {
             Ok(Ok(output)) if output.status.success()
                 || String::from_utf8_lossy(&output.stderr).contains("0 flow entries") => {},
-            _ => return Some(format!("Маршруты применены, но старые соединения {ip} не удалось сбросить. Переподключите сеть этого устройства")),
+            _ => return Some(format!("Маршруты применены, но старые соединения {ip} не удалось сбросить. Новые соединения используют обновлённые правила")),
         }
     }
     None

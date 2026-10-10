@@ -128,7 +128,7 @@ pub async fn apply_routes(State(state): State<AppState>, Json(request): Json<App
         .map(|rule| (rule["outboundTag"].as_str().map(str::to_owned),
             rule["balancerTag"].as_str().map(str::to_owned)));
     if global_vpn(&old_config) != global_vpn(&new_config) {
-        let note = "Новый сервер выбран для новых соединений. Уже открытые соединения сохраняют прежний выход; для проверки IP переподключите сеть только на проверяемом устройстве";
+        let note = "Новый сервер уже выбран для новых соединений клиентов. Открытое TCP-соединение нельзя перенести между серверами: оно завершится на прежнем выходе. Перезагрузка роутера, компьютера или Wi-Fi не требуется";
         warning = Some(warning.map_or_else(|| note.to_string(), |message| format!("{message}. {note}")));
     }
     Json(json!({ "success": true, "warning": warning }))

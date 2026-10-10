@@ -30,7 +30,7 @@ function countryFlag(outbound: Outbound): string {
   return ''
 }
 
-function outboundTitle(outbound: Outbound): string {
+export function outboundTitle(outbound: Outbound): string {
   if (outbound.tag === 'nfqws-direct') return 'nfqws2 · zapret2'
   if (/csqtt/i.test(outbound.tag)) return 'CSQTT'
   if (outbound.tag === 'wdtt-plus') return 'WDTT Plus'

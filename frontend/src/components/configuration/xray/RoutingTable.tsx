@@ -23,7 +23,7 @@ export interface RoutingRule {
 
 interface RoutingTableProps {
   rules: RoutingRule[]
-  outbounds: Array<{ tag: string; protocol: string }>
+  outbounds: Array<{ tag: string; protocol: string; label?: string }>
   inbounds: Array<{ tag: string }>
   onAddRule: (rule: RoutingRule) => void
   onEditRule: (id: string, rule: RoutingRule) => void
@@ -33,6 +33,7 @@ interface RoutingTableProps {
   deviceMode?: boolean
   canDelete?: (rule: RoutingRule) => boolean
   canReorder?: (rule: RoutingRule) => boolean
+  canToggle?: (rule: RoutingRule) => boolean
 }
 
 export function RoutingTable({
@@ -46,6 +47,7 @@ export function RoutingTable({
   deviceMode = false,
   canDelete = () => true,
   canReorder = () => true,
+  canToggle = () => true,
 }: RoutingTableProps) {
   const [editingRule, setEditingRule] = useState<RoutingRule | null>(null)
   const [isAddingNew, setIsAddingNew] = useState(false)
@@ -101,42 +103,21 @@ export function RoutingTable({
   return (
     <div className="space-y-4 text-foreground">
       {/* Заголовок и кнопка добавления */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <h3 className="text-lg font-semibold">{deviceMode ? 'Правила устройства' : 'Маршрутизация'}</h3>
         <Button onClick={openAddDialog} size="sm">
           <IconPlus data-icon="inline-start" />
-          Маршрутизация
+          Добавить правило
         </Button>
       </div>
 
-      {/* Таблица правил */}
-      <div className="border-border bg-card overflow-x-auto rounded-xl border">
-        <table className="w-full min-w-190 text-sm">
-          <thead className="bg-input-background border-border border-b">
-            <tr>
-              <th className="w-12 px-3 py-2 text-left font-medium">#</th>
-              <th className="px-3 py-2 text-left font-medium">Действия</th>
-              {!deviceMode && <th className="px-3 py-2 text-left font-medium">Включить</th>}
-              <th className="px-3 py-2 text-left font-medium">Комментарий</th>
-              <th className="px-3 py-2 text-left font-medium">Сеть</th>
-              <th className="px-3 py-2 text-left font-medium">Пункт назначения</th>
-              {!deviceMode && <th className="px-3 py-2 text-left font-medium">Входящие</th>}
-              <th className="px-3 py-2 text-left font-medium">Исходящие</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rules.length === 0 ? (
-              <tr>
-                <td colSpan={deviceMode ? 6 : 8} className="text-muted-foreground px-3 py-8 text-center">
-                  Правил нет. Нажмите «+ Маршрутизация» для добавления.
-                </td>
-              </tr>
-            ) : (
-              rules.map((rule, index) => (
-                <tr
+      <div className="space-y-2">
+        {rules.length === 0 ? <div className="border-border bg-card text-muted-foreground rounded-xl border p-6 text-center text-sm">Правил пока нет.</div> : rules.map((rule, index) => {
+          const outbound = outbounds.find(item => item.tag === rule.outboundTag)
+          return <div
                   key={rule.id}
                   className={cn(
-                    'border-border border-b transition-colors last:border-b-0',
+                    'border-border bg-card hover:border-primary/50 flex flex-wrap items-start gap-3 rounded-xl border p-3 transition-colors sm:p-4',
                     !rule.enabled && !deviceMode && 'opacity-50',
                     draggedIndex === index && 'opacity-50'
                   )}
@@ -151,80 +132,30 @@ export function RoutingTable({
                     setDraggedIndex(null)
                   }}
                 >
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-1.5">
-                      <IconGripVertical className={cn('text-muted-foreground size-4', canReorder(rule) ? 'cursor-grab' : 'opacity-30')} />
-                      <span className="text-muted-foreground text-xs">{index + 1}</span>
+                  <div className="flex shrink-0 items-center gap-1 pt-0.5">
+                    <IconGripVertical className={cn('text-muted-foreground size-4', canReorder(rule) ? 'cursor-grab' : 'opacity-30')} />
+                    <span className="text-muted-foreground w-5 text-center text-xs tabular-nums">{index + 1}</span>
+                  </div>
+                  <label className="flex items-center gap-1.5 pt-1" title={canToggle(rule) ? 'Включить или выключить правило' : 'Маршрут по умолчанию всегда включён'}>
+                    <input type="checkbox" role="switch" checked={rule.enabled} disabled={!canToggle(rule)} onChange={() => onToggleEnabled(rule.id)} className="accent-primary size-4 cursor-pointer disabled:cursor-not-allowed" aria-label={`${rule.enabled ? 'Выключить' : 'Включить'} ${rule.description}`} />
+                    <span className="text-muted-foreground text-xs">{rule.enabled ? 'Вкл.' : 'Выкл.'}</span>
+                  </label>
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="text-foreground font-semibold">{rule.description || 'Без названия'}</div>
+                    <div className="text-muted-foreground break-words text-xs">
+                      {rule.domain.length ? `Домены: ${rule.domain.slice(0, 2).join(', ')}${rule.domain.length > 2 ? ` +${rule.domain.length - 2}` : ''}` : ''}
+                      {rule.domain.length && rule.ip.length ? ' · ' : ''}
+                      {rule.ip.length ? `IP: ${rule.ip.slice(0, 2).join(', ')}${rule.ip.length > 2 ? ` +${rule.ip.length - 2}` : ''}` : ''}
+                      {!rule.domain.length && !rule.ip.length ? (rule.port ? `Порт: ${rule.port}` : 'Весь трафик устройства') : ''}
                     </div>
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-1">
-                      <Button
-                        size="icon-xs"
-                        variant="ghost"
-                        onClick={() => openEditDialog(rule)}
-                        title="Редактировать"
-                      >
-                        <IconPencil />
-                      </Button>
-                      {canDelete(rule) && <Button
-                        size="icon-xs"
-                        variant="ghost"
-                        onClick={() => onDeleteRule(rule.id)}
-                        title="Удалить"
-                      >
-                        <IconTrash />
-                      </Button>}
-                    </div>
-                  </td>
-                  {!deviceMode && <td className="px-3 py-2">
-                    <input
-                      type="checkbox"
-                      checked={rule.enabled}
-                      onChange={() => onToggleEnabled(rule.id)}
-                      className="accent-primary size-4 cursor-pointer"
-                    />
-                  </td>}
-                  <td className="px-3 py-2">
-                    <span className="text-foreground">{rule.description || '—'}</span>
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className="text-muted-foreground text-xs uppercase">
-                      {rule.network || 'tcp,udp'}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="text-muted-foreground flex flex-col gap-0.5 text-xs">
-                      {rule.domain.length > 0 && (
-                        <div>
-                          <span className="text-foreground font-medium">DOMAIN:</span>{' '}
-                          {rule.domain.slice(0, 2).join(', ')}
-                          {rule.domain.length > 2 && ` +${rule.domain.length - 2}`}
-                        </div>
-                      )}
-                      {rule.ip.length > 0 && (
-                        <div>
-                          <span className="text-foreground font-medium">IP:</span>{' '}
-                          {rule.ip.slice(0, 2).join(', ')}
-                          {rule.ip.length > 2 && ` +${rule.ip.length - 2}`}
-                        </div>
-                      )}
-                      {!rule.domain.length && !rule.ip.length && '—'}
-                    </div>
-                  </td>
-                  {!deviceMode && <td className="px-3 py-2">
-                    <span className="text-muted-foreground text-xs">
-                      {rule.inboundTag.join(', ') || '—'}
-                    </span>
-                  </td>}
-                  <td className="px-3 py-2">
-                    <span className="text-primary text-xs font-medium">{rule.outboundTag}</span>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+                    <div className="text-muted-foreground text-xs">{rule.network || 'TCP, UDP'} <span className="mx-1">→</span> <span className="text-primary font-medium">{outbound?.label || rule.outboundTag}</span></div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button size="icon-sm" variant="outline" onClick={() => openEditDialog(rule)} title="Редактировать" aria-label={`Редактировать ${rule.description}`}><IconPencil /></Button>
+                    {canDelete(rule) && <Button size="icon-sm" variant="outline" onClick={() => onDeleteRule(rule.id)} title="Удалить правило только для этого устройства" aria-label={`Удалить ${rule.description}`}><IconTrash /></Button>}
+                  </div>
+                </div>
+        })}
       </div>
 
       {/* Модальное окно редактирования */}
@@ -372,7 +303,7 @@ export function RoutingTable({
                 >
                   {outbounds.map((out) => (
                     <option key={out.tag} value={out.tag}>
-                      {out.tag}
+                      {out.label || out.tag}
                     </option>
                   ))}
                 </select>

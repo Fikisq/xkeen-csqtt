@@ -686,11 +686,11 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
       const parsed = parseJsonc(content)
       const before: RoutingRule[] = parsed?.routing?.rules
       if (!Array.isArray(before)) throw new Error('Правила Xray не найдены')
-      const own = (rule: RoutingRule) => baseRuleTag(rule).startsWith('device:192.168.0.130:')
+      const own = (rule: RoutingRule) => /^(disabled:)?device:192\.168\.0\.130:/.test(baseRuleTag(rule))
       const after = change(before)
       if (!Array.isArray(after)) throw new Error('Не удалось изменить правила устройства')
       if (JSON.stringify(before.filter(rule => !own(rule))) !== JSON.stringify(after.filter(rule => !own(rule)))) throw new Error('Правила других устройств и общие маршруты изменять нельзя')
-      if (after.some(rule => own(rule) && (rule.type !== 'field' || JSON.stringify(rule.sourceIP) !== '["192.168.0.130"]'))) throw new Error('Правило должно относиться только к 192.168.0.130')
+      if (after.some(rule => own(rule) && (rule.type !== 'field' || JSON.stringify(rule.sourceIP) !== (baseRuleTag(rule).startsWith('disabled:') ? '["192.0.2.255"]' : '["192.168.0.130"]')))) throw new Error('Правило должно относиться только к 192.168.0.130')
       return applyEdits(content, modify(content, ['routing', 'rules'], after, { formattingOptions: { insertSpaces: true, tabSize: 2 } }))
     }, 'Правило 0.130 добавлено в черновик', false, true)
   }
@@ -704,7 +704,7 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
       const route = baseRuleTag(parsed.routing.rules[ruleIndex] as RoutingRule) as RouteTag
       const rules = updateGlobalRules(parsed.routing.rules as RoutingRule[], route, outboundTag)
       return applyEdits(content, modify(content, ['routing', 'rules'], rules, { formattingOptions: { insertSpaces: true, tabSize: 2 } }))
-    }, `Группа переключена на ${outboundTag === '@selector' ? 'Селектор' : outboundTag}`)
+    }, `Группа переключена на ${outboundTag === '@selector' ? 'Селектор' : outboundTag}`, !routingDraft)
   }
 
   async function selectXrayDevice(file: string, ip: string, route: RouteTag | null, outboundTag?: string) {
@@ -714,7 +714,7 @@ export function ConfigPanel({ onOpenImport, onOpenXraySubscriptions, onOpenMihom
       if (outboundTag && outboundTag !== '@selector' && outboundTag !== '@bypass' && outboundTag !== '@nfqws2' && !parsed.outbounds?.some((item: any) => item.tag === outboundTag)) throw new Error('Узел больше не существует')
       const rules = updateDeviceRules(parsed.routing.rules as RoutingRule[], ip, route, outboundTag)
       return applyEdits(content, modify(content, ['routing', 'rules'], rules, { formattingOptions: { insertSpaces: true, tabSize: 2 } }))
-    }, route === null ? `Правила для ${ip} удалены` : `Маршрутизация ${ip} сохранена`)
+    }, route === null ? `Правила для ${ip} удалены` : `Маршрутизация ${ip} сохранена`, !routingDraft)
   }
 
   async function addXrayRoute(file: string, name: string, domains: string[]) {
