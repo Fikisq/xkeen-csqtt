@@ -1,5 +1,5 @@
-//! Subscription handlers are versioned: old handlers stay alive for existing
-//! sessions. No RemoveOutbound, process restart, firewall or DNS mutation.
+//! Subscription handlers are versioned. Retired handlers are removed from the
+//! manager after routing switches; existing sessions retain their handler.
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{collections::{HashMap, HashSet}, process::Stdio, time::Duration};
@@ -60,6 +60,24 @@ async fn api(command: &str, input: Option<&Value>) -> Result<Vec<u8>, String> {
     Ok(output.stdout)
 }
 
+fn is_live_alias(tag: &str) -> bool {
+    tag.starts_with("sub-") && tag.rsplit_once("-xk-live-").is_some_and(|(_, generation)|
+        generation.len() == 32 && generation.bytes().all(|byte| byte.is_ascii_hexdigit()))
+}
+
+async fn remove_aliases(tags: &[String]) -> Result<(), String> {
+    for batch in tags.chunks(16) {
+        let output = tokio::time::timeout(Duration::from_secs(18),
+            Command::new("/opt/sbin/xray").args(["api", "rmo", "-s", API, "-t", "12"])
+                .args(batch).stdout(Stdio::null()).stderr(Stdio::null())
+                .kill_on_drop(true).output()).await
+            .map_err(|_| "Тайм-аут очистки старых узлов Xray")?
+            .map_err(|_| "Не удалось вызвать очистку узлов Xray")?;
+        if !output.status.success() { return Err("Xray не удалил старые узлы".into()); }
+    }
+    Ok(())
+}
+
 fn mapped_routing(config: &Value, aliases: &HashMap<String, String>) -> Result<Value, String> {
     let mut routing = config.get("routing").cloned().ok_or("В JSON нет routing")?;
     if let Some(rules) = routing.get_mut("rules").and_then(Value::as_array_mut) {
@@ -104,6 +122,7 @@ pub(crate) async fn runtime_config(config: &Value) -> Result<Value, String> {
 pub(crate) struct Update {
     old: LiveState,
     next: LiveState,
+    retired: Vec<String>,
 }
 
 pub(crate) async fn prepare(old_config: &Value, new_config: &Value) -> Result<Update, String> {
@@ -116,8 +135,17 @@ pub(crate) async fn prepare(old_config: &Value, new_config: &Value) -> Result<Up
     let bytes = api("lso", None).await?;
     let start = bytes.iter().position(|byte| *byte == b'{').ok_or("API не вернул JSON узлов")?;
     let listed: Value = serde_json::from_slice(&bytes[start..]).map_err(|_| "Некорректный ответ API узлов")?;
-    let existing: HashSet<String> = listed["outbounds"].as_array().ok_or("Нет списка живых узлов")?
+    let mut existing: HashSet<String> = listed["outbounds"].as_array().ok_or("Нет списка живых узлов")?
         .iter().filter_map(|n| n["tag"].as_str().map(str::to_owned)).collect();
+    // Failed earlier updates can leave unreferenced generations in the manager.
+    // They are absent from the saved alias map, so no live routing rule uses them.
+    let active: HashSet<&str> = old.aliases.values().map(String::as_str).collect();
+    let orphans: Vec<String> = existing.iter().filter(|tag| is_live_alias(tag) && !active.contains(tag.as_str()))
+        .cloned().collect();
+    if !orphans.is_empty() {
+        remove_aliases(&orphans).await?;
+        for tag in orphans { existing.remove(&tag); }
+    }
     let previous: HashMap<&str, &Value> = old_config["outbounds"].as_array().ok_or("Нет старых узлов")?
         .iter().filter_map(|n| n["tag"].as_str().map(|t| (t, n))).collect();
     let mut next = old.clone();
@@ -148,6 +176,9 @@ pub(crate) async fn prepare(old_config: &Value, new_config: &Value) -> Result<Up
         }
     }
     next.aliases.retain(|tag, _| nodes.iter().any(|n| n["tag"].as_str() == Some(tag)));
+    let retired: Vec<String> = old.aliases.values().filter(|alias|
+        is_live_alias(alias) && !next.aliases.values().any(|current| current == *alias))
+        .cloned().collect();
     if existing.iter().filter(|tag| tag.starts_with("sub-")).count() + additions.len() > MAX_HANDLERS {
         return Err("Достигнут лимит 128 поколений узлов; текущие соединения сохранены, обновление отложено до планового перезапуска".into());
     }
@@ -164,7 +195,7 @@ pub(crate) async fn prepare(old_config: &Value, new_config: &Value) -> Result<Up
     mapped_routing(new_config, &next.aliases)?;
     if !additions.is_empty() { api("ado", Some(&json!({"outbounds": additions}))).await?; }
     if process_identity()? != old.process { return Err("Процесс Xray изменился во время обновления".into()); }
-    Ok(Update { old, next })
+    Ok(Update { old, next, retired })
 }
 
 impl Update {
@@ -181,6 +212,11 @@ impl Update {
         api("adrules", Some(&json!({"routing": mapped_routing(config, &self.old.aliases)?}))).await?;
         let data = serde_json::to_string(&self.old).map_err(|_| "Не удалось восстановить карту узлов")?;
         super::write_private(STATE, &data).await.map_err(|_| "Не удалось восстановить карту узлов".to_string())
+    }
+
+    pub(crate) async fn prune_retired(&self) -> Result<(), String> {
+        if process_identity()? != self.old.process { return Ok(()); }
+        remove_aliases(&self.retired).await
     }
 }
 

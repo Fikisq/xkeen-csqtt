@@ -206,9 +206,24 @@ fn format_bypass(entries: &BTreeMap<Ipv4Addr, String>) -> String {
     entries.iter().map(|(ip, mac)| format!("{mac} # {ip}\n")).collect()
 }
 
-pub async fn clear_changed_direct_connections(old: &Value, new: &Value) -> Option<String> {
+pub async fn clear_changed_device_connections(old: &Value, new: &Value) -> Option<String> {
     let (Ok(old_ips), Ok(new_ips)) = (direct_device_ips(old), direct_device_ips(new)) else { return None };
-    clear_device_connections(old_ips.symmetric_difference(&new_ips).copied().collect()).await
+    let mut changed: BTreeSet<Ipv4Addr> = old_ips.symmetric_difference(&new_ips).copied().collect();
+    let selectors = |config: &Value| -> BTreeMap<Ipv4Addr, (Option<String>, Option<String>)> {
+        config.pointer("/routing/rules").and_then(Value::as_array).into_iter().flatten()
+            .filter_map(|rule| {
+                let tag = rule["ruleTag"].as_str()?.split('|').next()?;
+                let ip = tag.strip_prefix("device:")?.strip_suffix(":VPN")?.parse().ok()?;
+                Some((ip, (rule["outboundTag"].as_str().map(str::to_owned),
+                    rule["balancerTag"].as_str().map(str::to_owned))))
+            }).collect()
+    };
+    let old_selectors = selectors(old);
+    let new_selectors = selectors(new);
+    for (ip, target) in &new_selectors {
+        if old_selectors.get(ip).is_some_and(|previous| previous != target) { changed.insert(*ip); }
+    }
+    clear_device_connections(changed).await
 }
 
 async fn clear_device_connections(ips: BTreeSet<Ipv4Addr>) -> Option<String> {

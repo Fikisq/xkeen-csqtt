@@ -220,6 +220,11 @@ async fn refresh(state: &AppState, apply: bool, diagnostics: &mut Vec<String>) -
         return Err("Не удалось сохранить узлы; автоматический перезапуск запрещён".into());
     }
     let _ = tokio::fs::remove_file("/opt/etc/xkeen/xray-subscription-pending.json").await;
+    if let Some(update) = &update {
+        if let Err(error) = update.prune_retired().await {
+            log("WARN", format!("Подписка обновлена, но старые узлы пока не очищены: {error}"));
+        }
+    }
     Ok(true)
 }
 

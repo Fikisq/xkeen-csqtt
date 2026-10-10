@@ -121,6 +121,15 @@ pub async fn apply_routes(State(state): State<AppState>, Json(request): Json<App
         _ = replace_live_rules(&old_config).await;
         return Json(json!({ "success": false, "error": format!("Не удалось сохранить JSON: {error}") }));
     }
-    let warning = device_bypass::clear_changed_direct_connections(&old_config, &new_config).await;
+    let mut warning = device_bypass::clear_changed_device_connections(&old_config, &new_config).await;
+    let global_vpn = |config: &Value| config.pointer("/routing/rules").and_then(Value::as_array)
+        .and_then(|rules| rules.iter().find(|rule| rule["ruleTag"].as_str()
+            .is_some_and(|tag| tag.split('|').next() == Some("VPN"))))
+        .map(|rule| (rule["outboundTag"].as_str().map(str::to_owned),
+            rule["balancerTag"].as_str().map(str::to_owned)));
+    if global_vpn(&old_config) != global_vpn(&new_config) {
+        let note = "Новый сервер выбран для новых соединений. Уже открытые соединения сохраняют прежний выход; для проверки IP переподключите сеть только на проверяемом устройстве";
+        warning = Some(warning.map_or_else(|| note.to_string(), |message| format!("{message}. {note}")));
+    }
     Json(json!({ "success": true, "warning": warning }))
 }
