@@ -54,7 +54,7 @@ export function RoutingTable({
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
 
   const emptyRule: RoutingRule = {
-    id: crypto.randomUUID(),
+    id: '',
     enabled: true,
     description: '',
     network: '',
@@ -68,7 +68,7 @@ export function RoutingTable({
   }
 
   const openAddDialog = () => {
-    setEditingRule({ ...emptyRule, id: crypto.randomUUID() })
+    setEditingRule({ ...emptyRule, id: `new-${Date.now()}` })
     setIsAddingNew(true)
   }
 
