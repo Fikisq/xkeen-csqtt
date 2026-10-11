@@ -89,7 +89,7 @@ export function SettingsModal() {
       <DialogHeader><DialogTitle className="flex items-center gap-2"><IconSettings className="text-chart-2" />Настройки</DialogTitle></DialogHeader>
       <Tabs defaultValue="general" className="flex min-h-0 flex-1 flex-col">
         <TabsList variant="line" className="justify-start"><TabsTrigger value="general">Общие</TabsTrigger><TabsTrigger value="access">Входы</TabsTrigger></TabsList>
-        <div className="min-h-0 overflow-y-auto pr-2">
+        <div className="min-h-0 overflow-x-hidden overflow-y-auto pr-2">
           <TabsContent value="general"><FieldGroup className="gap-0!">
             <Field orientation="horizontal" className="px-0 py-3"><FieldContent><FieldLabel htmlFor="theme">Тема приложения</FieldLabel><FieldDescription>Ручной режим или синхронизация с системой</FieldDescription></FieldContent>
               <select id="theme" value={settings.theme} className="bg-input-background border-input rounded-md border px-3 py-2 text-sm" onChange={event => dispatch({ type: 'SET_SETTINGS', settings: { theme: event.target.value as ThemeMode } })}><option value="auto">Авто</option><option value="light">Светлая</option><option value="dark">Тёмная</option></select>
