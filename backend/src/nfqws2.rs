@@ -194,6 +194,7 @@ pub async fn sync_transition(previous: &Value, next: &Value) -> Result<(), Strin
     if Path::new(MANUAL_STOPPED).exists() { return Ok(()); }
     let old = selected_for_canary(previous)?;
     let new = selected_for_canary(next)?;
+    if old == new { return Ok(()); }
     if new { run_canary("start-trial").await? }
     else if old { run_canary("stop-trial").await? }
     Ok(())

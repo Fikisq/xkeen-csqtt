@@ -1,4 +1,4 @@
-use crate::configs::{validate_core, xray_files_with_replacement};
+use crate::configs::xray_files_with_replacement;
 use crate::device_bypass;
 use crate::nfqws2;
 use crate::types::AppState;
@@ -82,8 +82,20 @@ pub async fn apply_routes(State(state): State<AppState>, Json(request): Json<App
         .and_then(|value| value.get("routing").cloned()).is_some()) {
         return Json(json!({ "success": false, "error": "Маршрутизация разделена между файлами; требуется обычное применение" }));
     }
-    if let Err(error) = validate_core("xray", &files).await {
-        return Json(json!({ "success": false, "error": format!("Проверка Xray не пройдена: {}", error.chars().take(200).collect::<String>()) }));
+    // adrules builds the routing configuration and the running Xray validates
+    // every matcher before atomically publishing the new rules. A second full
+    // core startup test repeats that expensive geo compilation for every edit.
+    // Settings outside rules/balancers are not reloaded by RoutingService.
+    let routing_settings = |config: &Value| {
+        let mut routing = config.get("routing").cloned().unwrap_or(Value::Null);
+        if let Some(object) = routing.as_object_mut() {
+            object.remove("rules");
+            object.remove("balancers");
+        }
+        routing
+    };
+    if routing_settings(&old_config) != routing_settings(&new_config) {
+        return Json(json!({ "success": false, "error": "Настройки маршрутизатора требуют обычного применения; API меняет только правила и балансировщики" }));
     }
     if let Err(error) = replace_live_rules(&new_config).await {
         // Restore through the same API. Never turn a failed rule update into a
