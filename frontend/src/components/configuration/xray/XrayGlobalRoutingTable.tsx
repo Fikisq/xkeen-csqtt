@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input'
 import { DeviceTab } from '@/components/configuration/DeviceTab'
 import { cn } from '@/lib/utils'
+import { groupRuRows, isRuGroup, reorderRuGroups, ruBranchResources, sameRuGroup } from '@/lib/xrayRuGroup'
 import { routeLabel } from '@/components/configuration/RouteIcon'
 import { RoutingTable, type RoutingRule as TableRule } from './RoutingTable'
 import { outboundTitle, outboundTransport } from './Selectors'
@@ -36,7 +37,7 @@ function destination(rule: XrayRule): string {
 
 function toTable(rule: XrayRule, index: number): TableRule {
   return {
-    id: String(index), enabled: !disabled(rule), description: routeLabel(baseRuleTag(rule)),
+    id: String(index), enabled: !disabled(rule), description: isRuGroup(rule) ? 'RU · RoscomVPN' : routeLabel(baseRuleTag(rule)),
     network: (rule.network ?? '') as TableRule['network'],
     inboundTag: Array.isArray(rule.inboundTag) ? rule.inboundTag as string[] : [],
     outboundTag: destination(rule), domain: rule.domain ?? [], ip: rule.ip ?? [],
@@ -71,7 +72,7 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
   const rules: XrayRule[] = Array.isArray(parsed?.routing?.rules) ? parsed.routing.rules : []
   const tags = routeTags(rules)
   const devices = readDeviceIps(rules)
-  const own = rules.map((rule, index) => ({ rule, index })).filter(({ rule }) => managed(rule, tags))
+  const own = groupRuRows(rules.map((rule, index) => ({ rule, index })).filter(({ rule }) => managed(rule, tags)))
   const vpn = own.find(({ rule }) => baseRuleTag(rule) === 'VPN')
   const fullBypass = isFullBypass(vpn?.rule)
   const deviceVpn = deviceIp ? rules.find(rule => baseRuleTag(rule) === `device:${deviceIp}:VPN`) : undefined
@@ -212,20 +213,22 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
   function applyRow(current: XrayRule[], tag: string, row: TableRule): XrayRule[] {
     const original = current.find(rule => baseRuleTag(rule) === tag)
     if (!original) throw new Error('Правило не найдено')
+    const groupTags = isRuGroup(original) ? ['RU', 'RU_IP'] : [tag]
+    if (isRuGroup(original) && (!row.domain.length || !row.ip.length)) throw new Error('Для RU укажите категории доменов и IP')
     if (tag === 'VPN' && (row.domain.length !== (original.domain?.length ?? 0) || row.ip.length !== (original.ip?.length ?? 0))) throw new Error('Ресурсы маршрута по умолчанию менять нельзя')
     const withFields = current.map(rule => {
       const name = baseRuleTag(rule).replace(/^disabled:/, '')
-      const sameResource = name === tag || name.startsWith('device:') && name.endsWith(`:${tag}`)
+      const sameResource = groupTags.some(groupTag => name === groupTag || name.startsWith('device:') && name.endsWith(`:${groupTag}`))
       if (!sameResource) return rule
-      if (name !== tag) return { ...rule, domain: row.domain.length ? [...row.domain] : undefined, ip: row.ip.length ? [...row.ip] : undefined }
+      if (!groupTags.includes(name)) return { ...rule, ...ruBranchResources(rule, row.domain, row.ip) }
       return { ...rule, network: row.network || 'tcp,udp', inboundTag: row.inboundTag.length ? row.inboundTag : undefined,
-        domain: row.domain.length ? [...row.domain] : undefined, ip: row.ip.length ? [...row.ip] : undefined,
+        ...ruBranchResources(rule, row.domain, row.ip),
         port: row.port || undefined }
     })
     const currentDestination = destination(withFields.find(rule => baseRuleTag(rule) === tag)!)
-    const selected = currentDestination === row.outboundTag ? withFields : updateGlobalRules(withFields, tag, row.outboundTag)
+    const selected = currentDestination === row.outboundTag ? withFields : groupTags.reduce((changed, groupTag) => updateGlobalRules(changed, groupTag, row.outboundTag), withFields)
     const ordered = tag === 'VPN' && row.outboundTag === '@bypass' ? placeBypassFirst(selected) : selected
-    return ordered.map(rule => baseRuleTag(rule) === tag ? { ...rule, sourceIP: row.enabled ? undefined : [DISABLED_SOURCE] } : rule)
+    return ordered.map(rule => groupTags.includes(baseRuleTag(rule)) ? { ...rule, sourceIP: row.enabled ? undefined : [DISABLED_SOURCE] } : rule)
   }
 
   return <div className="space-y-5 p-3">
@@ -273,17 +276,11 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
       onEditRule={(id, row) => edit(Number(id), row, false)}
       onDeleteRule={id => run(current => {
         const tag = baseRuleTag(current[Number(id)])
-        return removeCustomRoute(current, tag).filter(rule => !baseRuleTag(rule).startsWith('disabled:device:') || !baseRuleTag(rule).endsWith(`:${tag}`))
+        const groupTags = isRuGroup(current[Number(id)]) ? ['RU', 'RU_IP'] : [tag]
+        return groupTags.reduce((changed, groupTag) => removeCustomRoute(changed, groupTag).filter(rule => !baseRuleTag(rule).startsWith('disabled:device:') || !baseRuleTag(rule).endsWith(`:${groupTag}`)), current)
       })}
-      onReorder={(from, to) => run(current => {
-        const positions = current.map((rule, index) => managed(rule, routeTags(current)) ? index : -1).filter(index => index >= 0)
-        const selected = positions.map(index => current[index])
-        if (!selected[from] || !selected[to] || baseRuleTag(selected[from]) === 'VPN' || baseRuleTag(selected[to]) === 'VPN') return current
-        const [moving] = selected.splice(from, 1)
-        selected.splice(to, 0, moving)
-        return current.map((rule, index) => positions.includes(index) ? selected[positions.indexOf(index)] : rule)
-      })}
-      onToggleEnabled={id => run(current => current.map((rule, index) => index === Number(id) ? { ...rule, sourceIP: disabled(rule) ? undefined : [DISABLED_SOURCE] } : rule))}
+      onReorder={(from, to) => run(current => reorderRuGroups(current, rule => managed(rule, routeTags(current)), from, to))}
+      onToggleEnabled={id => run(current => current.map((rule, index) => index === Number(id) || sameRuGroup(rule, current[Number(id)]) ? { ...rule, sourceIP: disabled(rule) ? undefined : [DISABLED_SOURCE] } : rule))}
       canDelete={row => baseRuleTag(rules[Number(row.id)]) !== 'VPN'}
       canReorder={row => baseRuleTag(rules[Number(row.id)]) !== 'VPN'}
       canToggle={row => baseRuleTag(rules[Number(row.id)]) !== 'VPN'}

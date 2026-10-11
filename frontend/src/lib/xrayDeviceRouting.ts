@@ -278,6 +278,7 @@ export function updateDeviceRules(rules: RoutingRule[], ip: string, route: Route
   if (!target.outboundTag && !target.balancerTag) throw new Error('Общий Селектор не настроен')
   const nextRule: RoutingRule = {
     type: 'field',
+    ...(global.xkeenRouteGroup ? { xkeenRouteGroup: global.xkeenRouteGroup } : {}),
     ruleTag: tag + (linked ? '|selector' : nfqws2 ? '|nfqws2' : bypass ? '|bypass' : route === 'VPN' && outboundTag === 'direct' ? '|split' : ''),
     sourceIP: [ip],
     ...(route === 'VPN' ? { network: 'tcp,udp' } : Array.isArray(global.ip) && !Array.isArray(global.domain) ? { ip: global.ip } : { domain: global.domain }),

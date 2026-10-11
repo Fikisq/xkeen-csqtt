@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { RoutingTable, type RoutingRule as TableRule } from './RoutingTable'
 import { outboundTitle } from './Selectors'
 import { useOutboundLatency } from './useOutboundLatency'
+import { groupRuRows, isRuGroup, reorderRuGroups, ruBranchResources, sameRuGroup } from '@/lib/xrayRuGroup'
 import { baseRuleTag, customRouteName, isFullBypass, type RoutingRule as XrayRule } from '@/lib/xrayDeviceRouting'
 
 const DISABLED_SOURCE = '192.0.2.255'
@@ -19,6 +20,7 @@ function isOwn(rule: XrayRule, ip: string): boolean {
 }
 
 function label(rule: XrayRule, ip: string): string {
+  if (isRuGroup(rule)) return 'RU · RoscomVPN'
   const name = ownName(rule).slice(prefix(ip).length)
   return name === 'VPN' ? 'Маршрут по умолчанию' : customRouteName(name)
 }
@@ -59,8 +61,7 @@ function updateOwn(rule: XrayRule, row: TableRule, ip: string): XrayRule {
     ...rule, ruleTag: (disabled ? 'disabled:' : '') + name + suffix, sourceIP: [disabled ? DISABLED_SOURCE : ip],
     outboundTag: undefined, balancerTag: undefined,
     network: row.network || 'tcp,udp',
-    domain: row.domain.length ? row.domain : undefined,
-    ip: row.ip.length ? row.ip : undefined,
+    ...ruBranchResources(rule, row.domain, row.ip),
     port: row.port || undefined,
     ...target(row.outboundTag),
   }
@@ -83,7 +84,7 @@ export function XrayDeviceRoutingTable({ deviceIp = '192.168.0.130', content, on
   const { latencies, pingPending, ping } = useOutboundLatency()
   const parsed = useMemo(() => parseJsonc(content), [content])
   const rules: XrayRule[] = Array.isArray(parsed?.routing?.rules) ? parsed.routing.rules : []
-  const own = rules.map((rule, index) => ({ rule, index })).filter(({ rule }) => isOwn(rule, DEVICE_IP))
+  const own = groupRuRows(rules.map((rule, index) => ({ rule, index })).filter(({ rule }) => isOwn(rule, DEVICE_IP)))
   const outbounds: Array<{ tag: string; protocol: string; label: string }> = Array.isArray(parsed?.outbounds)
     ? parsed.outbounds.filter((out: any) => typeof out?.tag === 'string').map((out: any) => ({ tag: out.tag, protocol: out.protocol ?? '', label: out.tag === 'direct' ? 'direct' : out.tag === 'block' ? 'blocked' : outboundTitle(out) })) : []
   const balancers: string[] = Array.isArray(parsed?.routing?.balancers)
@@ -108,7 +109,8 @@ export function XrayDeviceRoutingTable({ deviceIp = '192.168.0.130', content, on
         return [...current.slice(0, insert), created, ...current.slice(insert)]
       }
       if (!current[index] || !isOwn(current[index], DEVICE_IP)) throw new Error('Правило изменилось. Обновите страницу')
-      const changed = current.map((rule, position) => position === index ? updateOwn(rule, row, DEVICE_IP) : rule)
+      if (isRuGroup(current[index]) && (!row.domain.length || !row.ip.length)) throw new Error('Для RU укажите категории доменов и IP')
+      const changed = current.map((rule, position) => position === index || sameRuGroup(rule, current[index]) ? updateOwn(rule, row, DEVICE_IP) : rule)
       if (ownName(current[index]) !== FALLBACK) return changed
       const positions = changed.map((rule, position) => isOwn(rule, DEVICE_IP) ? position : -1).filter(position => position >= 0)
       const block = positions.map(position => changed[position])
@@ -162,17 +164,10 @@ export function XrayDeviceRoutingTable({ deviceIp = '192.168.0.130', content, on
       outbounds={destinations} inbounds={[]}
       onAddRule={row => edit(-1, row, true)}
       onEditRule={(id, row) => edit(Number(id), row, false)}
-      onDeleteRule={id => run(current => current.filter((rule, index) => index !== Number(id) || !isOwn(rule, DEVICE_IP)))}
-      onReorder={(from, to) => run(current => {
-        const positions = current.map((rule, index) => isOwn(rule, DEVICE_IP) ? index : -1).filter(index => index >= 0)
-        const selected = positions.map(index => current[index])
-        if (selected[from] == null || selected[to] == null || ownName(selected[from]) === FALLBACK || ownName(selected[to]) === FALLBACK) return current
-        const [moving] = selected.splice(from, 1)
-        selected.splice(to, 0, moving)
-        return current.map((rule, index) => positions.includes(index) ? selected[positions.indexOf(index)] : rule)
-      })}
+      onDeleteRule={id => run(current => current.filter((rule, index) => (index !== Number(id) && !sameRuGroup(rule, current[Number(id)])) || !isOwn(rule, DEVICE_IP)))}
+      onReorder={(from, to) => run(current => reorderRuGroups(current, rule => isOwn(rule, DEVICE_IP), from, to))}
       onToggleEnabled={id => run(current => current.map((rule, index) => {
-        if (index !== Number(id) || !isOwn(rule, DEVICE_IP) || ownName(rule) === FALLBACK) return rule
+        if ((index !== Number(id) && !sameRuGroup(rule, current[Number(id)])) || !isOwn(rule, DEVICE_IP) || ownName(rule) === FALLBACK) return rule
         return isDisabled(rule)
           ? { ...rule, ruleTag: rule.ruleTag?.replace(/^disabled:/, ''), sourceIP: [DEVICE_IP] }
           : { ...rule, ruleTag: `disabled:${rule.ruleTag}`, sourceIP: [DISABLED_SOURCE] }
