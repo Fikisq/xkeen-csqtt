@@ -1,5 +1,5 @@
 use crate::types::{AppState, VERSION};
-use crate::updater::{self, get_repo};
+use crate::updater::get_repo;
 use axum::extract::State;
 use axum::response::{IntoResponse, Json};
 use serde_json::json;
@@ -100,53 +100,4 @@ pub async fn version_handler(State(state): State<AppState>) -> impl IntoResponse
     res.insert("success".into(), json!(true));
 
     Json(res)
-}
-
-pub fn start_update_checker(state: AppState) {
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(300));
-        loop {
-            interval.tick().await;
-
-            let (check_core, proxies) = {
-                let s = state.settings.read().unwrap();
-                let need = |on, last: &std::sync::RwLock<Option<Instant>>, sec| {
-                    on && last.read().unwrap().map_or(true, |t| t.elapsed().as_secs() > sec)
-                };
-                (need(s.updater.auto_check_core, &state.update_checker.last_core_check, 14400), s.updater.github_proxy.clone())
-            };
-
-            if check_core {
-                let core = state.core.read().unwrap().name.clone();
-                let cur_opt = get_local_core_version(&core).await;
-                let cur_str = cur_opt.as_deref().map(|v| v.trim_start_matches('v'));
-                if let Some((latest, tag)) = updater::fetch_latest_version(&state.http_client, &core, &proxies, cur_str).await
-                {
-                    if let Some(cur) = cur_str {
-                        if !cur.is_empty() {
-                            *state.update_checker.core_outdated.write().unwrap() = compare_versions(&latest, cur);
-                        }
-                    }
-                    *state.update_checker.core_latest_tag.write().unwrap() = Some(tag);
-                    *state.update_checker.last_core_check.write().unwrap() = Some(Instant::now());
-                }
-            }
-        }
-    });
-}
-
-fn compare_versions(latest: &str, current: &str) -> bool {
-    if current.to_lowercase().contains("alpha") || latest.to_lowercase().contains("alpha") {
-        return latest != current;
-    }
-
-    let parse = |v: &str| {
-        v.split('-')
-            .next()
-            .unwrap_or(v)
-            .split('.')
-            .filter_map(|s| s.parse::<u32>().ok())
-            .collect::<Vec<_>>()
-    };
-    parse(latest) > parse(current)
 }

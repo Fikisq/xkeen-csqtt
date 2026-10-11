@@ -20,7 +20,7 @@ import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from '
 import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
 import { apiCall, clashFetch } from '../../../lib/api'
-import { getConnections, subscribeConnections, useNowStore, useProxiesStore, useSettings, useWsConnected } from '../../../lib/store'
+import { getConnections, subscribeConnections, useNowStore, useProxiesStore, useWsConnected } from '../../../lib/store'
 interface ConnectionMetadata {
   network: string
   type: string
@@ -1155,7 +1155,7 @@ export function ConnectionsPanel({ clashApiPort, clashApiSecret, clashApiUnix }:
       return next
     })
   }, [])
-  const showSourceName = useSettings((s) => s.showSourceName)
+  const showSourceName = false
   const sourceNameRefreshTick = useSourceNameStore((s) => (showSourceName ? s.version : 0))
   const unresolvedSourceIPs = useConnectionsStore(useShallow((s) => collectRefreshableSourceIPs(s, showSourceName)))
 

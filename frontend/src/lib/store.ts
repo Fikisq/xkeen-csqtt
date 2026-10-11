@@ -4,8 +4,6 @@ import { useShallow } from 'zustand/react/shallow'
 import { clashFetch } from './api'
 import { getStoredTheme } from './theme'
 import {
-  DEFAULT_PING_TEST_TIMEOUT,
-  DEFAULT_PING_TEST_URL,
   type AppAction,
   type AppSettings,
   type AppState,
@@ -17,24 +15,7 @@ import { clashWsUrl } from './websocket'
 
 // ─── Zustand store ─────────────────────────────────────────────────────────────
 
-const initialSettings: AppSettings = {
-  theme: getStoredTheme(),
-  autoApply: false,
-  guiRouting: false,
-  guiLog: false,
-  autoCheckUI: true,
-  autoCheckCore: true,
-  backupCore: true,
-  githubProxies: [],
-  pingTestUrl: DEFAULT_PING_TEST_URL,
-  pingTestTimeout: DEFAULT_PING_TEST_TIMEOUT,
-  showSourceName: false,
-  hideUnavailableProxies: false,
-  hideUnavailableProxiesCounter: 3,
-  proxySortOrder: 'default',
-  timezone: 0,
-  authEnabled: false,
-}
+const initialSettings: AppSettings = { theme: getStoredTheme(), timezone: 3, authEnabled: false }
 
 const initialState: AppState = {
   serviceStatus: 'loading',

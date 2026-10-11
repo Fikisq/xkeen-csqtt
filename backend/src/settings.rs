@@ -5,7 +5,7 @@ use axum::response::{IntoResponse, Json};
 pub async fn get_settings(State(state): State<AppState>) -> impl IntoResponse {
     let s = state.settings.read().unwrap();
     Json(
-        serde_json::json!({ "success": true, "gui": s.gui, "updater": s.updater, "log": s.log, "clash_api": s.clash_api, "auth": { "enabled": s.auth.enabled } }),
+        serde_json::json!({ "success": true, "log": s.log, "auth": { "enabled": s.auth.enabled } }),
     )
 }
 
@@ -19,7 +19,14 @@ pub async fn patch_settings(State(state): State<AppState>, Json(patch): Json<ser
 
     let patch_sets_tz = patch.get("log").and_then(|l| l.get("timezone")).is_some();
 
+    if !patch.as_object().is_some_and(|object| object.keys().all(|key| ["auth", "log"].contains(&key.as_str()))) { return Json(serde_json::json!({"success": false, "error": "Неизвестная настройка"})); }
+    for (section, field) in [("auth", "enabled"), ("log", "timezone")] {
+        if patch.get(section).is_some_and(|value| !value.as_object().is_some_and(|object| object.keys().all(|key| key == field))) {
+            return Json(serde_json::json!({"success": false, "error": "Неизвестная настройка"}));
+        }
+    }
     json_merge(&mut file_json, patch);
+    if let Some(object) = file_json.as_object_mut() { for key in ["gui", "clash_api", "updater"] { object.remove(key); } }
 
     if let serde_json::Value::Object(ref mut map) = file_json {
         if let Some(legacy) = map.remove("timezoneOffset") {
@@ -31,7 +38,7 @@ pub async fn patch_settings(State(state): State<AppState>, Json(patch): Json<ser
         }
     }
 
-    let mut settings: AppSettings = match serde_json::from_value(file_json.clone()) {
+    let settings: AppSettings = match serde_json::from_value(file_json.clone()) {
         Ok(s) => s,
         Err(e) => return Json(serde_json::json!({"success": false, "error": e.to_string()})),
     };
@@ -39,16 +46,8 @@ pub async fn patch_settings(State(state): State<AppState>, Json(patch): Json<ser
     if settings.log.timezone < -12 || settings.log.timezone > 14 {
         return Json(serde_json::json!({"success": false, "error": "Неверный часовой пояс"}));
     }
-    settings.clash_api.ping_url = settings.clash_api.ping_url.trim().to_string();
-    if settings.clash_api.ping_url.is_empty() {
-        return Json(serde_json::json!({"success": false, "error": "URL пинг-теста не может быть пустым"}));
-    }
-    if settings.clash_api.ping_timeout == 0 {
-        return Json(serde_json::json!({"success": false, "error": "Таймаут пинг-теста должен быть больше 0"}));
-    }
-    settings.normalize_proxies();
 
-    *state.settings.write().unwrap() = settings;
+
 
     if let Err(e) = tokio::fs::create_dir_all(XKEEN_CONF_DIR).await {
         return Json(serde_json::json!({"success": false, "error": e.to_string()}));
@@ -58,7 +57,7 @@ pub async fn patch_settings(State(state): State<AppState>, Json(patch): Json<ser
     let tmp = format!("{}.tmp", APP_CONFIG);
     match tokio::fs::write(&tmp, &serialized).await {
         Ok(_) => match tokio::fs::rename(&tmp, APP_CONFIG).await {
-            Ok(_) => Json(serde_json::json!({"success": true})),
+            Ok(_) => { *state.settings.write().unwrap() = settings; Json(serde_json::json!({"success": true})) },
             Err(e) => Json(serde_json::json!({"success": false, "error": e.to_string()})),
         },
         Err(e) => Json(serde_json::json!({"success": false, "error": e.to_string()})),

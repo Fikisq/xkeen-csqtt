@@ -443,7 +443,7 @@ async fn main() {
         debug: cli.debug,
         rci_token,
     };
-    version::start_update_checker(state.clone());
+
     xray_subscription_refresh::start(state.clone());
     nfqws2::start_reconciler();
 
@@ -624,10 +624,7 @@ fn load_settings() -> AppSettings {
     };
 
     match serde_json::from_str::<AppSettings>(&content) {
-        Ok(mut s) => {
-            s.normalize_proxies();
-            s
-        }
+        Ok(s) => s,
         Err(e) => {
             log("ERROR", format!("Ошибка парсинга {}: {}", path, e));
             AppSettings::default()

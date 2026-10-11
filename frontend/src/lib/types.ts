@@ -12,24 +12,7 @@ export interface Config {
 
 export type ProxySortOrder = 'default' | 'name' | 'ping'
 
-export interface AppSettings {
-  theme: ThemeMode
-  autoApply: boolean
-  guiRouting: boolean
-  guiLog: boolean
-  autoCheckUI: boolean
-  autoCheckCore: boolean
-  backupCore: boolean
-  githubProxies: string[]
-  pingTestUrl: string
-  pingTestTimeout: number
-  showSourceName: boolean
-  hideUnavailableProxies: boolean
-  hideUnavailableProxiesCounter: number
-  proxySortOrder: ProxySortOrder
-  timezone: number
-  authEnabled: boolean
-}
+export interface AppSettings { theme: ThemeMode; timezone: number; authEnabled: boolean }
 
 export type ServiceStatus = 'loading' | 'running' | 'stopped' | 'pending'
 

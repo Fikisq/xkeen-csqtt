@@ -3,16 +3,14 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { LoginForm } from './components/auth/Login'
 import type { CodeMirrorRef } from './components/configuration/CodeMirror'
 import { ConfigPanel } from './components/configuration/ConfigPanel'
-import { LogPanel } from './components/log/LogPanel'
 import { StatusBar } from './components/status/StatusBar'
-import { Dialog, DialogContent, DialogTitle } from './components/ui/dialog'
 import { Toast } from './components/ui/toast'
 import { apiCall, capitalize, clashFetch } from './lib/api'
 import { LazyBoundary, lazyLoad, useLazyMount } from './lib/loader'
 import { fetchClashProxies, getAppState, useAppActions, useModalContext, useSettings } from './lib/store'
 import { applyTheme, THEME_MEDIA_QUERY } from './lib/theme'
 import { linkProviderToVpn } from './lib/mihomoSubscription'
-import { DEFAULT_PING_TEST_TIMEOUT, DEFAULT_PING_TEST_URL, type Config, type ThemeMode } from './lib/types'
+import { type Config, type ThemeMode } from './lib/types'
 import { parseClashApiCredentials } from './lib/utils'
 import { parse as parseJsonc } from 'jsonc-parser'
 import { defaultMihomoChoices, mihomoRouteTags, readMihomoDevices, readMihomoFullBypass, isMihomoFullRoute } from './lib/mihomoDeviceRouting'
@@ -122,7 +120,6 @@ const ModalManager = memo(function ModalManager({
 
 function AppContent({ onLogout }: { onLogout: () => void }) {
   const { dispatch, showToast } = useAppActions()
-  const [logOpen, setLogOpen] = useState(false)
   const [xraySubscriptionsOpen, setXraySubscriptionsOpen] = useState(false)
   const mountXraySubscriptions = useLazyMount(xraySubscriptionsOpen)
   const editorRef = useRef<CodeMirrorRef | null>(null)
@@ -241,19 +238,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         dispatch({
           type: 'SET_SETTINGS',
           settings: {
-            autoApply: data.gui.auto_apply,
-            guiRouting: data.gui.routing,
-            guiLog: data.gui.log,
-            autoCheckUI: data.updater.auto_check_ui ?? true,
-            autoCheckCore: data.updater.auto_check_core ?? true,
-            backupCore: data.updater.backup_core,
-            githubProxies: data.updater.github_proxy || [],
-            pingTestUrl: data.clash_api?.ping_url ?? DEFAULT_PING_TEST_URL,
-            pingTestTimeout: data.clash_api?.ping_timeout ?? DEFAULT_PING_TEST_TIMEOUT,
-            showSourceName: data.clash_api?.show_source_name ?? false,
-            hideUnavailableProxies: data.clash_api?.hide_unavailable_proxies ?? false,
-            hideUnavailableProxiesCounter: data.clash_api?.hide_unavailable_proxies_counter ?? 3,
-            proxySortOrder: data.clash_api?.proxy_sort_order ?? 'default',
             timezone: data.log.timezone,
             authEnabled: !!data.auth?.enabled,
           },
@@ -522,17 +506,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             onOpenTemplate={() => openModal('showTemplateModal')}
             onOpenGeoScan={() => openModal('showGeoScanModal')}
             onOpenBackups={() => openModal('showBackupsModal')}
-            onOpenLog={() => setLogOpen(true)}
             onRefreshConfigs={() => loadConfigs(undefined, false, true)}
           />
         </div>
       </main>
-      <Dialog open={logOpen} onOpenChange={setLogOpen}>
-        <DialogContent className="max-w-[min(96vw,1280px)]! overflow-hidden p-0">
-          <DialogTitle className="sr-only">Журнал</DialogTitle>
-          {logOpen && <LogPanel inDialog />}
-        </DialogContent>
-      </Dialog>
       <Toast />
       <ModalManager
         onSwitchCore={switchCore}

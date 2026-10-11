@@ -353,7 +353,7 @@ pub async fn post_update(State(state): State<AppState>, Json(req): Json<UpdateRe
 
     let tmp_dir = Path::new("/opt/tmp");
     _ = fs::create_dir_all(tmp_dir).await;
-    let proxies = state.settings.read().unwrap().updater.github_proxy.clone();
+    let proxies = vec!["https://gh-proxy.com".to_string(), "https://ghfast.top".to_string()];
     let arch = std::env::consts::ARCH;
 
     if req.core == "self" {

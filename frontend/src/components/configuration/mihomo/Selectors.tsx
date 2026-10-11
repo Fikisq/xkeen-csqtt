@@ -25,7 +25,7 @@ import { createContext, useContext, memo, useCallback, useEffect, useMemo, useSt
 import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
 import { apiCall, clashFetch } from '../../../lib/api'
-import { fetchClashProxies, useProxiesStore, useSettings, useAppContext } from '../../../lib/store'
+import { fetchClashProxies, useProxiesStore, useAppContext } from '../../../lib/store'
 import { defaultMihomoChoices, readMihomoFullBypass, isMihomoFullRoute, orderedMihomoRouteTags, readMihomoDevices, readMihomoRouteResources } from '../../../lib/mihomoDeviceRouting'
 import { findRoutePresets } from '../../../lib/routePresets'
 import { validDeviceIp, type RouteTag } from '../../../lib/xrayDeviceRouting'
@@ -704,9 +704,9 @@ const SelectorRow = memo(function SelectorRow({
   const selectedDelay = selectedProxy ? getLastDelay(selectedProxy) : null
   const showSelectedDelay = !!selectedProxy && selectedDelay !== null && selectedDelay > 0
 
-  const hideUnavailable = useSettings((s) => s.hideUnavailableProxies)
-  const hideCounter = useSettings((s) => s.hideUnavailableProxiesCounter)
-  const sortOrder = useSettings((s) => s.proxySortOrder)
+  const hideUnavailable = false
+  const hideCounter = 3
+  const sortOrder = "default" as "default" | "name" | "ping"
   const allProxiesMap = useRoutingProxies((s) => s.proxies as Record<string, ProxyInfo | undefined>)
 
   const filteredSortedProxies = useMemo(() => {

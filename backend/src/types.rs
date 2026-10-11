@@ -129,34 +129,6 @@ pub struct CoreInfo {
     pub is_json: bool,
 }
 
-#[derive(Clone, Serialize, Deserialize, Default)]
-#[serde(default)]
-pub struct GuiSettings {
-    pub routing: bool,
-    pub log: bool,
-    pub auto_apply: bool,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct UpdaterSettings {
-    pub auto_check_ui: bool,
-    pub auto_check_core: bool,
-    pub backup_core: bool,
-    pub github_proxy: Vec<String>,
-}
-
-impl Default for UpdaterSettings {
-    fn default() -> Self {
-        Self {
-            github_proxy: vec!["https://gh-proxy.com".into(), "https://ghfast.top".into()],
-            backup_core: true,
-            auto_check_ui: true,
-            auto_check_core: true,
-        }
-    }
-}
-
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LogSettings {
@@ -166,30 +138,6 @@ pub struct LogSettings {
 impl Default for LogSettings {
     fn default() -> Self {
         Self { timezone: 3 }
-    }
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ClashApiSettings {
-    pub ping_url: String,
-    pub ping_timeout: u32,
-    pub show_source_name: bool,
-    pub hide_unavailable_proxies: bool,
-    pub hide_unavailable_proxies_counter: u32,
-    pub proxy_sort_order: String,
-}
-
-impl Default for ClashApiSettings {
-    fn default() -> Self {
-        Self {
-            ping_url: "https://www.gstatic.com/generate_204".into(),
-            ping_timeout: 5000,
-            show_source_name: false,
-            hide_unavailable_proxies: false,
-            hide_unavailable_proxies_counter: 3,
-            proxy_sort_order: "default".into(),
-        }
     }
 }
 
@@ -210,10 +158,7 @@ pub struct AppendConfigPaths {
 
 #[derive(Clone, Serialize, Default)]
 pub struct AppSettings {
-    pub gui: GuiSettings,
-    pub updater: UpdaterSettings,
     pub log: LogSettings,
-    pub clash_api: ClashApiSettings,
     pub append_config_paths: AppendConfigPaths,
     pub auth: AuthSettings,
 }
@@ -226,13 +171,7 @@ impl<'de> Deserialize<'de> for AppSettings {
         #[derive(Deserialize)]
         struct RawConfig {
             #[serde(default)]
-            gui: GuiSettings,
-            #[serde(default)]
-            updater: UpdaterSettings,
-            #[serde(default)]
             log: LogSettings,
-            #[serde(default)]
-            clash_api: ClashApiSettings,
             #[serde(default)]
             append_config_paths: AppendConfigPaths,
             #[serde(default)]
@@ -245,32 +184,13 @@ impl<'de> Deserialize<'de> for AppSettings {
             raw.log.timezone = tz;
         }
         Ok(Self {
-            gui: raw.gui,
-            updater: raw.updater,
             log: raw.log,
-            clash_api: raw.clash_api,
             append_config_paths: raw.append_config_paths,
             auth: raw.auth,
         })
     }
 }
 
-impl AppSettings {
-    pub fn normalize_proxies(&mut self) {
-        self.updater.github_proxy = self
-            .updater
-            .github_proxy
-            .iter()
-            .map(|p| {
-                if p.starts_with("http") {
-                    p.to_string()
-                } else {
-                    format!("https://{}", p.trim_start_matches("://"))
-                }
-            })
-            .collect();
-    }
-}
 
 #[derive(Serialize)]
 pub struct ApiResponse<T> {

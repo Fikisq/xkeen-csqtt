@@ -17,7 +17,7 @@ const MAX_LINES = 1000
 export function LogPanel({ inDialog = false }: { inDialog?: boolean } = {}) {
   const timezone = useSettings((s) => s.timezone)
   const [filter, setFilter] = useState('')
-  const [currentFile, setCurrentFile] = useState('error.log')
+  const [currentFile, setCurrentFile] = useState('access.log')
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
   const [isAnimating, setIsAnimating] = useState(false)

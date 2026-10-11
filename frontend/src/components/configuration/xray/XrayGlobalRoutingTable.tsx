@@ -15,6 +15,16 @@ import { XrayDeviceRoutingTable } from './XrayDeviceRoutingTable'
 import { addCustomIpRoute, addCustomRoute, baseRuleTag, isFullBypass, readDeviceIps, removeCustomRoute, renameCustomRoute, routeTags, updateDeviceRules, updateGlobalRules, validDeviceIp, type RoutingRule as XrayRule } from '@/lib/xrayDeviceRouting'
 
 const DISABLED_SOURCE = '192.0.2.255'
+function ProtocolDetails({ outbound }: { outbound: { tag: string; protocol: string; streamSettings?: { network?: string; security?: string } } }) {
+  if (!['vless', 'vmess', 'trojan', 'hysteria', 'hysteria2', 'tuic', 'shadowsocks'].includes(outbound.protocol)) {
+    return <span className="text-muted-foreground text-xs">{outbound.tag === 'direct' ? 'Напрямую; правила ресурсов действуют' : outboundTransport(outbound)}</span>
+  }
+  const quic = ['hysteria', 'hysteria2', 'tuic'].includes(outbound.protocol)
+  const protocol = outbound.protocol === 'hysteria' ? 'hysteria2' : outbound.protocol
+  const network = quic ? 'quic' : outbound.streamSettings?.network === 'raw' ? 'tcp' : outbound.streamSettings?.network ?? 'tcp'
+  const security = quic ? 'tls' : outbound.streamSettings?.security ?? 'none'
+  return <span className="text-muted-foreground text-xs">{[protocol, network, security].map(value => value.toLowerCase()).join(' · ')}</span>
+}
 const PROTOCOL_ORDER_KEY = 'xkeen-xray-protocol-card-order'
 const managed = (rule: XrayRule, tags: string[]) => tags.includes(baseRuleTag(rule))
 const disabled = (rule: XrayRule) => Array.isArray(rule.sourceIP) && rule.sourceIP.length === 1 && rule.sourceIP[0] === DISABLED_SOURCE
@@ -258,7 +268,7 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
       <div className="flex items-center justify-between gap-2"><h3 className="text-base font-semibold">Протоколы</h3><Button size="sm" variant="outline" disabled={testingAll || pingPending !== null} onClick={() => void pingAll()}><IconBolt size={16} /> {testingAll ? 'Проверка…' : 'Пинг'}</Button></div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6 2xl:grid-cols-7">
         {orderedCards.map(out => <div key={out.tag} draggable onDragStart={event => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', out.tag); setDraggedProtocol(out.tag) }} onDragOver={event => { if (draggedProtocol) { event.preventDefault(); event.dataTransfer.dropEffect = 'move' } }} onDrop={event => { event.preventDefault(); if (draggedProtocol) moveProtocol(draggedProtocol, out.tag); setDraggedProtocol(null) }} onDragEnd={() => setDraggedProtocol(null)} title="Перетащите карточку, чтобы изменить порядок в браузере" className={cn('relative cursor-grab rounded-md border text-sm transition-colors active:cursor-grabbing', draggedProtocol === out.tag && 'opacity-60', selectedVpn?.outboundTag === out.tag && !isFullBypass(selectedVpn) ? 'border-blue-400 bg-blue-500/20' : 'border-ring/40 hover:border-blue-400 hover:bg-blue-500/10')}>
-          <button type="button" className="flex min-h-22 w-full flex-col justify-between px-3 py-2.5 pr-12 text-left" aria-pressed={selectedVpn?.outboundTag === out.tag && !isFullBypass(selectedVpn)} onClick={() => chooseVpn(out.tag)}><span className="font-medium">{out.label}</span><span className="text-muted-foreground text-xs">{out.tag === 'direct' ? 'Напрямую; правила ресурсов действуют' : outboundTransport((parsed.outbounds as any[]).find(raw => raw.tag === out.tag))}</span></button>
+          <button type="button" className="flex min-h-22 w-full flex-col justify-between px-3 py-2.5 text-left" aria-pressed={selectedVpn?.outboundTag === out.tag && !isFullBypass(selectedVpn)} onClick={() => chooseVpn(out.tag)}><span className="font-medium">{out.label}</span><ProtocolDetails outbound={(parsed.outbounds as any[]).find(raw => raw.tag === out.tag)} /></button>
           <button type="button" className={cn('absolute right-2 top-2 rounded p-1 text-xs font-medium tabular-nums hover:bg-blue-500/20', latencies[out.tag]?.ms !== undefined ? 'text-green-400' : latencies[out.tag]?.error ? 'text-red-400' : 'text-sky-400')} disabled={testingAll || pingPending !== null} onClick={() => void ping(out.tag)} title={latencies[out.tag]?.error || 'Проверить соединение через узел'} aria-label={`Пинг ${out.label}`}>{pingPending === out.tag ? '…' : latencies[out.tag]?.ms !== undefined ? `${latencies[out.tag].ms} мс` : latencies[out.tag]?.error ? '✕' : <IconBolt size={17} />}</button>
         </div>)}
       </div>

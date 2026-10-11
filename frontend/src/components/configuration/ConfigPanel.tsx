@@ -1,3 +1,4 @@
+import { LogPanel } from '@/components/log/LogPanel'
 import { readSelections, withSelections } from '@/lib/mihomoRoutingBackup'
 import { Button } from '@/components/ui/button'
 import {
@@ -39,7 +40,7 @@ import * as jsyaml from 'js-yaml'
 import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react'
 import { apiCall, capitalize, clashFetch, getFileLanguage } from '../../lib/api'
 import { LazyBoundary, lazyLoad, useLazyMount } from '../../lib/loader'
-import { fetchClashProxies, useProxiesStore, syncClashApiPort, useAppContext, useConnectionsSync, useModalContext, useSettings } from '../../lib/store'
+import { fetchClashProxies, useProxiesStore, syncClashApiPort, useAppContext, useConnectionsSync, useModalContext } from '../../lib/store'
 import type { Config } from '../../lib/types'
 import { cn } from '../../lib/utils'
 import { normalizeDevicePriority, baseRuleTag, type RouteTag, type RoutingRule } from '../../lib/xrayDeviceRouting'
@@ -53,8 +54,6 @@ import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '..
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover'
 import type { CodeMirrorRef } from './CodeMirror'
 
-const GuiRouting = lazyLoad(() => import('./xray/GuiRouting'), 'GuiRouting')
-const GuiLog = lazyLoad(() => import('./xray/GuiLog'), 'GuiLog')
 const ConnectionsPanel = lazyLoad(() => import('./mihomo/Connections'), 'ConnectionsPanel')
 const ProvidersModal = lazyLoad(() => import('../modals/Providers'), 'ProvidersModal')
 const BackupsModal = lazyLoad(() => import('../modals/Backups'), 'BackupsModal')
@@ -91,7 +90,6 @@ interface Props {
   onOpenTemplate: () => void
   onOpenGeoScan: () => void
   onOpenBackups: () => void
-  onOpenLog: () => void
   onRefreshConfigs: () => Promise<Config[]>
   editorRef: React.RefObject<CodeMirrorRef | null>
   configActionsRef: React.RefObject<{ switchTab: (index: number) => void; getActiveIndex: () => number }>
@@ -166,12 +164,11 @@ function ConfigTab({ config, currentCore, showToast, onRefreshConfigs, withConte
 
   const isProtected = config.file.endsWith('/config.yaml') || config.file === 'config.yaml'
 
+  const fileName = config.file.split('/').pop() ?? config.file
+  const fileLabel = ({ '00_config.json': 'Конфигурация Xray', 'client_bypass_macs.lst': 'Без VPN', 'device_capture_xray.lst': 'Устройства Xray' } as Record<string, string>)[fileName] ?? fileName.replace(/\.[^.]+$/, '')
   const tabsTrigger = (
     <TabsTrigger value={config.file} className="dark:data-[state=active]:bg-input-background! relative data-[state=active]:bg-white!">
-      {config.file
-        .split('/')
-        .pop()
-        ?.replace(/\.[^.]+$/, '')}
+      {fileLabel}
       {config.isDirty && <span className="absolute top-0.75 right-0.75 h-1.5 w-1.5 rounded-full bg-amber-400" />}
     </TabsTrigger>
   )
@@ -280,11 +277,9 @@ function ConfigTab({ config, currentCore, showToast, onRefreshConfigs, withConte
   )
 }
 
-export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpenBackups, onOpenLog, onRefreshConfigs, editorRef, configActionsRef }: Props) {
+export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpenBackups, onRefreshConfigs, editorRef, configActionsRef }: Props) {
   const { state, dispatch, showToast } = useAppContext({ includeConfigs: true })
   const { configs, isConfigsLoading, currentCore, serviceStatus, clashApiPort, clashApiSecret, clashApiUnix } = state
-  const guiRouting = useSettings((s) => s.guiRouting)
-  const guiLog = useSettings((s) => s.guiLog)
 
   const isRunning = serviceStatus === 'running'
   const isPending = serviceStatus === 'pending'
@@ -301,7 +296,7 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
   }, [configs, activeConfigFile])
   const [validationState, setValidationState] = useState<{ isValid: boolean; error?: string } | null>(null)
 
-  const [isEditorMounted, setIsEditorMounted] = useState(false)
+  const [, setIsEditorMounted] = useState(false)
 
   const [activePanel, setActivePanel] = useState<'selectors' | 'connections' | 'config'>('selectors')
   const [mountedPanels, setMountedPanels] = useState<Set<string>>(() => new Set(['selectors']))
@@ -505,17 +500,13 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
     configActionsRef.current = { switchTab, getActiveIndex: () => activeIndexRef.current }
   }, [configActionsRef, switchTab])
 
-  async function saveCurrentConfig(force = false) {
+  async function saveCurrentConfig(_force = false) {
     const cfg = configsRef.current[activeIndexRef.current]
     if (!cfg || !editorRef.current) return
     const content = editorRef.current.getValue()
     if (!content.trim()) return showToast('Конфигурация пустая', 'error')
     if (!editorRef.current.isValid(cfg.file)) return showToast('Файл содержит ошибки', 'error')
-    if (!force && isGuiActive(cfg) && hasComments(cfg.savedContent)) {
-      dispatch({ type: 'SET_PENDING_SAVE_ACTION', action: () => saveCurrentConfig(true) })
-      dispatch({ type: 'SHOW_MODAL', modal: 'showCommentsWarningModal', show: true })
-      return
-    }
+
     const result = await apiCall<{ success: boolean; error?: string }>('PUT', 'configs', { file: cfg.file, content })
     if (result.success) {
       editorRef.current.setSavedContent(content)
@@ -527,17 +518,13 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
     }
   }
 
-  async function saveAndApply(force = false) {
+  async function saveAndApply(_force = false) {
     const cfg = configsRef.current[activeIndexRef.current]
     if (!cfg || !editorRef.current) return
     const content = editorRef.current.getValue()
     if (!content.trim()) return showToast('Файл пустой', 'error')
     if (!editorRef.current.isValid(cfg.file)) return showToast('Файл содержит ошибки', 'error')
-    if (!force && isGuiActive(cfg) && hasComments(cfg.savedContent)) {
-      dispatch({ type: 'SET_PENDING_SAVE_ACTION', action: () => saveAndApply(true) })
-      dispatch({ type: 'SHOW_MODAL', modal: 'showCommentsWarningModal', show: true })
-      return
-    }
+
 
     dispatch({ type: 'SET_SERVICE_STATUS', status: 'pending', pendingText: 'Применение...' })
 
@@ -581,37 +568,6 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
       syncClashApiPort(200)
     }
   }
-
-  function isGuiActive(cfg: Config) {
-    const f = cfg.file.toLowerCase()
-    return (f.includes('routing') && guiRouting) || (f.includes('log') && guiLog)
-  }
-
-  const fileForGui = activeConfig?.file
-  const contentForGui = activeConfig?.savedContent
-  const isRoutingGui = useMemo(() => {
-    if (!guiRouting || !fileForGui) return false
-    if (!fileForGui.toLowerCase().includes('routing')) return false
-    try {
-      const j = parseJsonc(contentForGui || '')
-      return j && typeof j.routing === 'object'
-    } catch {
-      return false
-    }
-  }, [guiRouting, fileForGui, contentForGui])
-
-  const isLogGui = useMemo(() => {
-    if (!guiLog || !fileForGui) return false
-    if (!fileForGui.toLowerCase().includes('log')) return false
-    try {
-      const j = parseJsonc(contentForGui || '')
-      return j && typeof j.log === 'object'
-    } catch {
-      return false
-    }
-  }, [guiLog, fileForGui, contentForGui])
-
-  const isAnyGui = isRoutingGui || isLogGui
 
   const coreConfigs = configs.filter((c) => !c.file.startsWith('/opt/etc/xkeen'))
   const xkeenConfigs = configs.filter((c) => c.file.startsWith('/opt/etc/xkeen'))
@@ -920,7 +876,6 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
       <DropdownMenuGroup>
         <DropdownMenuItem onClick={onOpenBackups}><IconBox /> Резервные копии</DropdownMenuItem>
         <DropdownMenuItem onClick={onOpenGeoScan}><IconSearch /> Скан геофайлов</DropdownMenuItem>
-        <DropdownMenuItem onClick={onOpenLog}><IconFileText /> Журнал</DropdownMenuItem>
       </DropdownMenuGroup>
     </DropdownMenuContent>
   </DropdownMenu></>)
@@ -1069,13 +1024,6 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
           </div>
 
           <div className={cn('relative', currentPanel === 'selectors' && (isMihomo || hasXraySelectors) ? '' : 'min-h-175! md:min-h-0 md:flex-1')}>
-            {isEditorMounted && activeConfig && isRoutingGui && (
-              <GuiRouting editorRef={editorRef} configs={configs} activeConfigIndex={activeConfigIndex} />
-            )}
-            {isEditorMounted && activeConfig && isLogGui && (
-              <GuiLog editorRef={editorRef} configs={configs} activeConfigIndex={activeConfigIndex} />
-            )}
-
             {isMihomo && (
               <>
                 {mountedPanels.has('selectors') && (
@@ -1123,6 +1071,7 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
                 <div className={cn('relative min-h-0 flex-1', routingSaving && 'pointer-events-none opacity-60')}>
               <LazyBoundary>
                 <XrayGlobalRoutingTable content={routingAutoPreview?.file === xraySelectorsConfig.file ? routingAutoPreview.content : routingDraft?.file === xraySelectorsConfig.file ? routingDraft.content : xraySelectorsConfig.savedContent} onChange={editGlobalRouting} onDeviceChange={editDeviceRouting} onError={message => showToast(message, 'error')} utilities={routingUtilities} />
+                <section className="m-3"><LogPanel /></section>
               </LazyBoundary>
                 </div>
               </div>
@@ -1132,7 +1081,6 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
               <div
                 className={cn(
                   'absolute inset-0',
-                  isAnyGui && 'pointer-events-none invisible opacity-0',
                   (isMihomo || hasXraySelectors) && currentPanel !== 'config' && 'hidden'
                 )}
               >
@@ -1213,9 +1161,7 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
                           <DropdownMenuItem onClick={onOpenGeoScan}>
                             <IconSearch /> Скан геофайлов
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={onOpenLog}>
-                            <IconFileText /> Журнал
-                          </DropdownMenuItem>
+
                         </DropdownMenuGroup>
                         <DropdownMenuSeparator />
                         {isMobile ? (
@@ -1269,9 +1215,6 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
   )
 }
 
-function hasComments(content: string) {
-  return /(?<!:)\/\/|\/\*[\s\S]*?\*\//.test(content) || /^\s*#/m.test(content)
-}
 
 function hasCriticalChanges(oldContent: string, newContent: string, language: string): boolean {
   try {

@@ -132,6 +132,7 @@ pub async fn get_configs(
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if name == "client_bypass_mihomo_macs.lst" { continue; }
             if path.extension().map_or(false, |e| e == "lst") || name == "xkeen.json" {
                 if let Ok(content) = tokio::fs::read_to_string(&path).await {
                     lst_configs.push(ConfigItem {

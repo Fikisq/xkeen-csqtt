@@ -11,7 +11,7 @@ import { useEffect, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { apiCall, capitalize } from '../../lib/api'
-import { useAppContext, useModalContext, useSettings } from '../../lib/store'
+import { useAppContext, useModalContext } from '../../lib/store'
 import type { Release } from '../../lib/types'
 import { cn } from '../../lib/utils'
 
@@ -50,8 +50,8 @@ const fetchWithTimeout = (url: string, init?: RequestInit) => {
 export function UpdateModal({ onInstalled }: { onInstalled: () => void }) {
   const { dispatch, showToast } = useAppContext()
   const { modals } = useModalContext()
-  const backupCore = useSettings((s) => s.backupCore)
-  const githubProxies = useSettings((s) => s.githubProxies)
+  const backupCore = true
+  const githubProxies = ["https://gh-proxy.com", "https://ghfast.top"]
   const { updateModalCore } = modals
   const [releases, setReleases] = useState<Release[]>([])
   const [selectedVersion, setSelectedVersion] = useState('')
