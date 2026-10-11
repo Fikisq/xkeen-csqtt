@@ -124,27 +124,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Fetch CSQTT 2.1.9 and apply router patch
+      - name: Fetch pinned CSQTT 2.5.0 APK router runtime
         run: |
-          git clone --depth 1 --branch v2.1.9 https://github.com/amurcanov/csqtt.git upstream-csqtt
-          test "$(git -C upstream-csqtt rev-parse HEAD)" = 446293aa2e873ac5323ef6fd2316d9b81d966c11
-          git -C upstream-csqtt apply ../router/patches/csqtt-2.1.9-router-call-closure.patch
-      - name: Build ARM64 client
-        run: |
-          rustup toolchain install 1.97.1 --profile minimal
-          cargo install cross --locked
-          cd upstream-csqtt
-          cross +1.97.1 build --release --target aarch64-unknown-linux-musl --manifest-path rust-client/Cargo.toml
-      - name: Build ARM64 tun helper and package
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+          # The APK client and Bionic runtime were adapted separately from this repository.
+          curl -fLsS https://github.com/Fikisq/xkeen-csqtt/releases/download/v0.1.0-beta.3/csqtt-client-arm64-v8a.tar.gz -o csqtt-bootstrap.tar.gz
+          echo '94a785e84f8cd7239a2e59798ab2811068901869f19ee0339895facfeefe32ec  csqtt-bootstrap.tar.gz' | sha256sum -c -
           mkdir csqtt-bundle
-          cp upstream-csqtt/rust-client/target/aarch64-unknown-linux-musl/release/client csqtt-bundle/client
-          aarch64-linux-gnu-gcc -static -O2 -o csqtt-bundle/csqtt-tun-fd router/csqtt-tun-fd.c
-          cp router/S99csqtt router/csqtt-run-219.sh router/csqtt-js-calls.sh router/csqtt-api-calls.sh router/vk-manual-hashes.sh csqtt-bundle/
-          printf '2.1.9\n' > csqtt-bundle/client-version
-          chmod 755 csqtt-bundle/*
+          tar -xzf csqtt-bootstrap.tar.gz -C csqtt-bundle
+          cp router/S99csqtt router/csqtt-run-219.sh router/csqtt-run-250.sh router/csqtt-js-calls.sh router/csqtt-api-calls.sh router/vk-manual-hashes.sh csqtt-bundle/
+      - name: Build current ARM64 event adapter
+        run: |
+          rustup toolchain install stable --profile minimal
+          cargo install cross --locked
+          cross build --release --locked --target aarch64-unknown-linux-musl --manifest-path router/csqtt-native-events/Cargo.toml
+          cp router/csqtt-native-events/target/aarch64-unknown-linux-musl/release/csqtt-native-events csqtt-bundle/
+          chmod 755 csqtt-bundle/client csqtt-bundle/csqtt-* csqtt-bundle/S99csqtt csqtt-bundle/vk-manual-hashes.sh csqtt-bundle/runtime/linker
           tar -czf csqtt-client-arm64-v8a.tar.gz -C csqtt-bundle .
       - uses: actions/upload-artifact@v7
         with:
@@ -157,21 +151,13 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26'
-      - name: Build WDTT Plus v18 client
+          go-version: '1.26.8'
+      - name: Build WDTT Plus v20 router client
         run: |
-          git clone --depth 1 --branch v18 https://github.com/Ivan4537/WDTT-Plus.git upstream-wdtt
-          test "$(git -C upstream-wdtt rev-parse HEAD)" = b3935b947acd81d95107869c8f33507f3f5c1309
-          git -C upstream-wdtt apply ../router/wdtt-plus-client-v18.patch
-          cd upstream-wdtt/go_client
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags='-s -w' -o ../../wdtt-client .
-      - name: Package router client
-        run: |
-          mkdir wdtt-bundle
-          cp wdtt-client wdtt-bundle/client
-          cp router/S99wdtt-plus router/wdtt-plus-run.sh router/wdtt-plus-watchdog.sh router/wdtt-plus-calls.sh router/vk-manual-hashes.sh wdtt-bundle/
-          chmod 755 wdtt-bundle/*
-          tar -czf wdtt-plus-client-arm64-v8a.tar.gz -C wdtt-bundle .
+          sh router/build-wdtt-plus-v20.sh "$RUNNER_TEMP/wdtt-v20"
+          cp router/vk-manual-hashes.sh "$RUNNER_TEMP/wdtt-v20/package/"
+          rm "$RUNNER_TEMP/wdtt-v20/package/SHA256SUMS"
+          tar -czf wdtt-plus-client-arm64-v8a.tar.gz -C "$RUNNER_TEMP/wdtt-v20/package" .
       - uses: actions/upload-artifact@v7
         with:
           name: wdtt-plus-client-arm64-v8a

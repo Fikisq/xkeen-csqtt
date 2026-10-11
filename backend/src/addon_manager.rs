@@ -155,11 +155,25 @@ fn target(addon: &str, file: &str) -> Option<&'static str> {
         ("csqtt", "client-version") => Some("/opt/etc/csqtt/client-version"),
         ("csqtt", "csqtt-tun-fd") => Some("/opt/etc/csqtt/csqtt-tun-fd"),
         ("csqtt", "csqtt-run-219.sh") => Some("/opt/etc/csqtt/csqtt-run-219.sh"),
+        ("csqtt", "csqtt-run-250.sh") => Some("/opt/etc/csqtt/csqtt-run-250.sh"),
+        ("csqtt", "csqtt-native-events") => Some("/opt/etc/csqtt/csqtt-native-events"),
+        ("csqtt", "csqtt-dns-sync.sh") => Some("/opt/etc/csqtt/csqtt-dns-sync.sh"),
+        ("csqtt", "csqtt-flock") => Some("/opt/etc/csqtt/csqtt-flock"),
+        ("csqtt", "runtime/linker") => Some("/opt/csqtt250/linker"),
+        ("csqtt", "runtime/lib/libc.so") => Some("/opt/csqtt250/lib/libc.so"),
+        ("csqtt", "runtime/lib/libdl.so") => Some("/opt/csqtt250/lib/libdl.so"),
+        ("csqtt", "runtime/lib/libm.so") => Some("/opt/csqtt250/lib/libm.so"),
+        ("csqtt", "runtime/lib/ld-android.so") => Some("/opt/csqtt250/lib/ld-android.so"),
+        ("csqtt", "runtime/lib/libcsqtt-env.so") => Some("/opt/csqtt250/lib/libcsqtt-env.so"),
+        ("csqtt", "runtime/licenses/NOTICE.bionic") => Some("/opt/csqtt250/licenses/NOTICE.bionic"),
+        ("csqtt", "LICENSE.CSQTT") => Some("/opt/etc/csqtt/LICENSE.CSQTT"),
         ("csqtt", "csqtt-js-calls.sh") => Some("/opt/etc/csqtt/csqtt-js-calls.sh"),
         ("csqtt", "csqtt-api-calls.sh") => Some("/opt/etc/csqtt/csqtt-api-calls.sh"),
         ("csqtt", "vk-manual-hashes.sh") | ("wdtt-plus", "vk-manual-hashes.sh") => Some("/opt/bin/vk-manual-hashes.sh"),
         ("csqtt", "S99csqtt") => Some("/opt/etc/init.d/S99csqtt"),
         ("wdtt-plus", "client") => Some("/opt/etc/wdtt-plus/wdtt-plus-client"),
+        ("wdtt-plus", "client-version") => Some("/opt/etc/wdtt-plus/client-version"),
+        ("wdtt-plus", "LICENSE.WDTT-Plus") => Some("/opt/etc/wdtt-plus/LICENSE.WDTT-Plus"),
         ("wdtt-plus", "wdtt-plus-run.sh") => Some("/opt/etc/wdtt-plus/wdtt-plus-run.sh"),
         ("wdtt-plus", "wdtt-plus-watchdog.sh") => Some("/opt/etc/wdtt-plus/wdtt-plus-watchdog.sh"),
         ("wdtt-plus", "wdtt-plus-calls.sh") => Some("/opt/etc/wdtt-plus/wdtt-plus-calls.sh"),
@@ -180,8 +194,8 @@ fn target(addon: &str, file: &str) -> Option<&'static str> {
 
 fn bundle_files(name: &str) -> &'static [&'static str] {
     match name {
-        "csqtt" => &["client", "client-version", "csqtt-tun-fd", "csqtt-run-219.sh", "csqtt-js-calls.sh", "csqtt-api-calls.sh", "vk-manual-hashes.sh", "S99csqtt"],
-        "wdtt-plus" => &["client", "wdtt-plus-run.sh", "wdtt-plus-watchdog.sh", "wdtt-plus-calls.sh", "vk-manual-hashes.sh", "S99wdtt-plus"],
+        "csqtt" => &["client", "client-version", "csqtt-tun-fd", "csqtt-run-219.sh", "csqtt-run-250.sh", "csqtt-native-events", "csqtt-dns-sync.sh", "csqtt-flock", "csqtt-js-calls.sh", "csqtt-api-calls.sh", "vk-manual-hashes.sh", "S99csqtt", "runtime/linker", "runtime/lib/libc.so", "runtime/lib/libdl.so", "runtime/lib/libm.so", "runtime/lib/ld-android.so", "runtime/lib/libcsqtt-env.so", "runtime/licenses/NOTICE.bionic", "LICENSE.CSQTT"],
+        "wdtt-plus" => &["client", "client-version", "wdtt-plus-run.sh", "wdtt-plus-watchdog.sh", "wdtt-plus-calls.sh", "vk-manual-hashes.sh", "S99wdtt-plus", "LICENSE.WDTT-Plus"],
         _ => &["engine", "probe", "canary.sh", "probe-check.sh", "activate.sh", "nfqws2/lua/zapret-lib.lua.gz", "nfqws2/lua/zapret-antidpi.lua.gz", "nfqws2/blobs/quic_initial.bin", "nfqws2/blobs/tls_clienthello.bin", "S98nfqws2-xkeen"],
     }
 }
