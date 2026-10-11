@@ -26,7 +26,8 @@ fn routing_api_enabled(config: &Value) -> bool {
 }
 
 async fn replace_live_rules(config: &Value) -> Result<(), String> {
-    let runtime = crate::xray_subscription_refresh::live::runtime_config(config).await?;
+    let mut runtime = crate::xray_subscription_refresh::live::runtime_config(config).await?;
+    omit_shadowed_device_rules(&mut runtime);
     let config = &runtime;
     let routing = config.get("routing").ok_or("В JSON нет маршрутизации")?;
     let input = serde_json::to_vec(&json!({ "routing": routing })).map_err(|e| e.to_string())?;
@@ -44,6 +45,38 @@ async fn replace_live_rules(config: &Value) -> Result<(), String> {
     if output.status.success() { return Ok(()) }
     let error = String::from_utf8_lossy(&output.stderr);
     Err(format!("Xray не принял правила: {}", error.trim().chars().take(300).collect::<String>()))
+}
+
+// An earlier unconditional per-host rule wins for both transports. Keep the
+// saved rules intact, but avoid recompiling unreachable GeoSite/GeoIP matchers.
+// Recompute from the full saved config on every apply, including bypass removal.
+fn omit_shadowed_device_rules(config: &mut Value) {
+    let Some(rules) = config.pointer_mut("/routing/rules").and_then(Value::as_array_mut) else { return };
+    let mut covered = std::collections::HashSet::<String>::new();
+    rules.retain(|rule| {
+        let ips = rule.get("sourceIP").and_then(Value::as_array);
+        if ips.is_some_and(|ips| !ips.is_empty() && ips.iter().all(|ip|
+            ip.as_str().is_some_and(|ip| covered.contains(ip)))) { return false }
+        let unconditional = rule["type"] == "field"
+            && rule["outboundTag"].as_str().is_some_and(|tag| !tag.is_empty())
+            && rule.as_object().is_some_and(|object| object.keys().all(|key|
+                ["type", "network", "outboundTag", "sourceIP", "ruleTag"].contains(&key.as_str())))
+            && match rule.get("network") {
+                None => true,
+                Some(Value::String(network)) => {
+                    let parts: Vec<_> = network.split(',').map(str::trim).collect();
+                    parts.len() == 2 && parts.contains(&"tcp") && parts.contains(&"udp")
+                }
+                _ => false,
+            };
+        if unconditional {
+            for ip in ips.into_iter().flatten().filter_map(Value::as_str) {
+                // Do not reason about CIDR overlap, geo categories or inversion.
+                if ip.parse::<std::net::IpAddr>().is_ok() { covered.insert(ip.into()); }
+            }
+        }
+        true
+    });
 }
 
 pub async fn apply_routes(State(state): State<AppState>, Json(request): Json<ApplyRoutesRequest>) -> Json<Value> {
