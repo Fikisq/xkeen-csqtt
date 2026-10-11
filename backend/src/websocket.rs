@@ -1,6 +1,6 @@
 use crate::logger::{process_log_line, ts};
 use crate::types::*;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use futures_util::sink::SinkExt;
@@ -13,8 +13,14 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 static WS_COUNTER: AtomicU32 = AtomicU32::new(0);
 
-pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
-    ws.on_upgrade(|socket| handle_socket(socket, state))
+#[derive(serde::Deserialize)]
+pub struct LogQuery {
+    file: Option<String>,
+}
+
+pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>, Query(query): Query<LogQuery>) -> impl IntoResponse {
+    let initial_path = if query.file.as_deref() == Some("error.log") { error_log_path() } else { access_log_path() };
+    ws.on_upgrade(move |socket| handle_socket(socket, state, initial_path))
 }
 
 fn read_log_file(p: String, offset: u64, query: String, full: bool, tz: i32) -> (String, Vec<String>, u64) {
@@ -86,7 +92,7 @@ fn read_log_file(p: String, offset: u64, query: String, full: bool, tz: i32) -> 
     (if full { "initial".into() } else { "append".into() }, lines, bytes_read)
 }
 
-async fn handle_socket(socket: WebSocket, state: AppState) {
+async fn handle_socket(socket: WebSocket, state: AppState, initial_path: String) {
     let debug = state.debug;
     let count = WS_COUNTER.fetch_add(1, Ordering::SeqCst);
     if debug {
@@ -134,7 +140,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
     let (mut tx, mut rx) = socket.split();
     let mut log_rx = state.log_tx.subscribe();
-    let mut path = error_log_path();
+    let mut path = initial_path;
     let mut query = String::new();
     let tz = state.settings.read().unwrap().log.timezone;
 

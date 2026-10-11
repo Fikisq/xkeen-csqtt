@@ -11,7 +11,7 @@ import type { WsMessage } from '../../lib/websocket'
 import { useWebSocket } from '../../lib/websocket'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group'
 
-const LOG_FILES = ['error.log', 'access.log']
+const LOG_FILES = ['access.log', 'error.log']
 const MAX_LINES = 1000
 
 export function LogPanel({ inDialog = false }: { inDialog?: boolean } = {}) {
@@ -111,7 +111,7 @@ export function LogPanel({ inDialog = false }: { inDialog?: boolean } = {}) {
     [renderAll, appendLines]
   )
 
-  const ws = useWebSocket(handleMessage)
+  const ws = useWebSocket(handleMessage, currentFile)
 
   useEffect(() => {
     ws.reload(filter)

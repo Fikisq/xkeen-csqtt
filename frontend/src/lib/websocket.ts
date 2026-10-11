@@ -21,10 +21,10 @@ export interface WsMessage {
   error?: string
 }
 
-export function useWebSocket(onMessage: WsMessageHandler) {
+export function useWebSocket(onMessage: WsMessageHandler, initialFile = 'access.log') {
   const wsRef = useRef<WebSocket | null>(null)
   const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const currentFileRef = useRef('error.log')
+  const currentFileRef = useRef(initialFile)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const connectRef = useRef<() => void>(() => {})
 
