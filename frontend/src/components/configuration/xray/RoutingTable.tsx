@@ -6,6 +6,17 @@ import { cn } from '@/lib/utils'
 import { IconPencil, IconTrash, IconPlus, IconGripVertical, IconFolder } from '@tabler/icons-react'
 import { useRef, useState, type ReactNode } from 'react'
 import { GeoDatabasePicker } from '@/components/configuration/GeoDatabasePicker'
+import { resourceLabel } from '@/lib/geoLabels'
+
+function ResourceField({ label, resources, onChange, onPicker, placeholder }: {
+  label: string; resources: string[]; onChange: (resources: string[]) => void; onPicker: () => void; placeholder: string
+}) {
+  return <div className="space-y-2">
+    <div className="flex items-center justify-between gap-2"><span className="text-muted-foreground text-base">{label}</span><Button size="sm" variant="outline" onClick={onPicker}><IconFolder size={17} /> Выбрать из базы</Button></div>
+    <div className="flex flex-wrap gap-1.5">{resources.map(value => <span key={value} title={value} className="flex items-center rounded-md border border-blue-400/50 bg-blue-500/15 text-sm"><span className="px-2 py-1">{resourceLabel(value)}</span><button type="button" className="rounded-r-md px-2 py-1 hover:bg-red-500/20" aria-label={`Убрать ${resourceLabel(value)}`} onClick={() => onChange(resources.filter(item => item !== value))}>×</button></span>)}</div>
+    <details className="text-sm"><summary className="text-muted-foreground cursor-pointer">Ввести вручную</summary><Input className="mt-2 text-base" value={resources.join(', ')} placeholder={placeholder} onChange={event => onChange(event.target.value.split(',').map(value => value.trim()).filter(Boolean))} /></details>
+  </div>
+}
 
 // Типы для правила маршрутизации в стиле 3x-ui
 export interface RoutingRule {
@@ -227,15 +238,15 @@ export function RoutingTable({
                     <div className="text-muted-foreground flex flex-col gap-0.5 break-words text-sm">
                       {rule.domain.length > 0 && (
                         <div>
-                          <span className="text-foreground font-medium">DOMAIN:</span>{' '}
-                          {rule.domain.slice(0, 2).join(', ')}
+                          <span className="text-foreground font-medium">Домены:</span>{' '}
+                          {rule.domain.slice(0, 2).map(value => <span key={value} title={value} className="mr-2">{resourceLabel(value)}</span>)}
                           {rule.domain.length > 2 && ` +${rule.domain.length - 2}`}
                         </div>
                       )}
                       {rule.ip.length > 0 && (
                         <div>
                           <span className="text-foreground font-medium">IP:</span>{' '}
-                          {rule.ip.slice(0, 2).join(', ')}
+                          {rule.ip.slice(0, 2).map(value => <span key={value} title={value} className="mr-2">{resourceLabel(value)}</span>)}
                           {rule.ip.length > 2 && ` +${rule.ip.length - 2}`}
                         </div>
                       )}
@@ -311,64 +322,12 @@ export function RoutingTable({
               </div>
 
               {/* Домены */}
-              <div>
-                <label className="text-muted-foreground mb-1.5 block text-base">Домен</label>
-                <div className="relative">
-                  <Input
-                    value={editingRule.domain.join(', ')}
-                    onChange={(e) =>
-                      updateEditingRule({
-                        domain: e.target.value
-                          .split(',')
-                          .map((s) => s.trim())
-                          .filter(Boolean)
-                      })
-                    }
-                    placeholder="google.com, geosite:youtube"
-                    className="pr-10 text-base"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowDomainPicker(true)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-primary transition-colors"
-                    title="Выбрать из базы"
-                  >
-                    <IconFolder className="size-5" />
-                  </button>
-                </div>
-              </div>
-
+              <ResourceField label="Домены" resources={editingRule.domain} onChange={domain => updateEditingRule({ domain })} onPicker={() => setShowDomainPicker(true)} placeholder="google.com, geosite:youtube" />
               {/* IP */}
+              <ResourceField label="IP" resources={editingRule.ip} onChange={ip => updateEditingRule({ ip })} onPicker={() => setShowIpPicker(true)} placeholder="0.0.0.0/8, geoip:cloudflare" />
+              <details open={Boolean(editingRule.port || editingRule.inboundTag.length)} className="space-y-3 rounded-md border border-border p-3"><summary className="text-muted-foreground cursor-pointer text-sm">Дополнительные параметры</summary>{/* Порт */}
               <div>
-                <label className="text-muted-foreground mb-1.5 block text-base">IP</label>
-                <div className="relative">
-                  <Input
-                    value={editingRule.ip.join(', ')}
-                    onChange={(e) =>
-                      updateEditingRule({
-                        ip: e.target.value
-                          .split(',')
-                          .map((s) => s.trim())
-                          .filter(Boolean)
-                      })
-                    }
-                    placeholder="0.0.0.0/8, geoip:cloudflare"
-                    className="pr-10 text-base"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowIpPicker(true)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-primary transition-colors"
-                    title="Выбрать из базы"
-                  >
-                    <IconFolder className="size-5" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Порт */}
-              <div>
-                <label className="text-muted-foreground mb-1.5 block text-base">Порт</label>
+                <label className="text-muted-foreground mb-1.5 block text-base">Порты назначения</label>
                 <Input
                   className="text-base"
                   value={editingRule.port}
@@ -397,10 +356,10 @@ export function RoutingTable({
                 />
               </div>}
 
-              {/* Тег исходящего */}
+              </details>{/* Тег исходящего */}
               <div>
                 <label className="text-muted-foreground mb-1.5 block text-base">
-                  Тег исходящего
+                  Исходящее подключение
                 </label>
                 <div className="flex items-center gap-2">
                 <select

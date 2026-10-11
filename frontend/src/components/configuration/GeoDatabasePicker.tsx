@@ -4,6 +4,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { apiCall } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { geoCategoryLabel, geoDatabaseLabel, resourceLabel } from '@/lib/geoLabels'
 
 type Category = { file: string; name: string; count: number }
 type RecordEntry = { kind: string; value: string }
@@ -99,14 +100,14 @@ export function GeoDatabasePicker({ kind, resources, onChange, onPick }: {
   }
 
   const visible = useMemo(() => categories.filter(item =>
-    (!fileFilter || item.file === fileFilter) && item.name.toLowerCase().includes(search.trim().toLowerCase())
+    (!fileFilter || item.file === fileFilter) && `${item.name} ${geoCategoryLabel(item.name)} ${geoDatabaseLabel(item.file)}`.toLowerCase().includes(search.trim().toLowerCase())
   ), [categories, fileFilter, search])
 
   return <div className="space-y-3">
     <div className="flex flex-wrap gap-2">
       <select aria-label="Фильтр базы ресурсов" className="border-border bg-background min-w-0 flex-1 rounded-md border px-2 py-2 text-sm" value={fileFilter} onChange={event => setFileFilter(event.target.value)} disabled={uploading}>
         <option value="">Все базы ({files.length})</option>
-        {files.map(name => <option key={name} value={name}>{name}</option>)}
+        {files.map(name => <option key={name} value={name}>{geoDatabaseLabel(name)}</option>)}
       </select>
       <input ref={uploadInput} type="file" accept=".dat" className="hidden" onChange={event => { const selected = event.target.files?.[0]; if (selected) void upload(selected) }} />
       <Button size="sm" variant="outline" disabled={uploading} onClick={() => uploadInput.current?.click()}>{uploading ? 'Загрузка…' : 'Добавить базу .dat'}</Button>
@@ -116,9 +117,9 @@ export function GeoDatabasePicker({ kind, resources, onChange, onPick }: {
     <div className="flex max-h-20 flex-wrap gap-1.5 overflow-y-auto" aria-label="Выбранные ресурсы">
       {resources.map(value => {
         const category = categories.find(item => resourceValue(kind, item) === value)
-        return <span key={value} className="flex max-w-full items-center rounded-md border border-blue-400 bg-blue-500/20 text-xs text-blue-100">
-          {category ? <button type="button" className="min-w-0 truncate py-1 pl-2 text-left hover:underline" onClick={() => { setActive(category); setRecordFilter(''); setPage(0) }} aria-label={`Посмотреть ${value}`}>{value}</button>
-            : <span className="min-w-0 truncate py-1 pl-2">{value}</span>}
+        return <span key={value} title={value} className="flex max-w-full items-center rounded-md border border-blue-400 bg-blue-500/20 text-xs text-blue-100">
+          {category ? <button type="button" className="min-w-0 truncate py-1 pl-2 text-left hover:underline" onClick={() => { setActive(category); setRecordFilter(''); setPage(0) }} aria-label={`Посмотреть ${value}`}>{resourceLabel(value)}</button>
+            : <span className="min-w-0 truncate py-1 pl-2">{resourceLabel(value)}</span>}
           <button type="button" onClick={() => onChange(resources.filter(item => item !== value))} aria-label={`Убрать ${value}`} title={`Убрать ${value}`} className="shrink-0 rounded-r-md px-2 py-1 hover:bg-red-500/20 hover:text-red-300">×</button>
         </span>
       })}
@@ -136,7 +137,7 @@ export function GeoDatabasePicker({ kind, resources, onChange, onPick }: {
           return <div key={`${item.file}:${item.name}`} className={cn('flex items-center rounded text-sm hover:bg-blue-500/10', focused && 'bg-blue-500/20')}>
             <Checkbox aria-label={`Выбрать ${item.name} из ${item.file}`} checked={selected} onCheckedChange={() => toggle(item)} className="ml-2 size-4 shrink-0" />
             <button type="button" onClick={() => { setActive(item); setRecordFilter(''); setPage(0) }} className="flex min-w-0 flex-1 items-center justify-between gap-2 px-2 py-2 text-left" aria-label={`Посмотреть ${item.name} из ${item.file}`}>
-              <span className="min-w-0 truncate">{item.name}<small className="text-muted-foreground ml-1 block truncate">{item.file}</small></span>
+              <span className="min-w-0 truncate" title={`${item.file}:${item.name}`}>{geoCategoryLabel(item.name)}<small className="text-muted-foreground ml-1 block truncate">{geoDatabaseLabel(item.file)}</small></span>
               <span className="text-muted-foreground shrink-0">{item.count}</span>
             </button>
           </div>
@@ -146,7 +147,7 @@ export function GeoDatabasePicker({ kind, resources, onChange, onPick }: {
         {visible.length > 250 && <p className="text-muted-foreground px-2 py-2 text-xs">Показано 250 из {visible.length}. Уточните поиск.</p>}
       </div>
       <div className="flex min-h-0 min-w-0 flex-col">
-        <div className="border-border border-b px-3 py-2 text-sm font-medium">{active ? `${active.name} · ${recordTotal} записей` : 'Выберите категорию для просмотра'}</div>
+        <div className="border-border border-b px-3 py-2 text-sm font-medium">{active ? `${geoCategoryLabel(active.name)} · ${recordTotal} записей` : 'Выберите категорию для просмотра'}</div>
         {active && <Input value={recordFilter} onChange={event => { setRecordFilter(event.target.value); setPage(0) }} placeholder="Поиск внутри категории…" aria-label="Поиск записей категории" className="mx-2 mt-2 w-[calc(100%-1rem)]" />}
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
           {recordError && <p role="alert" className="text-sm text-red-400">{recordError}</p>}
