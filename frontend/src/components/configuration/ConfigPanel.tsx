@@ -46,7 +46,7 @@ import { cn } from '../../lib/utils'
 import { normalizeDevicePriority, baseRuleTag, type RouteTag, type RoutingRule } from '../../lib/xrayDeviceRouting'
 import { addMihomoCustomRoute, defaultMihomoChoices, readMihomoFullBypass, withMihomoFullBypass, isMihomoFullRoute, mihomoRouteTags, readMihomoDevices, removeMihomoRoute as removeMihomoRouteDefinition, editMihomoRouteResources, renameMihomoCustomRoute, reorderMihomoRoutes, updateMihomoDevice } from '../../lib/mihomoDeviceRouting'
 import { enableXrayRoutingCards } from '../../lib/xraySubscription'
-import { createXrayRoutingQueue } from '../../lib/xrayRoutingQueue'
+import { createXrayRoutingQueue, rebaseXrayRouting } from '../../lib/xrayRoutingQueue'
 import { linkProviderToVpn } from '../../lib/mihomoSubscription'
 import { applyEdits, modify, parse as parseJsonc } from 'jsonc-parser'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '../ui/context-menu'
@@ -645,21 +645,29 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
     const current = parseJsonc(config.savedContent)
     const liveRouting = current?.api?.listen === '127.0.0.1:18085' && current.api.services?.includes('RoutingService')
     if (routingDraft || !liveRouting) return applyXrayRoutingEdit(file, edit, message, !routingDraft, true)
-    if (routingSaving || configsRef.current.some(item => item.isDirty)) {
+    if (routingSaving || configsRef.current.some(item => item.isDirty && (getFileLanguage(item.file) !== 'json' || JSON.stringify(parseJsonc(item.content)) !== JSON.stringify(parseJsonc(item.savedContent))))) {
       showToast('Сначала сохраните изменения в редакторе', 'error')
       return Promise.resolve(false)
     }
     let session = routingQueueRef.current
-    if (!session || session.file !== file || session.confirmed !== config.savedContent) {
+    if (!session || session.file !== file || session.confirmed !== config.savedContent && !session.queue.isPending()) {
       const next = { file, confirmed: config.savedContent, queue: null as unknown as ReturnType<typeof createXrayRoutingQueue> }
       next.queue = createXrayRoutingQueue({
         initial: config.savedContent,
+        rebase: rebaseXrayRouting,
         send: async (previous, content) => {
-          const applied = await apiCall<{ success: boolean; error?: string; warning?: string }>('POST', 'xray/routes', {
+          let applied = await apiCall<{ success: boolean; error?: string; warning?: string }>('POST', 'xray/routes', {
             file, previous_content: previous, content,
           })
+          if (!applied.success && applied.error?.includes('Конфигурация уже изменилась')) {
+            const latest = (await onRefreshConfigs()).find(item => item.file === file)?.savedContent
+            if (!latest) throw new Error('Не удалось загрузить актуальную конфигурацию')
+            content = rebaseXrayRouting(previous, content, latest)
+            applied = await apiCall('POST', 'xray/routes', { file, previous_content: latest, content })
+          }
           if (!applied.success) throw new Error(applied.error || 'Xray не принял правила')
           if (applied.warning) showToast(applied.warning)
+          return content
         },
         onState: (content, pending) => {
           setRoutingAutoPreview(pending ? { file, content } : null)
@@ -671,13 +679,17 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
           if (index >= 0) {
             configsRef.current = configsRef.current.map((item, i) => i === index ? { ...item, content, savedContent: content, isDirty: false } : item)
             dispatch({ type: 'SAVE_CONFIG', index, content })
+            if (activeIndexRef.current === index && editorRef.current) {
+              editorRef.current.setValue(content, content)
+              editorRef.current.validate(file)
+            }
           }
         },
         onError: error => {
           routingRecoveryRef.current = true
           routingQueueRef.current = null
           showToast(error instanceof Error ? error.message : 'Не удалось применить маршрутизацию', 'error')
-          void onRefreshConfigs().catch(() => {}).finally(() => { routingRecoveryRef.current = false })
+          void refreshConfigsAndEditor().catch(() => {}).finally(() => { routingRecoveryRef.current = false })
         },
       })
       session = next
@@ -713,7 +725,7 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
       if (!Array.isArray(after)) throw new Error('Не удалось изменить правила устройства')
       if (JSON.stringify(before.filter(rule => !own(rule))) !== JSON.stringify(after.filter(rule => !own(rule)))) throw new Error('Правила других устройств и общие маршруты изменять нельзя')
       if (after.some(rule => own(rule) && (rule.type !== 'field' || JSON.stringify(rule.sourceIP) !== (baseRuleTag(rule).startsWith('disabled:') ? '["192.0.2.255"]' : JSON.stringify([ip]))))) throw new Error(`Правило должно относиться только к ${ip}`)
-      return applyEdits(content, modify(content, ['routing', 'rules'], after, { formattingOptions: { insertSpaces: true, tabSize: 2 } }))
+      return applyEdits(content, modify(content, ['routing', 'rules'], normalizeDevicePriority(after), { formattingOptions: { insertSpaces: true, tabSize: 2 } }))
     }, `Маршрут ${ip} применён`)
   }
 

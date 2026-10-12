@@ -66,7 +66,12 @@ type Props = {
 }
 
 export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onError, utilities }: Props) {
-  const [deviceIp, setDeviceIp] = useState('')
+  const [deviceIp, setDeviceIp] = useState(() => {
+    try { const ip = localStorage.getItem('xkeen-selected-device') ?? ''; return validDeviceIp(ip) ? ip : '' } catch { return '' }
+  })
+  const [pendingIps, setPendingIps] = useState<string[]>(() => {
+    try { const saved = JSON.parse(localStorage.getItem('xkeen-pending-devices') ?? '[]'); return Array.isArray(saved) ? saved.filter(ip => typeof ip === 'string' && validDeviceIp(ip)).slice(0, 64) : [] } catch { return [] }
+  })
   const [newIp, setNewIp] = useState('')
   const [addIpOpen, setAddIpOpen] = useState(false)
   const [testingAll, setTestingAll] = useState(false)
@@ -83,6 +88,15 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
   const rules: XrayRule[] = Array.isArray(parsed?.routing?.rules) ? parsed.routing.rules : []
   const tags = routeTags(rules)
   const devices = readDeviceIps(rules)
+  const deviceTabs = [...new Set([...devices, ...pendingIps])]
+  useEffect(() => { try { localStorage.setItem('xkeen-selected-device', deviceIp) } catch { /* Browser storage unavailable. */ } }, [deviceIp])
+  useEffect(() => { try { localStorage.setItem('xkeen-pending-devices', JSON.stringify(pendingIps)) } catch { /* Browser storage unavailable. */ } }, [pendingIps])
+  const addDeviceTab = () => {
+    const ip = newIp.trim()
+    if (!validDeviceIp(ip) || deviceTabs.includes(ip)) return
+    setPendingIps(current => [...current.filter(item => !devices.includes(item)), ip].slice(-64))
+    setDeviceIp(ip); setAddIpOpen(false); setNewIp('')
+  }
   const own = groupRuRows(rules.map((rule, index) => ({ rule, index })).filter(({ rule }) => managed(rule, tags)))
   const vpn = own.find(({ rule }) => baseRuleTag(rule) === 'VPN')
   const fullBypass = isFullBypass(vpn?.rule)
@@ -246,13 +260,14 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
     <div className="border-border flex flex-col gap-2 border-b pb-3">
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" variant={!deviceIp ? 'default' : 'outline'} onClick={() => setDeviceIp('')}>Общая маршрутизация</Button>
-        {devices.map(ip => <DeviceTab key={ip} ip={ip} selected={deviceIp === ip} disabled={false} onSelect={() => setDeviceIp(ip)} onRemove={() => {
+        {deviceTabs.map(ip => <DeviceTab key={ip} ip={ip} selected={deviceIp === ip} disabled={false} onSelect={() => setDeviceIp(ip)} onRemove={() => {
         if (window.confirm(`Удалить отдельные правила ${ip}?`)) {
-          void onDeviceChange(ip, current => current.filter(rule => !baseRuleTag(rule).startsWith(`device:${ip}:`)))
+          if (devices.includes(ip)) void onDeviceChange(ip, current => current.filter(rule => !baseRuleTag(rule).replace(/^disabled:/, '').startsWith(`device:${ip}:`)))
+          setPendingIps(current => current.filter(item => item !== ip))
           if (deviceIp === ip) setDeviceIp('')
         }
         }} />)}
-        {deviceIp && !devices.includes(deviceIp) && <Button size="sm" variant="outline">{deviceIp}</Button>}
+        {deviceIp && !deviceTabs.includes(deviceIp) && <Button size="sm" variant="outline">{deviceIp}</Button>}
         <Button size="sm" variant="outline" onClick={() => setAddIpOpen(true)}>+ Добавить IP</Button>
       </div>
     </div>
@@ -260,9 +275,9 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
       <DialogContent className="sm:max-w-sm">
         <DialogHeader><DialogTitle>Добавить устройство</DialogTitle></DialogHeader>
         <Input value={newIp} onChange={event => setNewIp(event.target.value)} onKeyDown={event => {
-          if (event.key === 'Enter' && validDeviceIp(newIp) && !devices.includes(newIp.trim())) { setDeviceIp(newIp.trim()); setAddIpOpen(false); setNewIp('') }
+          if (event.key === 'Enter') addDeviceTab()
         }} placeholder="192.168.0.20" aria-label="IP нового устройства" />
-        <DialogFooter><Button disabled={!validDeviceIp(newIp) || devices.includes(newIp.trim())} onClick={() => { setDeviceIp(newIp.trim()); setAddIpOpen(false); setNewIp('') }}>Добавить</Button></DialogFooter>
+        <DialogFooter><Button disabled={!validDeviceIp(newIp) || deviceTabs.includes(newIp.trim())} onClick={addDeviceTab}>Добавить</Button></DialogFooter>
       </DialogContent>
     </Dialog>
     <section className="border-border bg-input-background/70 space-y-3 rounded-xl border p-3">
