@@ -44,7 +44,7 @@ export function isFullBypass(rule?: RoutingRule): boolean {
 
 // Each device owns a complete block, before all general service rules.
 export function normalizeDevicePriority(rules: RoutingRule[]): RoutingRule[] {
-  const deviceIp = (rule: RoutingRule) => /^device:([^:]+):/.exec(baseRuleTag(rule))?.[1]
+  const deviceIp = (rule: RoutingRule) => /^device:([^:]+):/.exec(baseRuleTag(rule).replace(/^disabled:/, ''))?.[1]
   const vpnTag = (ip: string) => deviceRuleTag(ip, 'VPN')
   const locked = (rule?: RoutingRule) => isFullBypass(rule)
   const managed = new Set([...routeTags(rules), RU_IP_TAG])
@@ -287,5 +287,5 @@ export function updateDeviceRules(rules: RoutingRule[], ip: string, route: Route
   const withoutVpn = updated.filter((rule) => baseRuleTag(rule) !== tag)
   const fallbackIndex = withoutVpn.findIndex((rule) => baseRuleTag(rule) === 'VPN')
   withoutVpn.splice(fallbackIndex < 0 ? withoutVpn.length : fallbackIndex, 0, vpnRule)
-  return withoutVpn
+  return normalizeDevicePriority(withoutVpn)
 }

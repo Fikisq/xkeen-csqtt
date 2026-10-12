@@ -27,7 +27,9 @@ fn routing_api_enabled(config: &Value) -> bool {
 }
 
 pub(crate) async fn replace_live_rules(config: &Value) -> Result<(), String> {
-    let mut runtime = crate::xray_subscription_refresh::live::runtime_config(config).await?;
+    let mut ordered = config.clone();
+    prioritize_device_rules(&mut ordered);
+    let mut runtime = crate::xray_subscription_refresh::live::runtime_config(&ordered).await?;
     omit_shadowed_device_rules(&mut runtime);
     let config = &runtime;
     let routing = config.get("routing").ok_or("В JSON нет маршрутизации")?;
@@ -46,6 +48,37 @@ pub(crate) async fn replace_live_rules(config: &Value) -> Result<(), String> {
     if output.status.success() { return Ok(()) }
     let error = String::from_utf8_lossy(&output.stderr);
     Err(format!("Xray не принял правила: {}", error.trim().chars().take(300).collect::<String>()))
+}
+
+// Device fallbacks must win over every general service rule, including RU.
+// Keep disabled device rules in their block so toggling cannot move the fallback.
+fn prioritize_device_rules(config: &mut Value) {
+    let Some(rules) = config.pointer_mut("/routing/rules").and_then(Value::as_array_mut) else { return };
+    let device = |rule: &Value| -> Option<String> {
+        let tag = rule["ruleTag"].as_str()?.trim_start_matches("disabled:");
+        tag.strip_prefix("device:")?.split(':').next().map(str::to_owned)
+    };
+    let mut ips = Vec::new();
+    for rule in rules.iter() {
+        if let Some(ip) = device(rule) { if !ips.contains(&ip) { ips.push(ip); } }
+    }
+    if ips.is_empty() { return; }
+    let mut result: Vec<Value> = rules.iter().filter(|rule| device(rule).is_none() && rule["ruleTag"].as_str().is_none()).cloned().collect();
+    for ip in ips {
+        let own: Vec<Value> = rules.iter().filter(|rule| device(rule).as_deref() == Some(ip.as_str())).cloned().collect();
+        let fallback = own.iter().position(|rule| rule["ruleTag"].as_str().is_some_and(|tag|
+            tag.strip_prefix(&format!("device:{ip}:VPN")).is_some_and(|suffix| suffix.is_empty() || suffix.starts_with('|'))));
+        if let Some(index) = fallback {
+            let vpn = own[index].clone();
+            let tag = vpn["ruleTag"].as_str().unwrap_or("");
+            let bypass = vpn["outboundTag"] == "direct" && !tag.ends_with("|split") && !tag.ends_with("|selector");
+            if bypass { result.push(vpn.clone()); }
+            result.extend(own.into_iter().enumerate().filter_map(|(i, rule)| (i != index).then_some(rule)));
+            if !bypass { result.push(vpn); }
+        } else { result.extend(own); }
+    }
+    result.extend(rules.iter().filter(|rule| device(rule).is_none() && rule["ruleTag"].as_str().is_some()).cloned());
+    *rules = result;
 }
 
 // An earlier unconditional per-host rule wins for both transports. Keep the

@@ -698,7 +698,7 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
       if (!Array.isArray(before)) throw new Error('Правила Xray не найдены')
       const after = change(before)
       if (!Array.isArray(after)) throw new Error('Не удалось изменить общие правила')
-      return applyEdits(content, modify(content, ['routing', 'rules'], after, { formattingOptions: { insertSpaces: true, tabSize: 2 } }))
+      return applyEdits(content, modify(content, ['routing', 'rules'], normalizeDevicePriority(after), { formattingOptions: { insertSpaces: true, tabSize: 2 } }))
     }, 'Общая маршрутизация применена')
   }
 
