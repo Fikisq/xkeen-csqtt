@@ -149,7 +149,7 @@ export function WdttPlusSettings({ onBack, onRefresh }: { onBack: () => void; on
     </div>
     <p className="text-muted-foreground text-xs">Порт WireGuard здесь справочный: рабочую конфигурацию клиент получает от сервера через GETCONF. Пароль и хеши сохраняются с доступом только для root и не возвращаются в панель.</p>
     {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
-    </div><div className="bg-card flex shrink-0 justify-end gap-2 border-t pt-3 pb-1">
+    </div><div className="bg-card relative z-10 -mx-5 flex shrink-0 justify-end gap-2 border-t px-5 py-4">
       <Button variant="outline" onClick={onBack}>Назад</Button>
       <Button disabled={pending || !valid} onClick={() => void save()}>Сохранить</Button>
       {restartRequired && <Button disabled={pending || !!password} onClick={() => void apply()}>Применить</Button>}

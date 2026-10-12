@@ -52,7 +52,7 @@ pub fn find_init_file(log_enabled: bool) -> Option<String> {
     final_path
 }
 
-async fn resolve_init_file(state: &AppState) -> Result<String, String> {
+pub(crate) async fn resolve_init_file(state: &AppState) -> Result<String, String> {
     if let Some(path) = state.init_file.read().unwrap().clone() {
         if Path::new(&path).exists() {
             return Ok(path);
@@ -244,7 +244,7 @@ pub async fn get_control(State(state): State<AppState>) -> impl IntoResponse {
     )
 }
 
-async fn check_core_config(core: &str) -> Result<(), String> {
+pub(crate) async fn check_core_config(core: &str) -> Result<(), String> {
     if core == "xray" {
         fs::create_dir_all(XRAY_CONF_DIR).await.map_err(|e| e.to_string())?;
         let has_json = std::fs::read_dir(XRAY_CONF_DIR)
@@ -299,6 +299,11 @@ async fn check_core_config(core: &str) -> Result<(), String> {
 
 pub async fn post_control(State(state): State<AppState>, Json(req): Json<ControlReq>) -> impl IntoResponse {
     match req.action.as_str() {
+        "stopAll" | "startAll" => {
+            if let Err(error) = crate::service_lifecycle::control(&state, req.action == "startAll").await {
+                return Json(ApiResponse { success: false, error: Some(error), data: None });
+            }
+        }
         "switchCore" => {
             let old = state.core.read().unwrap().name.clone();
             if old == req.core {

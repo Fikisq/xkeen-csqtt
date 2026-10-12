@@ -213,7 +213,7 @@ pub async fn status() -> Json<Value> {
 }
 
 #[derive(Deserialize)]
-pub struct ControlRequest { action: String }
+pub struct ControlRequest { pub(crate) action: String }
 
 pub async fn control(Json(request): Json<ControlRequest>) -> Json<Value> {
     static CONTROL_GATE: OnceLock<Semaphore> = OnceLock::new();

@@ -2247,6 +2247,7 @@ proxy_stop() {
         trap '_release_proxy_mutex; trap - INT TERM HUP' INT TERM HUP
     fi
     rm -f "/tmp/xkeen_ready"
+    clean_firewall
     if ! proxy_status; then
         echo -e "  Прокси-клиент ${red}не запущен${reset}"
         cleanup_fd_monitor

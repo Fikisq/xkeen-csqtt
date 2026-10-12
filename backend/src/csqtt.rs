@@ -304,7 +304,7 @@ pub async fn restart() -> Json<Value> {
 
 #[derive(Deserialize)]
 pub struct ControlRequest {
-    action: String,
+    pub(crate) action: String,
 }
 
 pub async fn control(Json(request): Json<ControlRequest>) -> Json<Value> {
@@ -356,7 +356,7 @@ pub async fn control(Json(request): Json<ControlRequest>) -> Json<Value> {
     }
 }
 
-fn starter_running() -> bool {
+pub(crate) fn starter_running() -> bool {
     let pid = std::fs::read_to_string("/var/run/csqtt.pid").ok()
         .and_then(|text| text.trim().parse::<u32>().ok());
     pid.is_some_and(|pid| {

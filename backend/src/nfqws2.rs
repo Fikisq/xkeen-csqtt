@@ -516,7 +516,7 @@ pub async fn latency_probe() -> Result<u32, &'static str> {
 }
 
 #[derive(Deserialize)]
-pub struct ControlRequest { action: String }
+pub struct ControlRequest { pub(crate) action: String }
 
 pub async fn control(State(_state): State<AppState>, Json(request): Json<ControlRequest>) -> Json<Value> {
     let _guard = SETTINGS_LOCK.get_or_init(|| Mutex::new(())).lock().await;

@@ -23,6 +23,7 @@ mod node_metadata;
 mod nfqws2;
 mod ruleset_inspector;
 mod settings;
+mod service_lifecycle;
 mod subscription;
 mod types;
 mod updater;

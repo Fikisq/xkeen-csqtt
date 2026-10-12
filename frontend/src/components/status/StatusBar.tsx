@@ -72,7 +72,7 @@ export function StatusBar({
 
   async function startService() {
     setPending('Запуск сервиса...')
-    const result = await apiCall<any>('POST', 'control', { action: 'start' })
+    const result = await apiCall<any>('POST', 'control', { action: 'startAll' })
     showToast(result.success ? 'XKeen запущен' : `${result.output || result.error}`, result.success ? 'success' : 'error')
     dispatch({ type: 'SET_SERVICE_STATUS', status: result.success ? 'running' : 'stopped' })
     if (result.success) {
@@ -82,9 +82,9 @@ export function StatusBar({
   }
 
   async function stopService() {
-    setPending('Остановка сервиса...')
-    const result = await apiCall<any>('POST', 'control', { action: 'stop' })
-    showToast(result.success ? 'XKeen остановлен' : `${result.output || result.error}`, result.success ? 'success' : 'error')
+    setPending('Остановка всех сервисов...')
+    const result = await apiCall<any>('POST', 'control', { action: 'stopAll' })
+    showToast(result.success ? 'Все сервисы остановлены, обычный режим' : `${result.output || result.error}`, result.success ? 'success' : 'error')
     onRefreshStatus()
   }
 
@@ -151,7 +151,7 @@ export function StatusBar({
                     <TooltipContent>Запустить</TooltipContent>
                   </Tooltip>
                 )}
-                {isRunning && (
+                {(isRunning || serviceStatus === 'stopped') && (
                   <Tooltip>
                     <TooltipTrigger render={
                       <Button
@@ -164,7 +164,7 @@ export function StatusBar({
                         {isPending ? <Spinner className="text-muted-foreground" /> : <IconPlayerStopFilled />}
                       </Button>
                     } />
-                    <TooltipContent>Остановить</TooltipContent>
+                    <TooltipContent>Остановить все сервисы и вернуть обычный режим</TooltipContent>
                   </Tooltip>
                 )}
               </>
