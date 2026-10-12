@@ -3,7 +3,7 @@ const categoryNames: Record<string, string> = {
   private: 'Локальные сети', 'category-ru-all': 'Российские сайты',
   'category-ru-whitelist': 'Белый список РФ', ru: 'Россия', 'ru-banks': 'Банки РФ',
   youtube: 'YouTube', telegram: 'Telegram', openai: 'OpenAI', anthropic: 'Anthropic',
-  perplexity: 'Perplexity', github: 'GitHub',
+  perplexity: 'Perplexity', github: 'GitHub', 'category-ads': 'Реклама VK / Mail.ru',
 }
 export function geoCategoryLabel(category: string): string {
   return categoryNames[category.toLowerCase()] ?? category.toLowerCase()

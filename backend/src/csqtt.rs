@@ -117,7 +117,6 @@ pub async fn settings() -> Json<Value> {
             "turnSubnet": value(&content, "TURN_SUBNET").unwrap_or_default(),
             "turnIpLimit": number(&content, "TURN_IP_LIMIT").unwrap_or(8),
             "customTurnIps": value(&content, "CUSTOM_TURN_IPS").unwrap_or_default(),
-            "bootstrapDns": value(&content, "BOOTSTRAP_DNS").unwrap_or_else(|| "yandex".into()),
             "turnPresets": serde_json::from_str::<Value>(include_str!("csqtt_turn_presets.json")).unwrap_or(json!([])),
             "hasPassword": value(&content, "PASSWORD").is_some_and(|v| !v.is_empty()),
             "hasVkToken": tokio::fs::metadata(VK_TOKEN).await.is_ok_and(|m| m.len() > 0),
@@ -147,8 +146,6 @@ pub struct SettingsRequest {
     turn_ip_limit: Option<u32>,
     #[serde(rename = "customTurnIps")]
     custom_turn_ips: Option<String>,
-    #[serde(rename = "bootstrapDns")]
-    bootstrap_dns: Option<String>,
     #[serde(rename = "manualHashes")]
     manual_hashes: Option<String>,
 }
@@ -218,16 +215,7 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
     }
     parsed_turn_ips.truncate(turn_ip_limit as usize);
     let custom_turn_ips = parsed_turn_ips.iter().map(ToString::to_string).collect::<Vec<_>>().join(",");
-    let bootstrap_dns = request.bootstrap_dns.clone().unwrap_or_else(|| value(&content, "BOOTSTRAP_DNS").unwrap_or_else(|| "yandex".into()));
-    if !matches!(bootstrap_dns.as_str(), "system" | "yandex" | "cloudflare" | "google") {
-        let ips: Vec<_> = bootstrap_dns.split(',').map(str::trim).collect();
-        if apk_client && ips.iter().any(|ip| ip.parse::<std::net::Ipv4Addr>().is_err()) {
-            return Json(json!({ "success": false, "error": "DNS для клиента из APK: укажите один-два IPv4 адреса" }));
-        }
-        if ips.is_empty() || ips.len() > 2 || ips.iter().any(|ip| ip.parse::<std::net::IpAddr>().map_or(true, |ip| ip.is_unspecified() || ip.is_multicast())) {
-            return Json(json!({ "success": false, "error": "DNS для VK: выберите провайдера или укажите один-два IP через запятую" }));
-        }
-    }
+    let bootstrap_dns = String::from("system");
     let peer = request.peer.as_deref().unwrap_or("").trim();
     if !peer.is_empty() {
         let Some((host, port)) = peer.rsplit_once(':') else {

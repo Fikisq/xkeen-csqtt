@@ -77,7 +77,6 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
   const [csqttTurnSubnet, setCsqttTurnSubnet] = useState('')
   const [csqttTurnIpLimit, setCsqttTurnIpLimit] = useState('8')
   const [csqttCustomTurnIps, setCsqttCustomTurnIps] = useState('')
-  const [csqttBootstrapDns, setCsqttBootstrapDns] = useState('yandex')
   const [csqttTurnPresets, setCsqttTurnPresets] = useState<{ id: string; title: string; ips: string[] }[]>([])
   const [pingingTurn, setPingingTurn] = useState(false)
   const [turnPickerOpen, setTurnPickerOpen] = useState(false)
@@ -99,7 +98,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
   const [savingCsqtt, setSavingCsqtt] = useState(false)
   const [generatingCsqtt, setGeneratingCsqtt] = useState(false)
   const [csqttRestartRequired, setCsqttRestartRequired] = useState(false)
-  const [csqttSavedValues, setCsqttSavedValues] = useState({ hashes: 4, workers: 81, peer: '', hashMode: 'auto_js', obfs: 'audio', turnTransport: 'udp', turnSubnet: '', turnIpLimit: '8', customTurnIps: '', bootstrapDns: 'yandex' })
+  const [csqttSavedValues, setCsqttSavedValues] = useState({ hashes: 4, workers: 81, peer: '', hashMode: 'auto_js', obfs: 'audio', turnTransport: 'udp', turnSubnet: '', turnIpLimit: '8', customTurnIps: '' })
   const csqttApkClient = csqttClientVersion === '2.5.0-apk-router'
   const validCsqttNumbers = Number.isInteger(Number(csqttHashes)) && Number(csqttHashes) >= 1 && Number(csqttHashes) <= 6
     && Number.isInteger(Number(csqttWorkers)) && (csqttApkClient
@@ -137,7 +136,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
   async function openCsqttSettings() {
     setCsqttError('')
     try {
-      const result = await apiCall<{ success: boolean; hashes?: number; workers?: number; peer?: string; hashMode?: string; obfs?: string; turnTransport?: string; turnSubnet?: string; turnIpLimit?: number; customTurnIps?: string; bootstrapDns?: string; turnPresets?: { id: string; title: string; ips: string[] }[]; hasPassword?: boolean; hasVkToken?: boolean; hasManualHashes?: boolean; clientVersion?: string; error?: string }>('GET', 'csqtt/settings')
+      const result = await apiCall<{ success: boolean; hashes?: number; workers?: number; peer?: string; hashMode?: string; obfs?: string; turnTransport?: string; turnSubnet?: string; turnIpLimit?: number; customTurnIps?: string; turnPresets?: { id: string; title: string; ips: string[] }[]; hasPassword?: boolean; hasVkToken?: boolean; hasManualHashes?: boolean; clientVersion?: string; error?: string }>('GET', 'csqtt/settings')
       if (!result.success || !result.hashes || !result.workers) throw new Error(result.error || 'Не удалось прочитать параметры CSQTT')
       setCsqttHashes(String(result.hashes))
       setCsqttClientVersion(result.clientVersion ?? '2.0')
@@ -149,7 +148,6 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
       setCsqttTurnSubnet(result.turnSubnet ?? '')
       setCsqttTurnIpLimit(String(result.turnIpLimit ?? 8))
       setCsqttCustomTurnIps(result.customTurnIps ?? '')
-      setCsqttBootstrapDns(result.bootstrapDns ?? 'yandex')
       setCsqttTurnPresets(result.turnPresets ?? [])
       setCsqttPassword('')
       setCsqttVkToken('')
@@ -159,7 +157,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
       setCsqttLinkParsed(false)
       setCsqttHasPassword(!!result.hasPassword)
       setCsqttHasVkToken(!!result.hasVkToken)
-      setCsqttSavedValues({ hashes: result.hashes, workers: result.workers, peer: result.peer ?? '', hashMode: result.hashMode ?? 'auto_js', obfs: result.obfs ?? 'audio', turnTransport: result.turnTransport ?? 'udp', turnSubnet: result.turnSubnet ?? '', turnIpLimit: String(result.turnIpLimit ?? 8), customTurnIps: result.customTurnIps ?? '', bootstrapDns: result.bootstrapDns ?? 'yandex' })
+      setCsqttSavedValues({ hashes: result.hashes, workers: result.workers, peer: result.peer ?? '', hashMode: result.hashMode ?? 'auto_js', obfs: result.obfs ?? 'audio', turnTransport: result.turnTransport ?? 'udp', turnSubnet: result.turnSubnet ?? '', turnIpLimit: String(result.turnIpLimit ?? 8), customTurnIps: result.customTurnIps ?? '' })
       setEditingCsqtt(true)
     } catch (error) { setCsqttError(error instanceof Error ? error.message : 'Ошибка CSQTT') }
   }
@@ -171,11 +169,11 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
       const result = await apiCall<{ success: boolean; error?: string }>('PUT', 'csqtt/settings', {
         hashes: Number(csqttHashes), workers: Number(csqttWorkers), peer: csqttPeer.trim(),
         password: csqttPassword, vkToken: csqttVkToken.trim(), hashMode: csqttHashMode,
-        obfs: csqttObfs, turnTransport: csqttTurnTransport, turnSubnet: csqttTurnSubnet, turnIpLimit: Number(csqttTurnIpLimit), customTurnIps: csqttCustomTurnIps.trim(), bootstrapDns: csqttBootstrapDns.trim(), manualHashes: csqttManualHashes.trim(),
+        obfs: csqttObfs, turnTransport: csqttTurnTransport, turnSubnet: csqttTurnSubnet, turnIpLimit: Number(csqttTurnIpLimit), customTurnIps: csqttCustomTurnIps.trim(), manualHashes: csqttManualHashes.trim(),
       })
       if (!result.success) throw new Error(result.error || 'Не удалось сохранить параметры CSQTT')
       setCsqttRestartRequired(true)
-      setCsqttSavedValues({ hashes: Number(csqttHashes), workers: Number(csqttWorkers), peer: csqttPeer.trim(), hashMode: csqttHashMode, obfs: csqttObfs, turnTransport: csqttTurnTransport, turnSubnet: csqttTurnSubnet, turnIpLimit: csqttTurnIpLimit, customTurnIps: csqttCustomTurnIps.trim(), bootstrapDns: csqttBootstrapDns.trim() })
+      setCsqttSavedValues({ hashes: Number(csqttHashes), workers: Number(csqttWorkers), peer: csqttPeer.trim(), hashMode: csqttHashMode, obfs: csqttObfs, turnTransport: csqttTurnTransport, turnSubnet: csqttTurnSubnet, turnIpLimit: csqttTurnIpLimit, customTurnIps: csqttCustomTurnIps.trim() })
       if (csqttPassword) setCsqttHasPassword(true)
       if (csqttVkToken) setCsqttHasVkToken(true)
       if (csqttManualHashes.trim()) setCsqttHasManualHashes(true)
@@ -429,14 +427,8 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
             </div>
             {csqttTurnSubnet && <label className="text-sm font-medium">Использовать до IP<Input type="number" min="1" max="256" value={csqttTurnIpLimit} onChange={(event) => setCsqttTurnIpLimit(event.target.value)} /></label>}
             {csqttTurnSubnet === 'custom' && <label className="text-sm font-medium md:col-span-2">IP серверов TURN<Input value={csqttCustomTurnIps} onChange={(event) => setCsqttCustomTurnIps(event.target.value)} placeholder="IP-адреса через запятую, без портов" /></label>}
-            <label className="text-sm font-medium">DNS для подключения к VK
-              <select className="bg-input-background border-border mt-1 h-9 w-full rounded-md border px-2 text-sm" value={['system', 'yandex', 'cloudflare', 'google'].includes(csqttBootstrapDns) ? csqttBootstrapDns : 'custom'} onChange={(event) => setCsqttBootstrapDns(event.target.value === 'custom' ? '' : event.target.value)}>
-                <option value="yandex">Яндекс</option><option value="system">DNS роутера</option><option value="cloudflare">Cloudflare</option><option value="google">Google</option><option value="custom">Свои DNS</option>
-              </select>
-            </label>
-            {!['system', 'yandex', 'cloudflare', 'google'].includes(csqttBootstrapDns) && <label className="text-sm font-medium">Адреса DNS<Input value={csqttBootstrapDns} onChange={(event) => setCsqttBootstrapDns(event.target.value)} placeholder="Один-два IP через запятую" /></label>}
           </div>
-          <p className="text-muted-foreground text-xs">Наборы TURN взяты из APK 2.5.0. Выбор набора доступен для UDP; адреса распределяются между потоками. DNS выше используется для подключения к VK и TURN. DNS интернет-трафика выбирается на сервере CSQTT, а сайты и устройства — в маршрутизации роутера.</p>
+          <p className="text-muted-foreground text-xs">Наборы TURN взяты из APK 2.5.0. Выбор набора доступен для UDP; адреса распределяются между потоками. Адреса VK и TURN определяются автоматически. DNS интернет-трафика выбирается на сервере CSQTT, а сайты и устройства — в маршрутизации роутера.</p>
           <p className="text-muted-foreground text-xs">Лимит IP ограничивает используемую часть набора. Например, 64 разрешает все 64 адреса; число одновременных подключений задаётся полем «Потоки».</p>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-muted-foreground text-xs">ARM64:</span>
@@ -454,7 +446,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
           {csqttHashMode === 'auto_api' && <p className="text-muted-foreground text-xs">Авто API создаст {Math.ceil(Number(csqttWorkers) / 27)} звонка(ов) для {csqttWorkers} потоков: один звонок на каждые 27 потоков. Значение поля «Хеши» в этом режиме не используется. Нужен сохранённый VK-токен.</p>}
           {csqttClientVersion.startsWith('2.1.9') && csqttHashMode === 'auto_js' && <p className="text-muted-foreground text-xs">Авто ВК создаёт один звонок и распределяет потоки по учётным данным этого звонка. Поле «Хеши» не используется.</p>}
           {csqttApkClient && csqttHashMode === 'auto_js' && <p className="text-muted-foreground text-xs">Авто ВК использует сохранённый токен; звонки создаёт оригинальный клиент 2.5.0. При обычной остановке ему отправляется команда завершить звонки. После аварийного отключения завершение не гарантируется.</p>}{csqttError && <p role="alert" className="text-sm text-red-500">{csqttError}</p>}
-          <div className="bg-card sticky bottom-0 flex justify-end gap-2 border-t pt-3 pb-1"><Button variant="outline" onClick={() => setEditingCsqtt(false)}>Назад</Button><Button disabled={savingCsqtt || !validCsqttNumbers || !csqttPeer.trim() || (csqttHashMode === 'manual' && !csqttHasManualHashes && !csqttManualHashes.trim())} onClick={saveCsqttSettings}>Сохранить</Button>{csqttRestartRequired && <Button disabled={savingCsqtt || Number(csqttHashes) !== csqttSavedValues.hashes || Number(csqttWorkers) !== csqttSavedValues.workers || csqttPeer.trim() !== csqttSavedValues.peer || csqttHashMode !== csqttSavedValues.hashMode || csqttObfs !== csqttSavedValues.obfs || csqttTurnTransport !== csqttSavedValues.turnTransport || csqttTurnSubnet !== csqttSavedValues.turnSubnet || csqttTurnIpLimit !== csqttSavedValues.turnIpLimit || csqttCustomTurnIps.trim() !== csqttSavedValues.customTurnIps || csqttBootstrapDns.trim() !== csqttSavedValues.bootstrapDns || !!csqttPassword || !!csqttVkToken || !!csqttManualHashes} onClick={restartCsqtt}>Применить</Button>}</div>
+          <div className="bg-card sticky bottom-0 flex justify-end gap-2 border-t pt-3 pb-1"><Button variant="outline" onClick={() => setEditingCsqtt(false)}>Назад</Button><Button disabled={savingCsqtt || !validCsqttNumbers || !csqttPeer.trim() || (csqttHashMode === 'manual' && !csqttHasManualHashes && !csqttManualHashes.trim())} onClick={saveCsqttSettings}>Сохранить</Button>{csqttRestartRequired && <Button disabled={savingCsqtt || Number(csqttHashes) !== csqttSavedValues.hashes || Number(csqttWorkers) !== csqttSavedValues.workers || csqttPeer.trim() !== csqttSavedValues.peer || csqttHashMode !== csqttSavedValues.hashMode || csqttObfs !== csqttSavedValues.obfs || csqttTurnTransport !== csqttSavedValues.turnTransport || csqttTurnSubnet !== csqttSavedValues.turnSubnet || csqttTurnIpLimit !== csqttSavedValues.turnIpLimit || csqttCustomTurnIps.trim() !== csqttSavedValues.customTurnIps || !!csqttPassword || !!csqttVkToken || !!csqttManualHashes} onClick={restartCsqtt}>Применить</Button>}</div>
         </div> : <div className="space-y-4">
           {CORES.map((core, i) => {
             const isActive = currentCore === core.id

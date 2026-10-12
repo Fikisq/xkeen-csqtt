@@ -1,3 +1,4 @@
+import defaultRoutes from '../../../backend/src/routing-template.json'
 type XrayOutbound = { tag: string; protocol: string; [key: string]: unknown }
 type XrayConfig = {
   inbounds?: unknown[]
@@ -101,14 +102,7 @@ function starterConfig(outbounds: XrayOutbound[]): XrayConfig {
       balancers: [{ tag: 'auto-vpn', selector: [MANAGED_PREFIX], fallbackTag: 'direct', strategy: { type: 'roundRobin' } }],
       rules: [
         { type: 'field', ip: ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16', '127.0.0.0/8', '169.254.0.0/16', 'fc00::/7', 'fe80::/10'], outboundTag: 'direct' },
-        { type: 'field', protocol: ['bittorrent'], outboundTag: 'direct' },
-        { type: 'field', ruleTag: 'Youtube|selector', domain: ['domain:youtube.com', 'domain:youtu.be', 'domain:googlevideo.com', 'domain:ytimg.com'], balancerTag: 'auto-vpn' },
-        { type: 'field', ruleTag: 'Discord|selector', domain: ['domain:discord.com', 'domain:discord.gg', 'domain:discordapp.com'], balancerTag: 'auto-vpn' },
-        { type: 'field', ruleTag: 'Games|selector', domain: ['domain:steampowered.com', 'domain:steamcommunity.com', 'domain:epicgames.com', 'domain:riotgames.com'], balancerTag: 'auto-vpn' },
-        { type: 'field', ruleTag: 'AI|selector', domain: ['domain:openai.com', 'domain:chatgpt.com'], balancerTag: 'auto-vpn' },
-        { type: 'field', ruleTag: 'Github|selector', domain: ['domain:github.com', 'domain:githubusercontent.com'], balancerTag: 'auto-vpn' },
-        { type: 'field', ruleTag: 'RU', domain: ['geosite:category-ru'], outboundTag: 'direct' },
-        { type: 'field', ruleTag: 'VPN', network: 'tcp,udp', balancerTag: 'auto-vpn' },
+        ...defaultRoutes.map(rule => rule.outboundTag ? rule : { ...rule, balancerTag: 'auto-vpn' }),
       ],
     },
   }

@@ -182,10 +182,23 @@ ensure_conntrack() {
   opkg install conntrack || printf "\n conntrack не установлен. После смены режима может понадобиться переподключить сеть устройства.\n"
 }
 
+install_geodata() {
+  if "$BIN_STAGED" --help 2>/dev/null | grep -q geodata-download; then
+    printf "\n Загрузка и проверка баз RoscomVPN и GeoSite...\n"
+    "$BIN_STAGED" geodata-download || {
+      printf "${RED_BOLD}\n Не удалось проверить базы. Установка панели остановлена.${NCN}"
+      exit 1
+    }
+  else
+    printf "\n Этот релиз панели ещё не поддерживает автоматическую установку геобаз.\n"
+  fi
+}
+
 install_xkeenui() {
   ensure_conntrack
   [ -f "/opt/tmp/xkeen-ui-$ARCH" ] && LOCAL=true
   download_files
+  install_geodata
   install_nfqws2
   if [[ -d $STATIC_DIR || -f $XKEENUI_BIN || -f $XKEENUI_INIT || -f $LIGHTTPD_CONF ]]; then
     printf "${YELLOW}\n Обнаружены файлы XKeen UI, запуск переустановки...\n${NC}"
@@ -212,6 +225,7 @@ update_xkeenui() {
   [ -f "$XKEENUI_BIN" ] || { printf "${ERROR} Ошибка: XKeen UI не установлен!${NCN}"; exit 1; }
   [ -f "/opt/tmp/xkeen-ui-$ARCH" ] && LOCAL=true
   download_files
+  install_geodata
   install_nfqws2
 
   printf "${INFO} Начинаем обновление...${NCN}"

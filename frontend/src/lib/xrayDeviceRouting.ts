@@ -46,7 +46,7 @@ export function isFullBypass(rule?: RoutingRule): boolean {
 export function normalizeDevicePriority(rules: RoutingRule[]): RoutingRule[] {
   const deviceIp = (rule: RoutingRule) => /^device:([^:]+):/.exec(baseRuleTag(rule))?.[1]
   const vpnTag = (ip: string) => deviceRuleTag(ip, 'VPN')
-  const locked = (rule?: RoutingRule) => isFullBypass(rule) || ['csqtt', 'wdtt-plus'].includes(rule?.outboundTag ?? '')
+  const locked = (rule?: RoutingRule) => isFullBypass(rule)
   const managed = new Set([...routeTags(rules), RU_IP_TAG])
   const unmanaged = rules.filter((rule) => !deviceIp(rule) && !managed.has(baseRuleTag(rule)))
   const devices = [...new Set(rules.map(deviceIp).filter((ip): ip is string => !!ip))]
@@ -224,23 +224,6 @@ export function updateGlobalRules(rules: RoutingRule[], route: RouteTag, selecti
     })
     const vpnRule = updated.find((rule) => baseRuleTag(rule) === 'VPN')!
     const otherRules = updated.filter((rule) => baseRuleTag(rule) !== 'VPN')
-    if (selection.toLowerCase() === 'csqtt' || selection.toLowerCase() === 'wdtt-plus') {
-      // Keep explicit device-wide bypasses and local-network exclusions. The
-      // tunnel selector must precede service and RU rules so every other
-      // device uses the tunnel regardless of its old per-service choices.
-      const bypassIps = new Set(updated.flatMap((rule) => {
-        const match = /^device:([^:]+):VPN$/.exec(baseRuleTag(rule))
-        return match && isFullBypass(rule) ? [match[1]] : []
-      }))
-      const exempt = (rule: RoutingRule) => {
-        const tag = baseRuleTag(rule)
-        const deviceMatch = /^device:([^:]+):/.exec(tag)
-        return rule.outboundTag === 'direct' && (
-          (!!deviceMatch && bypassIps.has(deviceMatch[1])) || (!tag && Array.isArray(rule.ip) && rule.ip.length > 0)
-        )
-      }
-      return [...otherRules.filter(exempt), vpnRule, ...otherRules.filter((rule) => !exempt(rule))]
-    }
     return [...otherRules, vpnRule]
   }
   return updated
@@ -253,7 +236,7 @@ export function updateDeviceRules(rules: RoutingRule[], ip: string, route: Route
   if (route === 'VPN' && !readDeviceIps(rules).includes(ip)) {
     let seeded = rules
     for (const category of routeTags(rules).filter((tag) => tag !== 'VPN')) {
-      if (rules.some((rule) => baseRuleTag(rule) === category)) seeded = updateDeviceRules(seeded, ip, category, category === 'RU' || category === RU_IP_TAG ? 'direct' : '@selector')
+      if (rules.some((rule) => baseRuleTag(rule) === category)) seeded = updateDeviceRules(seeded, ip, category, rules.find(rule => baseRuleTag(rule) === category)?.outboundTag === 'block' ? 'block' : category === 'RU' || category === RU_IP_TAG ? 'direct' : '@selector')
     }
     return updateDeviceRules(seeded, ip, 'VPN', outboundTag)
   }
@@ -281,6 +264,7 @@ export function updateDeviceRules(rules: RoutingRule[], ip: string, route: Route
     ...(global.xkeenRouteGroup ? { xkeenRouteGroup: global.xkeenRouteGroup } : {}),
     ruleTag: tag + (linked ? '|selector' : nfqws2 ? '|nfqws2' : bypass ? '|bypass' : route === 'VPN' && outboundTag === 'direct' ? '|split' : ''),
     sourceIP: [ip],
+    ...(global.network ? { network: global.network } : {}),
     ...(route === 'VPN' ? { network: 'tcp,udp' } : Array.isArray(global.ip) && !Array.isArray(global.domain) ? { ip: global.ip } : { domain: global.domain }),
     ...target,
   }
@@ -298,24 +282,6 @@ export function updateDeviceRules(rules: RoutingRule[], ip: string, route: Route
   if (bypass || nfqws2) return normalizeDevicePriority(updated)
   updated = updated.map((rule) => usesSelector(rule) && baseRuleTag(rule).startsWith(devicePrefix)
     ? { ...rule, outboundTag: undefined, balancerTag: undefined, ...target } : rule)
-  if (outboundTag.toLowerCase() === 'csqtt' || outboundTag.toLowerCase() === 'wdtt-plus') {
-    // The device selector must match before both its service rules and the
-    // global service rules. Keep explicit device bypasses and LAN exclusions.
-    const vpnRule = updated.find((rule) => baseRuleTag(rule) === tag)!
-    const remaining = updated.filter((rule) => baseRuleTag(rule) !== tag)
-    const bypassIps = new Set(remaining.flatMap((rule) => {
-      const match = /^device:([^:]+):VPN$/.exec(baseRuleTag(rule))
-      return match && isFullBypass(rule) ? [match[1]] : []
-    }))
-    const exempt = (rule: RoutingRule) => {
-      const name = baseRuleTag(rule)
-      const deviceMatch = /^device:([^:]+):/.exec(name)
-      return rule.outboundTag === 'direct' && (
-        (!!deviceMatch && bypassIps.has(deviceMatch[1])) || (!name && Array.isArray(rule.ip) && rule.ip.length > 0)
-      )
-    }
-    return [...remaining.filter(exempt), vpnRule, ...remaining.filter((rule) => !exempt(rule))]
-  }
   // A device fallback follows its service rules and precedes the global fallback.
   const vpnRule = updated.find((rule) => baseRuleTag(rule) === tag)!
   const withoutVpn = updated.filter((rule) => baseRuleTag(rule) !== tag)

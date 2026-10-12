@@ -11,6 +11,7 @@ use tokio::{io::AsyncWriteExt, process::Command, sync::Mutex};
 const CONFIG_FILE: &str = "/opt/etc/xray/configs/00_config.json";
 const API_LISTEN: &str = "127.0.0.1:18085";
 static ROUTE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+pub(crate) fn routing_lock() -> &'static Mutex<()> { ROUTE_LOCK.get_or_init(|| Mutex::new(())) }
 
 #[derive(Deserialize)]
 pub struct ApplyRoutesRequest {
@@ -25,7 +26,7 @@ fn routing_api_enabled(config: &Value) -> bool {
             .is_some_and(|services| services.iter().any(|service| service.as_str() == Some("RoutingService")))
 }
 
-async fn replace_live_rules(config: &Value) -> Result<(), String> {
+pub(crate) async fn replace_live_rules(config: &Value) -> Result<(), String> {
     let mut runtime = crate::xray_subscription_refresh::live::runtime_config(config).await?;
     omit_shadowed_device_rules(&mut runtime);
     let config = &runtime;

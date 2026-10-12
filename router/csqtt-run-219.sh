@@ -23,7 +23,7 @@ set -- "$DIR/csqtt-client" \
     --captcha-mode "${CSQTT_CAPTCHA_MODE:-$CAPTCHA_MODE}" \
     --tun-uds csqtt_router_tun_uds
 
-set -- "$@" --bootstrap-dns "${BOOTSTRAP_DNS:-yandex}"
+set -- "$@" --bootstrap-dns system
 if [ -n "${CUSTOM_TURN_IPS:-}" ]; then
     set -- "$@" --custom-turn-ips "$CUSTOM_TURN_IPS"
 fi

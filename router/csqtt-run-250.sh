@@ -126,45 +126,11 @@ trap stop_native_client HUP INT TERM
 # Always use the latest panel setting. The system resolver is only read and
 # copied in system mode; all writes remain in the client-private directory.
 RESOLVER_TMP=/opt/csqtt250/resolv.conf.tmp.$$
-case "${BOOTSTRAP_DNS:-yandex}" in
-    yandex) RESOLVER_IPS='77.88.8.8,77.88.8.1' ;;
-    cloudflare) RESOLVER_IPS='1.1.1.1,1.0.0.1' ;;
-    google) RESOLVER_IPS='8.8.8.8,8.8.4.4' ;;
-    system) RESOLVER_IPS='' ;;
-    *) RESOLVER_IPS=$BOOTSTRAP_DNS ;;
-esac
-if [ "${BOOTSTRAP_DNS:-yandex}" = system ]; then
-    cp /etc/resolv.conf "$RESOLVER_TMP" || {
-        echo "не удалось прочитать системный DNS для частного resolver CSQTT" >&2
-        stop_native_client 1
-    }
-else
-    # Accept one or two canonical IPv4 addresses. Private/loopback DNS is valid;
-    # unspecified and multicast addresses cannot be DNS destinations.
-    printf '%s\n' "$RESOLVER_IPS" | awk '
-        {
-            if (NR != 1) exit 1
-            count = split($0, ips, ",")
-            if (count < 1 || count > 2) exit 1
-            for (i = 1; i <= count; i++) {
-                sub(/^[ \t]+/, "", ips[i])
-                sub(/[ \t]+$/, "", ips[i])
-                if (split(ips[i], octets, /[.]/) != 4) exit 1
-                for (j = 1; j <= 4; j++) {
-                    if (octets[j] !~ /^[0-9]+$/ || length(octets[j]) > 3 ||
-                        (length(octets[j]) > 1 && substr(octets[j], 1, 1) == "0") ||
-                        octets[j] + 0 > 255) exit 1
-                }
-                if (ips[i] == "0.0.0.0" || (octets[1] + 0 >= 224 && octets[1] + 0 <= 239)) exit 1
-                output[i] = "nameserver " ips[i]
-            }
-            for (i = 1; i <= count; i++) print output[i]
-        }
-    ' > "$RESOLVER_TMP" || {
-        echo "DNS для VK: выберите провайдера или укажите один-два IPv4 через запятую" >&2
-        stop_native_client 1
-    }
-fi
+# DNS before the tunnel is automatic; internet DNS is supplied by the server.
+cp /etc/resolv.conf "$RESOLVER_TMP" || {
+    echo "не удалось прочитать системный DNS для частного resolver CSQTT" >&2
+    stop_native_client 1
+}
 chmod 600 "$RESOLVER_TMP" && mv -f "$RESOLVER_TMP" /opt/csqtt250/resolv.conf || {
     echo "не удалось атомарно обновить частный resolver CSQTT" >&2
     stop_native_client 1
@@ -195,7 +161,7 @@ set -- "$DIR/csqtt-client" \
     --tun-uds csqtt_router_tun_uds
 
 # The original APK client has no --bootstrap-dns option.
-# A private resolver file is regenerated from BOOTSTRAP_DNS on every launch.
+# The private resolver follows the router on every launch.
 if [ -n "${CUSTOM_TURN_IPS:-}" ]; then
     set -- "$@" --custom-turn-ips "$CUSTOM_TURN_IPS"
 fi

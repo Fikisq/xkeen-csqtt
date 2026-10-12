@@ -1,0 +1,8 @@
+[
+  {"type":"field","ruleTag":"custom:Реклама VK","network":"tcp,udp","domain":["ext:roscomvpn-geosite.dat:category-ads"],"outboundTag":"block"},
+  {"type":"field","ruleTag":"AI|selector","network":"tcp,udp","domain":["geosite:openai","geosite:anthropic","geosite:perplexity","domain:gemini.google.com","domain:aistudio.google.com"]},
+  {"type":"field","ruleTag":"Youtube|selector","network":"tcp","domain":["ext:roscomvpn-geosite.dat:youtube"]},
+  {"type":"field","ruleTag":"RU","network":"tcp,udp","domain":["ext:roscomvpn-geosite.dat:category-ru","ext:roscomvpn-geosite.dat:whitelist"],"outboundTag":"direct","xkeenRouteGroup":"roscomvpn-ru"},
+  {"type":"field","ruleTag":"RU_IP","network":"tcp,udp","ip":["ext:roscomvpn-geoip.dat:direct"],"outboundTag":"direct","xkeenRouteGroup":"roscomvpn-ru"},
+  {"type":"field","ruleTag":"VPN","network":"tcp,udp"}
+]

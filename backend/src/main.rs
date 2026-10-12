@@ -10,6 +10,7 @@ mod manual_hashes;
 mod wdtt_plus;
 mod frontend_embedder;
 mod geo;
+mod geodata_update;
 mod logger;
 mod latency;
 mod mihomo_latency;
@@ -71,6 +72,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Скачать и проверить базы GeoSite/GeoIP для установки панели
+    GeodataDownload,
     /// Создать init скрипт
     CreateInit,
     /// Запустить сервис (трeбуется init скрипт)
@@ -298,6 +301,13 @@ async fn main() {
 
     if let Some(command) = cli.command {
         match command {
+            Command::GeodataDownload => {
+                match geodata_update::update(None).await {
+                    Ok(value) => println!("{value}"),
+                    Err(error) => { eprintln!("{error}"); exit(1); }
+                }
+                return;
+            }
             Command::Setup => {
                 use std::os::unix::process::CommandExt;
                 let err = std::process::Command::new("sh")
@@ -445,6 +455,7 @@ async fn main() {
     };
 
     xray_subscription_refresh::start(state.clone());
+    geodata_update::start(state.clone());
     nfqws2::start_reconciler();
 
     if let Some(ref _token) = state.rci_token {
@@ -520,6 +531,7 @@ async fn main() {
         .route("/api/device-list", get(api_relay::get_device_list))
         .route("/api/update", post(updater::post_update))
         .route("/api/geo", get(geo::get_geo))
+        .route("/api/geo/template", post(geodata_update::apply_template))
         .route("/api/geo/categories", get(geo::get_geosite_categories))
         .route("/api/geo/records", get(geo::get_geo_records))
         .route("/api/geo/site", get(geo::get_geosite))

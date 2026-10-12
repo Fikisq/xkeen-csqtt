@@ -132,7 +132,7 @@ pub async fn get_geo_records(Query(params): Query<HashMap<String, String>>) -> i
 }
 
 // Validate every protobuf category and record before making a file visible to Xray.
-fn validate_uploaded_geo(data: &[u8], is_ip: bool) -> Result<(), String> {
+pub(crate) fn validate_uploaded_geo(data: &[u8], is_ip: bool) -> Result<(), String> {
     let mut list = data;
     let mut records = 0;
     while list.has_remaining() {
