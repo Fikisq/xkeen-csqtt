@@ -861,10 +861,8 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
   const isMihomo = currentCore === 'mihomo' && (!!activeClashApiPort || !!activeClashApiUnix)
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768
   const usefulLinks = [
-    { title: 'Инструкция XKeen', url: 'https://github.com/Corvus-Malus/XKeen/' },
-    { title: 'FAQ XKeen', url: 'https://jameszero.net/faq-xkeen.htm' },
+    { title: 'Инструкция панели', url: 'https://github.com/Fikisq/xkeen-csqtt#readme' },
     { title: 'Документация Xray', url: 'https://xtls.github.io/ru/config' },
-    { title: 'Документация Mihomo', url: 'https://wiki.metacubex.one/ru/config/general' },
   ]
 
   const activeRoutingDraft = routingDraft?.file === (isMihomo ? mihomoConfig?.file : xraySelectorsConfig?.file) ? routingDraft : null
