@@ -12,6 +12,7 @@ mod frontend_embedder;
 mod geo;
 mod geodata_update;
 mod logger;
+mod log_retention;
 mod latency;
 mod mihomo_latency;
 mod mihomo_subscription_refresh;
@@ -404,6 +405,7 @@ async fn main() {
         }
         let _ = std::fs::OpenOptions::new().create(true).append(true).open(path);
     }
+    log_retention::start();
 
     println!(
         "{} [INFO] Defined xray logs: access={}, error={}",

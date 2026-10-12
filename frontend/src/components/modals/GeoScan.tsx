@@ -138,9 +138,9 @@ export function GeoScanModal() {
   return (
     <Dialog open={modals.showGeoScanModal} onOpenChange={(open) => !open && close()}>
       <DialogContent
-        className="flex flex-col overflow-hidden"
+        className="flex! flex-col overflow-hidden"
         style={{
-          maxHeight: '95vh',
+          maxHeight: '95dvh',
           maxWidth: '36rem',
           width: 'calc(100vw - 2rem)',
         }}
@@ -153,7 +153,7 @@ export function GeoScanModal() {
           <DialogDescription>Найдите категории, в которые входит домен или IP. Скан не изменяет правила маршрутизации.</DialogDescription>
         </DialogHeader>
 
-        <Tabs value={geoType} onValueChange={(value) => switchType(value as GeoType)} className="shrink-0">
+        <div className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-2"><Tabs value={geoType} onValueChange={(value) => switchType(value as GeoType)} className="shrink-0">
           <TabsList className="border-border h-full! w-full! overflow-hidden rounded-lg border bg-transparent p-0">
             <TabsTrigger
               value="domain"
@@ -201,7 +201,7 @@ export function GeoScanModal() {
         </div>
 
         {/* File list — fixed height, scrollable */}
-        <ScrollArea className="border-border bg-input-background relative max-h-62.5 min-h-62.5 scrollbar-thin overflow-y-auto rounded-lg border">
+        <ScrollArea className="border-border bg-input-background relative h-[clamp(6rem,25dvh,15.625rem)] shrink-0 scrollbar-thin overflow-y-auto rounded-lg border">
           {loading ? (
             <div className="space-y-1 p-1.5">
               {Array.from({ length: 6 }).map((_, i) => (
@@ -291,7 +291,7 @@ export function GeoScanModal() {
           </InputGroupAddon>
         </InputGroup>
 
-        <DialogFooter className="shrink-0">
+        </div><DialogFooter className="shrink-0">
           <Button onClick={scan} disabled={uploading || scanning || !input.trim() || selectedFiles.length === 0} className="h-9 w-full">
             {scanning ? 'Сканирование...' : 'Сканировать'}
           </Button>

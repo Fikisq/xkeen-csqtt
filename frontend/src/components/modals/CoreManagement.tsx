@@ -384,15 +384,15 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
   return (
     <>
     <Dialog open={modals.showCoreManageModal} onOpenChange={(open) => !open && closeCurrentView()}>
-      <DialogContent showCloseButton={!editingCsqtt && !editingWdtt && !editingNfqws} className={editingCsqtt || editingWdtt || editingNfqws ? 'max-h-[95dvh] max-w-[min(96vw,900px)]! overflow-y-auto' : 'max-w-[min(96vw,760px)]!'}>
+      <DialogContent showCloseButton={!editingCsqtt && !editingWdtt && !editingNfqws} className={editingCsqtt || editingWdtt ? 'flex! max-h-[95dvh] max-w-[min(96vw,900px)]! flex-col overflow-hidden' : editingNfqws ? 'max-h-[95dvh] max-w-[min(96vw,900px)]! overflow-y-auto' : 'max-w-[min(96vw,760px)]!'}>
         {(editingCsqtt || editingWdtt || editingNfqws) && <Button variant="ghost" size="icon" className="text-ring hover:bg-muted! absolute top-4 right-4 transition-colors hover:text-white" aria-label="Вернуться к управлению ядром" onClick={closeCurrentView}><IconX className="size-6" /></Button>}
-        <DialogHeader>
+        <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2 pb-3">
           <IconCpu size={24} className="text-chart-2" /> {editingWdtt ? 'Настройка WDTT Plus' : editingCsqtt ? 'Настройка CSQTT' : editingNfqws ? 'Настройка nfqws2' : 'Управление ядром'}
           </DialogTitle>
         </DialogHeader>
 
-        {editingWdtt ? <WdttPlusSettings onBack={() => setEditingWdtt(false)} onRefresh={() => void refreshWdttStatus()} /> : editingNfqws ? <Nfqws2Settings onBack={() => setEditingNfqws(false)} onRefresh={() => void refreshNfqwsStatus()} /> : editingCsqtt ? <div className="space-y-2">
+        {editingWdtt ? <WdttPlusSettings onBack={() => setEditingWdtt(false)} onRefresh={() => void refreshWdttStatus()} /> : editingNfqws ? <Nfqws2Settings onBack={() => setEditingNfqws(false)} onRefresh={() => void refreshNfqwsStatus()} /> : editingCsqtt ? <div className="flex min-h-0 flex-col gap-3"><div className="min-h-0 space-y-2 overflow-y-auto pr-2">
           <p className="text-xs text-green-400">Клиент CSQTT {csqttClientVersion}</p>
           <p className="text-muted-foreground text-xs">Ссылка разбирается на адрес и пароль; исходная ссылка не хранится. Сохранённые секреты скрыты. Пустые поля пароля и токена оставляют прежние значения. Изменения вступят в силу после «Применить».</p>
           <p className="text-muted-foreground text-xs">Ручной использует сохранённые ссылки или хеши VK. Авто API создаёт звонки через calls.start и завершает их при остановке. Для токена откройте вход VK: пароль вводится только на сайте VK.</p>
@@ -446,7 +446,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
           {csqttHashMode === 'auto_api' && <p className="text-muted-foreground text-xs">Авто API создаст {Math.ceil(Number(csqttWorkers) / 27)} звонка(ов) для {csqttWorkers} потоков: один звонок на каждые 27 потоков. Значение поля «Хеши» в этом режиме не используется. Нужен сохранённый VK-токен.</p>}
           {csqttClientVersion.startsWith('2.1.9') && csqttHashMode === 'auto_js' && <p className="text-muted-foreground text-xs">Авто ВК создаёт один звонок и распределяет потоки по учётным данным этого звонка. Поле «Хеши» не используется.</p>}
           {csqttApkClient && csqttHashMode === 'auto_js' && <p className="text-muted-foreground text-xs">Авто ВК использует сохранённый токен; звонки создаёт оригинальный клиент 2.5.0. При обычной остановке ему отправляется команда завершить звонки. После аварийного отключения завершение не гарантируется.</p>}{csqttError && <p role="alert" className="text-sm text-red-500">{csqttError}</p>}
-          <div className="bg-card sticky bottom-0 flex justify-end gap-2 border-t pt-3 pb-1"><Button variant="outline" onClick={() => setEditingCsqtt(false)}>Назад</Button><Button disabled={savingCsqtt || !validCsqttNumbers || !csqttPeer.trim() || (csqttHashMode === 'manual' && !csqttHasManualHashes && !csqttManualHashes.trim())} onClick={saveCsqttSettings}>Сохранить</Button>{csqttRestartRequired && <Button disabled={savingCsqtt || Number(csqttHashes) !== csqttSavedValues.hashes || Number(csqttWorkers) !== csqttSavedValues.workers || csqttPeer.trim() !== csqttSavedValues.peer || csqttHashMode !== csqttSavedValues.hashMode || csqttObfs !== csqttSavedValues.obfs || csqttTurnTransport !== csqttSavedValues.turnTransport || csqttTurnSubnet !== csqttSavedValues.turnSubnet || csqttTurnIpLimit !== csqttSavedValues.turnIpLimit || csqttCustomTurnIps.trim() !== csqttSavedValues.customTurnIps || !!csqttPassword || !!csqttVkToken || !!csqttManualHashes} onClick={restartCsqtt}>Применить</Button>}</div>
+          </div><div className="bg-card flex shrink-0 justify-end gap-2 border-t pt-3 pb-1"><Button variant="outline" onClick={() => setEditingCsqtt(false)}>Назад</Button><Button disabled={savingCsqtt || !validCsqttNumbers || !csqttPeer.trim() || (csqttHashMode === 'manual' && !csqttHasManualHashes && !csqttManualHashes.trim())} onClick={saveCsqttSettings}>Сохранить</Button>{csqttRestartRequired && <Button disabled={savingCsqtt || Number(csqttHashes) !== csqttSavedValues.hashes || Number(csqttWorkers) !== csqttSavedValues.workers || csqttPeer.trim() !== csqttSavedValues.peer || csqttHashMode !== csqttSavedValues.hashMode || csqttObfs !== csqttSavedValues.obfs || csqttTurnTransport !== csqttSavedValues.turnTransport || csqttTurnSubnet !== csqttSavedValues.turnSubnet || csqttTurnIpLimit !== csqttSavedValues.turnIpLimit || csqttCustomTurnIps.trim() !== csqttSavedValues.customTurnIps || !!csqttPassword || !!csqttVkToken || !!csqttManualHashes} onClick={restartCsqtt}>Применить</Button>}</div>
         </div> : <div className="space-y-4">
           {CORES.map((core, i) => {
             const isActive = currentCore === core.id
@@ -573,7 +573,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
     </Dialog>
     <Dialog open={vkAuthOpen} onOpenChange={open => { setVkAuthOpen(open); if (!open) { setVkRedirect(''); setVkAuthError('') } }}>
       <DialogContent className="max-w-[min(94vw,580px)]!">
-        <DialogHeader><DialogTitle>Получить токен VK</DialogTitle></DialogHeader>
+        <DialogHeader className="shrink-0"><DialogTitle>Получить токен VK</DialogTitle></DialogHeader>
         <ol className="text-muted-foreground list-decimal space-y-2 pl-5 text-sm">
           <li>Откройте вход VK и подтвердите разрешения приложения.</li>
           <li>Когда появится пустая страница blank.html, скопируйте её полный адрес из адресной строки.</li>

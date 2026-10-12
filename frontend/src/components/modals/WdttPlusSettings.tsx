@@ -105,7 +105,7 @@ export function WdttPlusSettings({ onBack, onRefresh }: { onBack: () => void; on
     finally { setPending(false) }
   }
 
-  return <div className="space-y-3">
+  return <div className="flex min-h-0 flex-col gap-3"><div className="min-h-0 space-y-3 overflow-y-auto pr-2">
     <p className="text-muted-foreground text-xs">Клиент WDTT Plus {clientVersion} открывает локальный SOCKS5 с UDP для Xray. Панель не создаёт звонки VK: вставьте уже полученные ссылки или хеши.</p>
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
       <label className="text-sm font-medium">Сервер<Input className="mt-1" value={server} onChange={(event) => setServer(event.target.value)} placeholder="31.77.146.181" /></label>
@@ -149,7 +149,7 @@ export function WdttPlusSettings({ onBack, onRefresh }: { onBack: () => void; on
     </div>
     <p className="text-muted-foreground text-xs">Порт WireGuard здесь справочный: рабочую конфигурацию клиент получает от сервера через GETCONF. Пароль и хеши сохраняются с доступом только для root и не возвращаются в панель.</p>
     {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
-    <div className="bg-card sticky bottom-0 flex justify-end gap-2 border-t pt-3 pb-1">
+    </div><div className="bg-card flex shrink-0 justify-end gap-2 border-t pt-3 pb-1">
       <Button variant="outline" onClick={onBack}>Назад</Button>
       <Button disabled={pending || !valid} onClick={() => void save()}>Сохранить</Button>
       {restartRequired && <Button disabled={pending || !!password} onClick={() => void apply()}>Применить</Button>}
