@@ -677,10 +677,14 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
           next.confirmed = content
           const index = configsRef.current.findIndex(item => item.file === file)
           if (index >= 0) {
-            configsRef.current = configsRef.current.map((item, i) => i === index ? { ...item, content, savedContent: content, isDirty: false } : item)
+            const existing = configsRef.current[index]
+            const keepDraft = existing.isDirty && JSON.stringify(parseJsonc(existing.content)) !== JSON.stringify(parseJsonc(existing.savedContent))
+            configsRef.current = configsRef.current.map((item, i) => i === index ? { ...item, content: keepDraft ? existing.content : content, savedContent: content, isDirty: keepDraft } : item)
             dispatch({ type: 'SAVE_CONFIG', index, content })
+            if (keepDraft) dispatch({ type: 'UPDATE_CONFIG_DIRTY', index, content: existing.content, isDirty: true })
             if (activeIndexRef.current === index && editorRef.current) {
-              editorRef.current.setValue(content, content)
+              if (keepDraft) editorRef.current.setSavedContent(content)
+              else editorRef.current.setValue(content, content)
               editorRef.current.validate(file)
             }
           }
