@@ -33,11 +33,12 @@ cleanup() {
 
 probe_sites() {
     protocol=$1
+    probe_timeout=$2
     mkdir -m 700 -p "$RESULTS"
     index=0
     for site in https://www.youtube.com/generate_204 https://discord.com/ https://www.instagram.com/; do
         index=$((index + 1))
-        "$PROBE" -protocol "$protocol" -mark "$MARK" -url "$site" > "$RESULTS/$protocol-$index" &
+        "$PROBE" -protocol "$protocol" -timeout "$probe_timeout" -mark "$MARK" -url "$site" > "$RESULTS/$protocol-$index" &
     done
     wait
     for index in 1 2 3; do cat "$RESULTS/$protocol-$index"; done
@@ -85,11 +86,11 @@ ip route show default | grep -q "dev $WAN " || { echo 'WAN interface changed' >&
 trap cleanup EXIT HUP INT TERM
 cleanup
 build_args "$2" "$3" "${4:-/dev/null}"
-sleep 1
+sleep 0.1
 [ -f "$PID" ] || { echo 'probe engine did not start' >&2; exit 1; }
 rule -A tcp
 [ "$3" = tcp-quic ] && rule -A udp
-probe_sites tcp
-if [ "$3" = tcp-quic ]; then
-    probe_sites h3
-fi
+timeout_seconds=${5:-5}
+case "$timeout_seconds" in 2|3|4|5|6|7|8|9|10|11|12|13|14|15) ;; *) exit 2 ;; esac
+if [ "$3" = tcp-quic ]; then protocol=both; else protocol=tcp; fi
+probe_sites "$protocol" "$timeout_seconds"

@@ -515,6 +515,24 @@ pub async fn get_geoip(
     geo_query_handler(params, true, Some(state.http_client)).await
 }
 
+pub(crate) fn matching_categories(filename: &str, target: &str, is_ip: bool) -> Result<Vec<String>, String> {
+    if !filename.ends_with(".dat") || filename.bytes().any(|c| !c.is_ascii_alphanumeric() && !matches!(c, b'.' | b'_' | b'-')) {
+        return Err("Некорректное имя геобазы".into());
+    }
+    let file = File::open(Path::new(XRAY_ASSET_DIR).join(filename)).map_err(|e| e.to_string())?;
+    let mmap = unsafe { MmapOptions::new().map(&file).map_err(|e| e.to_string())? };
+    if is_ip {
+        let (v4, v6) = match target.parse::<IpAddr>().map_err(|e| e.to_string())? {
+            IpAddr::V4(ip) => (Some(u32::from(ip)), None),
+            IpAddr::V6(ip) => (None, Some(u128::from(ip))),
+        };
+        Ok(find_categories(&mmap, |buf| parse_cidr_and_match(buf, v4, v6)))
+    } else {
+        let lower = target.to_lowercase();
+        Ok(find_categories(&mmap, |buf| parse_domain_and_match(buf, &lower)))
+    }
+}
+
 pub async fn get_geosite(
     State(_): State<AppState>, Query(params): Query<HashMap<String, String>>,
 ) -> impl IntoResponse {

@@ -6,6 +6,8 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 
 use crate::types::AppState;
+#[path = "nfqws2_search.rs"]
+pub(crate) mod search;
 
 const CANARY: &str = "/opt/etc/xkeen/nfqws2-stage/canary.sh";
 const ENGINE: &str = "/opt/etc/xkeen/nfqws2-stage/engine";
@@ -114,6 +116,7 @@ fn settings_json() -> Value {
         "tcpLua": if custom_args.trim().is_empty() { TCP_LUA.to_vec() } else { custom_args.lines().filter(|line| line.starts_with("--lua-desync=") && !line.contains("quic_initial")).collect::<Vec<_>>() },
         "quicLua": if custom_args.trim().is_empty() { QUIC_LUA[0] } else { custom_args.lines().find(|line| line.contains("quic_initial") && line.starts_with("--lua-desync=")).unwrap_or(QUIC_LUA[0]) },
         "lastCheck": active_check(),
+        "library": search::saved(),
         "globalReady": global_ready,
         "scope": if global_ready {
             "В селекторах выберите nfqws2 для нужных маршрутов. Они пойдут напрямую с обходом DPI; прочие маршруты останутся как настроены."
@@ -170,6 +173,7 @@ pub fn start_reconciler() {
             if status_json().await["running"] != true { continue; }
             let current_mode = profile();
             let current_args = std::fs::read_to_string(CUSTOM).unwrap_or_default();
+            search::reset_cancel();
             let healthy = match run_probe("preset", &current_mode, &current_args).await {
                 Ok(report) => {
                     _ = persist_check(&report).await;
@@ -242,7 +246,11 @@ fn candidate(request: &SettingsRequest) -> Result<(String, String), String> {
     if !matches!(request.source.as_str(), "preset" | "custom") {
         return Err("Неизвестный источник стратегии".into());
     }
-    if request.source == "preset" { return Ok((std::fs::read_to_string(PROFILE).unwrap_or_else(|_| "tcp-quic".into()).trim().into(), String::new())); }
+    if request.source == "preset" {
+        let mode = profile();
+        let args = if request.custom_args.trim().is_empty() { std::fs::read_to_string(CUSTOM).unwrap_or_default() } else { request.custom_args.clone() };
+        return candidate(&SettingsRequest { source: "custom".into(), custom_args: if args.trim().is_empty() { preset_args(0, &mode, 0) } else { args } });
+    }
     let lines: Vec<&str> = request.custom_args.lines().map(str::trim)
         .filter(|line| !line.is_empty()).collect();
     if lines.is_empty() || lines.len() > 32 || request.custom_args.len() > 4096
@@ -259,21 +267,35 @@ fn candidate(request: &SettingsRequest) -> Result<(String, String), String> {
 }
 
 async fn run_probe(source: &str, mode: &str, custom: &str) -> Result<Value, String> {
+    run_probe_timeout(source, mode, custom, 5).await
+}
+
+async fn probe_ready() -> Result<(), String> {
+    let output = tokio::time::timeout(Duration::from_secs(3), Command::new(PROBE).arg("-version").kill_on_drop(true).output()).await
+        .map_err(|_| "Утилита проверки nfqws2 не ответила")?.map_err(|e| e.to_string())?;
+    if !output.status.success() || String::from_utf8_lossy(&output.stdout).trim() != "xkeen-nfqws-probe 2" {
+        return Err("Обновите утилиту проверки nfqws2: установленная версия не поддерживает быструю проверку TCP + QUIC".into());
+    }
+    Ok(())
+}
+
+async fn run_probe_timeout(source: &str, mode: &str, custom: &str, seconds: u64) -> Result<Value, String> {
     if !Path::new(PROBE).exists() || !Path::new(PROBE_SCRIPT).exists() {
         return Err("Проверка TCP/HTTP3 ещё не установлена".into());
     }
+    probe_ready().await?;
     tokio::fs::write(PROBE_CANDIDATE, custom).await.map_err(|e| e.to_string())?;
     tokio::fs::set_permissions(PROBE_CANDIDATE, std::fs::Permissions::from_mode(0o600)).await.map_err(|e| e.to_string())?;
     let script_source = if custom.trim().is_empty() { "preset" } else { "custom" };
-    let output = tokio::time::timeout(Duration::from_secs(40), Command::new(PROBE_SCRIPT)
-        .args(["check", script_source, mode, PROBE_CANDIDATE]).kill_on_drop(true).output()).await;
+    let output = tokio::time::timeout(Duration::from_secs(seconds + 5), Command::new(PROBE_SCRIPT)
+        .args(["check", script_source, mode, PROBE_CANDIDATE, &seconds.to_string()]).kill_on_drop(true).output()).await;
     _ = tokio::fs::remove_file(PROBE_CANDIDATE).await;
     let output = match output {
         Ok(Ok(output)) => output,
         Ok(Err(error)) => return Err(format!("Не удалось запустить проверку: {error}")),
         Err(_) => {
             _ = Command::new(PROBE_SCRIPT).arg("cleanup").output().await;
-            return Err("Проверка превысила 40 секунд".into());
+            return Err("Истёк срок проверки стратегии".into());
         }
     };
     if !output.status.success() {
@@ -302,6 +324,7 @@ async fn run_probe(source: &str, mode: &str, custom: &str) -> Result<Value, Stri
         "siteCount": 3,
         "verifiedTransport": if tcp_working && quic_working { "tcp-quic" } else if tcp_working { "tcp" } else { "none" },
         "results": results,
+        "args": custom,
     }))
 }
 
@@ -312,52 +335,7 @@ fn healthy_report(report: &Value, mode: &str) -> bool {
 }
 
 async fn scan_preset() -> Result<(Value, String, String), String> {
-    let started = Instant::now();
-    let mut best_tcp: Option<(usize, Value)> = None;
-    let mut summary = Vec::new();
-    // TCP and QUIC have separate NFQUEUE profiles. Choose TCP first, then vary only QUIC.
-    for variant in 0..4 {
-        if started.elapsed() > Duration::from_secs(150) { break; }
-        let args = preset_args(variant, "tcp", 0);
-        match run_probe("preset", "tcp", &args).await {
-            Ok(report) => {
-                let tcp = report["tcpSites"].as_u64().unwrap_or(0);
-                summary.push(json!({"variant": variant, "phase": "tcp", "mode": "tcp", "tcpSites": tcp, "http3Sites": 0}));
-                if best_tcp.as_ref().is_none_or(|(_, old)| tcp > old["tcpSites"].as_u64().unwrap_or(0)) {
-                    best_tcp = Some((variant, report));
-                }
-            }
-            Err(error) => summary.push(json!({"variant": variant, "phase": "tcp", "mode": "tcp", "error": error})),
-        }
-    }
-    let (tcp_variant, tcp_report) = best_tcp.ok_or("Ни один вариант TCP не удалось проверить")?;
-    if !healthy_report(&tcp_report, "tcp") { return Err("Ни один вариант не дал ответ хотя бы от двух сайтов по TCP".into()); }
-    let mut best: Option<(u64, usize, Value)> = None;
-    for quic_variant in 0..QUIC_LUA.len() {
-        if started.elapsed() > Duration::from_secs(150) { break; }
-        let args = preset_args(tcp_variant, "tcp-quic", quic_variant);
-        match run_probe("preset", "tcp-quic", &args).await {
-            Ok(report) => {
-                let tcp = report["tcpSites"].as_u64().unwrap_or(0);
-                let h3 = report["http3Sites"].as_u64().unwrap_or(0);
-                summary.push(json!({"variant": tcp_variant, "quicVariant": quic_variant, "phase": "quic", "mode": "tcp-quic", "tcpSites": tcp, "http3Sites": h3}));
-                if healthy_report(&report, "tcp-quic") {
-                    let score = tcp * 10 + h3 * 6;
-                    if best.as_ref().is_none_or(|(old, _, _)| score > *old) { best = Some((score, quic_variant, report)); }
-                }
-            }
-            Err(error) => summary.push(json!({"variant": tcp_variant, "quicVariant": quic_variant, "phase": "quic", "mode": "tcp-quic", "error": error})),
-        }
-    }
-    let (mut report, mode, args, selected_quic) = if let Some((_, quic_variant, report)) = best {
-        (report, "tcp-quic", preset_args(tcp_variant, "tcp-quic", quic_variant), Some(quic_variant))
-    } else {
-        (tcp_report, "tcp", preset_args(tcp_variant, "tcp", 0), None)
-    };
-    report["candidates"] = json!(summary);
-    report["selectedVariant"] = json!(tcp_variant);
-    report["selectedQuicVariant"] = json!(selected_quic);
-    Ok((report, mode.into(), args))
+    search::scan(false, &profile()).await
 }
 
 async fn persist_check(report: &Value) -> Result<(), String> {
@@ -368,16 +346,20 @@ async fn persist_check(report: &Value) -> Result<(), String> {
 }
 
 pub async fn check_strategy(State(_state): State<AppState>, Json(request): Json<SettingsRequest>) -> Json<Value> {
-    let _guard = SETTINGS_LOCK.get_or_init(|| Mutex::new(())).lock().await;
+    let Ok(_guard) = SETTINGS_LOCK.get_or_init(|| Mutex::new(())).try_lock() else {
+        return Json(json!({"success": false, "error": "Идёт подбор или проверка nfqws2. Дождитесь завершения или отмените подбор"}));
+    };
     if !Path::new(ROOT).is_dir() { return Json(json!({"success": false, "error": "nfqws2 не установлен"})); }
     let (mode, custom) = match candidate(&request) {
         Ok(value) => value,
         Err(error) => return Json(json!({"success": false, "error": error})),
     };
-    let checked = if request.source == "preset" { scan_preset().await }
-        else { run_probe(&request.source, &mode, &custom).await.map(|report| (report, mode, custom.clone())) };
+    let checked = run_probe(&request.source, &mode, &custom).await.map(|report| (report, mode, custom.clone()));
     match checked {
         Ok((report, selected_mode, selected_args)) => {
+            if let Err(error) = search::remember(&selected_mode, &selected_args, &report).await {
+                return Json(json!({"success": false, "error": format!("Проверка завершена, но рабочий вариант не сохранён: {error}"), "results": report["results"]}));
+            }
             *PREVIEW.get_or_init(|| Mutex::new(None)).lock().await = Some(Preview {
                 source: request.source,
                 custom,
@@ -443,7 +425,9 @@ async fn apply_checked(next_mode: &str, next_custom: &str, automatic: bool, chec
 }
 
 pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<SettingsRequest>) -> Json<Value> {
-    let _guard = SETTINGS_LOCK.get_or_init(|| Mutex::new(())).lock().await;
+    let Ok(_guard) = SETTINGS_LOCK.get_or_init(|| Mutex::new(())).try_lock() else {
+        return Json(json!({"success": false, "error": "Идёт подбор или проверка nfqws2"}));
+    };
     if !Path::new(ROOT).is_dir() {
         return Json(json!({"success": false, "error": "nfqws2 не установлен или неизвестный источник стратегии"}));
     }
@@ -456,13 +440,8 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
             && preview.checked_at.elapsed() < Duration::from_secs(300));
     let (check, next_mode, next_custom) = if let Some(preview) = cached {
         (preview.report, preview.mode, preview.args)
-    } else if request.source == "preset" {
-        match scan_preset().await {
-            Ok(result) => result,
-            Err(error) => return Json(json!({"success": false, "error": error})),
-        }
     } else {
-        match run_probe("custom", &mode, &custom).await {
+        match run_probe(&request.source, &mode, &custom).await {
             Ok(report) => (report, mode, custom),
             Err(error) => return Json(json!({"success": false, "error": error})),
         }
@@ -519,6 +498,7 @@ pub async fn latency_probe() -> Result<u32, &'static str> {
 pub struct ControlRequest { pub(crate) action: String }
 
 pub async fn control(State(_state): State<AppState>, Json(request): Json<ControlRequest>) -> Json<Value> {
+    if request.action == "stop" { search::cancel_current(); }
     let _guard = SETTINGS_LOCK.get_or_init(|| Mutex::new(())).lock().await;
     if !matches!(request.action.as_str(), "start" | "stop") {
         return Json(json!({"success": false, "error": "Допустимы только start и stop"}));

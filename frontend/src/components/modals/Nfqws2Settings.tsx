@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { apiCall } from '@/lib/api'
@@ -13,7 +13,11 @@ interface Settings {
   quicLua: string | null
   scope: string
   lastCheck?: CheckResult | null
+  library?: SavedStrategy[]
 }
+
+interface SavedStrategy { id: string; mode: 'tcp' | 'tcp-quic'; args: string; checkedAt: string; tcpSites: number; http3Sites: number }
+interface SearchStatus { running: boolean; phase?: string; completed?: number; total?: number; result?: CheckResult; error?: string; library?: SavedStrategy[] }
 
 interface CheckResult {
   success: boolean
@@ -27,8 +31,10 @@ interface CheckResult {
   tcpSites?: number
   http3Sites?: number
   siteCount?: number
+  args?: string
+  durationSeconds?: number
   verifiedTransport?: 'tcp' | 'tcp-quic' | 'none'
-  candidates?: Array<{ variant: number; quicVariant?: number; phase?: 'tcp' | 'quic'; mode: 'tcp' | 'tcp-quic'; tcpSites?: number; http3Sites?: number; error?: string }>
+  candidates?: Array<{ name?: string; variant: number; quicVariant?: number; phase?: 'tcp' | 'quic'; mode: 'tcp' | 'tcp-quic'; tcpSites?: number; http3Sites?: number; error?: string }>
   results?: Array<{ protocol: 'tcp' | 'h3'; url: string; ok: boolean; status?: number; error?: string }>
 }
 
@@ -52,6 +58,41 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
   const [checking, setChecking] = useState(false)
   const [report, setReport] = useState<CheckResult | null>(null)
   const [error, setError] = useState('')
+  const [searching, setSearching] = useState(false)
+  const [searchMode, setSearchMode] = useState<'tcp' | 'tcp-quic'>('tcp-quic')
+  const [searchJob, setSearchJob] = useState<SearchStatus | null>(null)
+  const sawRunning = useRef(false)
+
+  useEffect(() => {
+    let active = true, timer: ReturnType<typeof setTimeout> | undefined
+    async function poll() {
+      try {
+        const job = await apiCall<SearchStatus>('GET', 'nfqws2/search')
+        if (!active) return
+        setSearchJob(job)
+        if (job.running) { sawRunning.current = true; setSearching(true); timer = setTimeout(() => void poll(), 2000) }
+        else {
+          setSearching(false)
+          if (sawRunning.current) {
+            sawRunning.current = false
+            if (job.result) { setReport(job.result); setCustomArgs(job.result.args || ''); setSource('preset'); setMode(job.result.mode || 'tcp') }
+            else if (job.error) setError(job.error)
+          }
+        }
+      } catch { if (active && searching) timer = setTimeout(() => void poll(), 3000) }
+    }
+    void poll()
+    return () => { active = false; if (timer) clearTimeout(timer) }
+  }, [searching])
+
+  async function startSearch() {
+    setError(''); setReport(null)
+    try {
+      const result = await apiCall<{success: boolean; error?: string}>('POST', 'nfqws2/search', {mode: searchMode})
+      if (!result.success) throw new Error(result.error || 'Не удалось начать подбор')
+      sawRunning.current = true; setSearching(true)
+    } catch (error) { setError(error instanceof Error ? error.message : 'Ошибка подбора') }
+  }
 
   useEffect(() => {
     let active = true
@@ -139,11 +180,18 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
       </label>}
       {source === 'preset' && <div className="rounded-md border p-3">
         <p className="text-sm font-medium">Параметры выбранной стратегии</p>
-        <p className="text-muted-foreground text-xs">Автоподбор проверяет четыре варианта TCP, затем два варианта QUIC с лучшим TCP. Проверки идут в отдельной очереди. Каждые 10 минут роутер проверяет выбранную стратегию; после двух неудач повторяет подбор. Если рабочей замены нет, текущая стратегия сохраняется.</p>
+        <p className="text-muted-foreground text-xs">«Проверить» проверяет выбранные параметры. «Подобрать» генерирует сочетания Fake TLS, Multisplit, Multidisorder и числа повторов QUIC. Сохранённые рабочие варианты проверяются первыми. Подбор занимает до двух минут и не меняет активную стратегию до применения.</p>
         <div className="text-muted-foreground mt-2 text-xs">TCP</div>
-        <pre className="overflow-x-auto whitespace-pre-wrap break-all text-xs">{settings?.tcpLua.join('\n')}</pre>
+        <pre className="overflow-x-auto whitespace-pre-wrap break-all text-xs">{report?.args?.split('--new')[0] || settings?.tcpLua.join('\n')}</pre>
         {mode === 'tcp-quic' && <><div className="text-muted-foreground mt-2 text-xs">QUIC</div><pre className="overflow-x-auto whitespace-pre-wrap break-all text-xs">{settings?.quicLua}</pre></>}
       </div>}
+      <div className="space-y-3 rounded-md border p-3">
+        <div className="flex flex-wrap items-center gap-2"><select className="bg-input-background rounded-md border px-2 py-2 text-sm" value={searchMode} disabled={searching} onChange={event => setSearchMode(event.target.value as 'tcp' | 'tcp-quic')}><option value="tcp-quic">TCP + QUIC</option><option value="tcp">Только TCP</option></select><Button variant="outline" disabled={saving || checking || searching} onClick={() => void startSearch()}>Подобрать стратегию</Button>{searching && <Button variant="outline" onClick={() => void apiCall('POST', 'nfqws2/search/cancel')}>Отменить подбор</Button>}</div>
+        {searching && <p role="status" className="text-sm">{searchJob?.phase || 'Подготовка'} · проверено {searchJob?.completed || 0} из {searchJob?.total || '…'}</p>}
+        <p className="text-muted-foreground text-xs">TCP и QUIC проверяются одновременно. Быстрая проверка ограничена 5 секундами на запрос; найденный вариант подтверждается повторной проверкой до 8 секунд. Неудачный подбор сохраняет действующую стратегию.</p>
+        <h4 className="text-sm font-medium">Сохранённые рабочие варианты</h4>
+        <div className="max-h-44 space-y-2 overflow-y-auto">{(searchJob?.library || settings?.library || []).map(item => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm"><span>{item.mode.toUpperCase()} · TCP {item.tcpSites}/3 · QUIC {item.http3Sites}/3 · {new Date(item.checkedAt).toLocaleString('ru-RU')}</span><Button size="sm" variant="outline" disabled={searching || checking || saving} onClick={() => { setSource('custom'); setCustomArgs(item.args); setMode(item.mode); setReport(null) }}>Выбрать</Button></div>)}{!(searchJob?.library || settings?.library || []).length && <p className="text-muted-foreground text-sm">Пока нет подтверждённых вариантов.</p>}</div>
+      </div>
       {report?.results && <div className="rounded-md border p-3 text-sm">
         <p className="font-medium">Проверка сайтов {report.checkedAt ? `· ${new Date(report.checkedAt).toLocaleTimeString('ru-RU')}` : ''}</p>
         <div className="mt-2 overflow-x-auto rounded-md border">
@@ -160,10 +208,10 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
         {report.candidates && <div className="mt-3 space-y-1 border-t pt-3">
           <p className="text-xs font-medium">Автоподбор · {report.candidates.length} проверок</p>
           {report.candidates.map((item) => {
-            const selected = item.variant === report.selectedVariant && (item.mode === 'tcp' ? report.mode === 'tcp' : item.quicVariant === report.selectedQuicVariant && report.mode === 'tcp-quic')
-            const name = ['TLS + Multisplit', 'Fake TLS', 'Multisplit', 'Fake TLS + Multidisorder'][item.variant] ?? `Вариант ${item.variant + 1}`
-            return <div key={`${item.variant}:${item.mode}:${item.quicVariant ?? 0}`} className={`flex flex-wrap justify-between gap-x-3 rounded px-2 py-1 text-xs ${selected ? 'bg-green-500/10 text-green-400' : 'text-muted-foreground'}`}>
-              <span>{selected ? '✓ ' : ''}{name} · {item.mode === 'tcp-quic' ? `QUIC ${item.quicVariant === 1 ? '6' : '11'} повторов` : 'TCP'}</span>
+            const selected = typeof item.variant === 'number' && item.variant === report.selectedVariant && (item.mode === 'tcp' ? report.mode === 'tcp' : item.quicVariant === report.selectedQuicVariant && report.mode === 'tcp-quic')
+            const name = item.name || ['TLS + Multisplit', 'Fake TLS', 'Multisplit', 'Fake TLS + Multidisorder'][item.variant] || 'Вариант'
+            return <div key={item.name || `${item.variant}:${item.mode}:${item.quicVariant ?? 0}`} className={`flex flex-wrap justify-between gap-x-3 rounded px-2 py-1 text-xs ${selected ? 'bg-green-500/10 text-green-400' : 'text-muted-foreground'}`}>
+              <span>{selected ? '✓ ' : ''}{name} · {item.name ? item.mode.toUpperCase() : item.mode === 'tcp-quic' ? `QUIC ${item.quicVariant === 1 ? '6' : '11'} повторов` : 'TCP'}</span>
               <span title={item.error}>{item.error ? 'проверка не удалась' : `TCP ${item.tcpSites ?? 0}/3 · HTTP/3 ${item.http3Sites ?? 0}/3`}</span>
             </div>
           })}
@@ -172,7 +220,7 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
       </div>}
       <p className="text-muted-foreground text-xs">После проверки кнопка «Сохранить и применить» использует её результат в течение 5 минут. Если параметры изменились или срок истёк, проверка запускается снова.</p>
       {error && <p role="alert" className="text-destructive text-sm">{error}</p>}
-      <div className="flex flex-wrap justify-end gap-2"><Button variant="outline" onClick={onBack}>Назад</Button><Button variant="outline" disabled={saving || checking || (source === 'custom' && !customArgs.trim())} onClick={() => void check()}>{checking ? 'Проверка…' : 'Проверить стратегию'}</Button><Button disabled={saving || checking || (source === 'custom' && !customArgs.trim())} onClick={() => void save()}>{saving ? 'Сохраняется…' : 'Сохранить и применить'}</Button></div>
+      <div className="flex flex-wrap justify-end gap-2"><Button variant="outline" onClick={onBack}>Назад</Button><Button variant="outline" disabled={saving || checking || searching || (source === 'custom' && !customArgs.trim())} onClick={() => void check()}>{checking ? 'Проверка…' : 'Проверить стратегию'}</Button><Button disabled={saving || checking || searching || (source === 'custom' && !customArgs.trim())} onClick={() => void save()}>{saving ? 'Сохраняется…' : 'Сохранить и применить'}</Button></div>
     </>}
   </div>
 }

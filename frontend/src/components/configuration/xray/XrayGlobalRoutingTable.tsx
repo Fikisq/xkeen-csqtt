@@ -12,6 +12,8 @@ import { RoutingTable, type RoutingRule as TableRule } from './RoutingTable'
 import { outboundTitle, outboundTransport } from './Selectors'
 import { useOutboundLatency } from './useOutboundLatency'
 import { XrayDeviceRoutingTable } from './XrayDeviceRoutingTable'
+import { ConnectionDiagnostics } from '@/components/modals/ConnectionDiagnostics'
+import { ConnectionPicker } from '@/components/modals/ConnectionPicker'
 import { addCustomIpRoute, addCustomRoute, baseRuleTag, isFullBypass, readDeviceIps, removeCustomRoute, renameCustomRoute, routeTags, updateDeviceRules, updateGlobalRules, validDeviceIp, type RoutingRule as XrayRule } from '@/lib/xrayDeviceRouting'
 
 const DISABLED_SOURCE = '192.0.2.255'
@@ -74,6 +76,20 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
   })
   const [newIp, setNewIp] = useState('')
   const [addIpOpen, setAddIpOpen] = useState(false)
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const gridRef = useRef<HTMLDivElement>(null)
+  const [columns, setColumns] = useState(() => window.innerWidth >= 1536 ? 7 : window.innerWidth >= 1024 ? 6 : window.innerWidth >= 640 ? 3 : 2)
+  const [pinned, setPinned] = useState<string[] | null>(() => {
+    try { const value = JSON.parse(localStorage.getItem('xkeen-visible-connections') || 'null'); return Array.isArray(value) ? value.filter(tag => typeof tag === 'string') : null } catch { return null }
+  })
+  useEffect(() => {
+    const grid = gridRef.current; if (!grid) return
+    const update = () => setColumns(Math.max(1, getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length))
+    update(); const observer = new ResizeObserver(update); observer.observe(grid)
+    return () => observer.disconnect()
+  }, [])
+  useEffect(() => { try { localStorage.setItem('xkeen-visible-connections', JSON.stringify(pinned)) } catch { /* Browser storage unavailable. */ } }, [pinned])
   const [testingAll, setTestingAll] = useState(false)
   const automaticPingStarted = useRef(false)
   const [draggedProtocol, setDraggedProtocol] = useState<string | null>(null)
@@ -115,6 +131,15 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
   const orderedCards = protocolOrder.length
     ? [...protocolOrder.map(tag => protocolCards.find(out => out.tag === tag)).filter((out): out is typeof protocolCards[number] => !!out), ...protocolCards.filter(out => !protocolOrder.includes(out.tag))]
     : protocolCards
+  const cardLimit = columns * 3
+  const chosenCards = pinned === null ? orderedCards : orderedCards.filter(out => pinned.includes(out.tag))
+  const activeCard = orderedCards.find(out => out.tag === selectedVpn?.outboundTag)
+  const visibleCards = chosenCards.slice(0, cardLimit)
+  if (activeCard && !visibleCards.some(out => out.tag === activeCard.tag)) { visibleCards.splice(Math.max(0, cardLimit - 1), 1, activeCard) }
+  const toggleCard = (tag: string) => {
+    const tags = visibleCards.map(out => out.tag)
+    setPinned(tags.includes(tag) ? tags.filter(item => item !== tag) : [...tags, tag].slice(0, cardLimit))
+  }
 
   function moveProtocol(source: string, target: string) {
     if (source === target) return
@@ -130,11 +155,11 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
 
   async function pingAll() {
     setTestingAll(true)
-    try { for (const out of protocolCards) await ping(out.tag) }
+    try { for (const out of visibleCards) await ping(out.tag) }
     finally { setTestingAll(false) }
   }
 
-  const pingTargetKey = protocolCards.map(out => out.tag).join('|')
+  const pingTargetKey = visibleCards.map(out => out.tag).join('|')
   useEffect(() => {
     if (automaticPingStarted.current || !pingTargetKey) return
     automaticPingStarted.current = true
@@ -269,8 +294,11 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
         }} />)}
         {deviceIp && !deviceTabs.includes(deviceIp) && <Button size="sm" variant="outline">{deviceIp}</Button>}
         <Button size="sm" variant="outline" onClick={() => setAddIpOpen(true)}>+ Добавить IP</Button>
+        <Button size="sm" variant="outline" onClick={() => setDiagnosticsOpen(true)}>Диагностика</Button>
       </div>
     </div>
+    <ConnectionDiagnostics open={diagnosticsOpen} onOpenChange={setDiagnosticsOpen} devices={deviceTabs} selectedDevice={deviceIp} />
+    <ConnectionPicker open={pickerOpen} onOpenChange={setPickerOpen} connections={orderedCards.map(out => ({tag: out.tag, label: out.label, details: outboundTransport((parsed.outbounds as any[]).find(raw => raw.tag === out.tag))}))} shown={visibleCards.map(out => out.tag)} limit={cardLimit} activeTag={selectedVpn?.outboundTag} onToggle={toggleCard} latencies={latencies} pingPending={pingPending} ping={ping} />
     <Dialog open={addIpOpen} onOpenChange={open => { setAddIpOpen(open); if (!open) setNewIp('') }}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader><DialogTitle>Добавить устройство</DialogTitle></DialogHeader>
@@ -281,9 +309,9 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
       </DialogContent>
     </Dialog>
     <section className="border-border bg-input-background/70 space-y-3 rounded-xl border p-3">
-      <div className="flex items-center justify-between gap-2"><h3 className="text-base font-semibold">Протоколы</h3><Button size="sm" variant="outline" disabled={testingAll || pingPending !== null} onClick={() => void pingAll()}><IconBolt size={16} /> {testingAll ? 'Проверка…' : 'Пинг'}</Button></div>
-      <div className="grid grid-cols-2 auto-rows-[100px] gap-2 sm:grid-cols-3 lg:grid-cols-6 2xl:grid-cols-7">
-        {orderedCards.map(out => <div key={out.tag} draggable onDragStart={event => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', out.tag); setDraggedProtocol(out.tag) }} onDragOver={event => { if (draggedProtocol) { event.preventDefault(); event.dataTransfer.dropEffect = 'move' } }} onDrop={event => { event.preventDefault(); if (draggedProtocol) moveProtocol(draggedProtocol, out.tag); setDraggedProtocol(null) }} onDragEnd={() => setDraggedProtocol(null)} title="Перетащите карточку, чтобы изменить порядок в браузере" className={cn('relative cursor-grab rounded-md border text-sm transition-colors active:cursor-grabbing', draggedProtocol === out.tag && 'opacity-60', selectedVpn?.outboundTag === out.tag && !isFullBypass(selectedVpn) ? 'border-blue-400 bg-blue-500/20' : 'border-ring/40 hover:border-blue-400 hover:bg-blue-500/10')}>
+      <div className="flex items-center justify-between gap-2"><h3 className="text-base font-semibold">Протоколы</h3><div className="ml-auto flex items-center gap-2"><Button size="sm" variant="outline" onClick={() => setPickerOpen(true)}>Все подключения ({orderedCards.length})</Button><Button size="sm" variant="outline" disabled={testingAll || pingPending !== null} onClick={() => void pingAll()}><IconBolt size={16} /> {testingAll ? 'Проверка…' : 'Пинг'}</Button></div></div>
+      <div ref={gridRef} className="grid grid-cols-2 auto-rows-[100px] gap-2 sm:grid-cols-3 lg:grid-cols-6 2xl:grid-cols-7">
+        {visibleCards.map(out => <div key={out.tag} draggable onDragStart={event => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', out.tag); setDraggedProtocol(out.tag) }} onDragOver={event => { if (draggedProtocol) { event.preventDefault(); event.dataTransfer.dropEffect = 'move' } }} onDrop={event => { event.preventDefault(); if (draggedProtocol) moveProtocol(draggedProtocol, out.tag); setDraggedProtocol(null) }} onDragEnd={() => setDraggedProtocol(null)} title="Перетащите карточку, чтобы изменить порядок в браузере" className={cn('relative cursor-grab rounded-md border text-sm transition-colors active:cursor-grabbing', draggedProtocol === out.tag && 'opacity-60', selectedVpn?.outboundTag === out.tag && !isFullBypass(selectedVpn) ? 'border-blue-400 bg-blue-500/20' : 'border-ring/40 hover:border-blue-400 hover:bg-blue-500/10')}>
           <button type="button" className="flex h-full min-w-0 w-full flex-col gap-1 px-3 py-1.5 text-left" aria-pressed={selectedVpn?.outboundTag === out.tag && !isFullBypass(selectedVpn)} onClick={() => chooseVpn(out.tag)}>
             <span title={out.label} className="line-clamp-2 h-10 shrink-0 w-full min-w-0 break-words pr-16 font-medium leading-5">{out.label}</span>
             <span className="line-clamp-2 shrink-0 w-full break-words leading-5"><ProtocolDetails outbound={(parsed.outbounds as any[]).find(raw => raw.tag === out.tag)} /></span>

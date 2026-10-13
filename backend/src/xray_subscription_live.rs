@@ -16,7 +16,11 @@ pub(crate) struct LiveState {
 }
 
 fn process_identity() -> Result<String, String> {
-    let pids = crate::controller::get_pid("xray");
+    let pids: Vec<_> = crate::controller::get_pid("xray").into_iter().filter(|pid| {
+        // Panel-owned latency probes are isolated helpers, not the live core.
+        !std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|command| command.split(|byte| *byte == 0)
+            .any(|arg| arg.starts_with(b"/tmp/xkeen-xray-probe-") && arg.ends_with(b".json")))
+    }).collect();
     if pids.len() != 1 { return Err("Нужен ровно один процесс Xray".into()); }
     let pid = pids[0];
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).map_err(|_| "Не удалось определить процесс Xray")?;

@@ -5,6 +5,7 @@ mod auth;
 mod backuper;
 mod configs;
 mod controller;
+mod connection_diagnostics;
 mod csqtt;
 mod manual_hashes;
 mod wdtt_plus;
@@ -545,6 +546,9 @@ async fn main() {
         .route("/api/nfqws2/control", post(nfqws2::control))
         .route("/api/nfqws2/settings", get(nfqws2::get_settings).post(nfqws2::save_settings))
         .route("/api/nfqws2/check", post(nfqws2::check_strategy))
+        .route("/api/diagnostics/connections", get(connection_diagnostics::inspect))
+        .route("/api/nfqws2/search", get(nfqws2::search::status).post(nfqws2::search::start))
+        .route("/api/nfqws2/search/cancel", post(nfqws2::search::cancel))
         .route("/api/nfqws2/attach-xray", post(nfqws2::attach_xray))
         .route("/api/addons/remove", post(addon_manager::remove))
         .route("/api/addons/install", post(addon_manager::install))

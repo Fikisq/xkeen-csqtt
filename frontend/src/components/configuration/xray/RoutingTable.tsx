@@ -154,14 +154,13 @@ export function RoutingTable({
               <th className="w-40 px-3 py-3 text-left font-medium">Комментарий</th>
               <th className="w-24 px-3 py-3 text-left font-medium">Сеть</th>
               <th className="px-3 py-3 text-left font-medium">Пункт назначения</th>
-              {!deviceMode && <th className="w-28 px-3 py-3 text-left font-medium">Входящие</th>}
               <th className="w-52 px-3 py-3 text-left font-medium">Исходящие</th>
             </tr>
           </thead>
           <tbody>
             {rules.length === 0 ? (
               <tr>
-                <td colSpan={deviceMode ? 7 : 8} className="text-muted-foreground px-3 py-8 text-center">
+                <td colSpan={7} className="text-muted-foreground px-3 py-8 text-center">
                   Правил нет. Нажмите «Добавить правило».
                 </td>
               </tr>
@@ -243,11 +242,6 @@ export function RoutingTable({
                       {!rule.domain.length && !rule.ip.length && '—'}
                     </div>
                   </td>
-                  {!deviceMode && <td className="px-3 py-3">
-                    <span className="text-muted-foreground text-sm">
-                      {rule.inboundTag.join(', ') || '—'}
-                    </span>
-                  </td>}
                   <td className="px-3 py-3">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="text-primary break-words text-sm font-medium">{outbounds.find(out => out.tag === rule.outboundTag)?.label || rule.outboundTag}</span>
