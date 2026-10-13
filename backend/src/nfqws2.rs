@@ -240,7 +240,7 @@ pub async fn get_settings(State(_state): State<AppState>) -> Json<Value> {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SettingsRequest { source: String, custom_args: String }
+pub struct SettingsRequest { source: String, custom_args: String, #[serde(default)] allow_tcp_only: bool }
 
 fn candidate(request: &SettingsRequest) -> Result<(String, String), String> {
     if !matches!(request.source.as_str(), "preset" | "custom") {
@@ -249,7 +249,7 @@ fn candidate(request: &SettingsRequest) -> Result<(String, String), String> {
     if request.source == "preset" {
         let mode = profile();
         let args = if request.custom_args.trim().is_empty() { std::fs::read_to_string(CUSTOM).unwrap_or_default() } else { request.custom_args.clone() };
-        return candidate(&SettingsRequest { source: "custom".into(), custom_args: if args.trim().is_empty() { preset_args(0, &mode, 0) } else { args } });
+        return candidate(&SettingsRequest { source: "custom".into(), custom_args: if args.trim().is_empty() { preset_args(0, &mode, 0) } else { args }, allow_tcp_only: false });
     }
     let lines: Vec<&str> = request.custom_args.lines().map(str::trim)
         .filter(|line| !line.is_empty()).collect();
@@ -446,7 +446,7 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
             Err(error) => return Json(json!({"success": false, "error": error})),
         }
     };
-    if request.source == "preset" && profile() == "tcp-quic" && next_mode == "tcp" {
+    if request.source == "preset" && profile() == "tcp-quic" && next_mode == "tcp" && !request.allow_tcp_only {
         return Json(json!({"success": false, "error": "Подбор не подтвердил QUIC. Текущая стратегия TCP + QUIC сохранена", "check": check}));
     }
     if !healthy_report(&check, &next_mode) {

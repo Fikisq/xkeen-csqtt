@@ -41,7 +41,7 @@ fn generated_tcp() -> Vec<String> {
     }
     let mut unique = Vec::new();
     for args in pool {
-        if !unique.contains(&args) && candidate(&SettingsRequest { source: "custom".into(), custom_args: args.clone() }).is_ok() { unique.push(args); }
+        if !unique.contains(&args) && candidate(&SettingsRequest { source: "custom".into(), custom_args: args.clone(), allow_tcp_only: false }).is_ok() { unique.push(args); }
     }
     unique.truncate(20);
     unique

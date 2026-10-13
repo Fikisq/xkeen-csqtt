@@ -113,7 +113,7 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
     setSaving(true)
     setError('')
     try {
-      const result = await apiCall<{ success: boolean; settings?: Settings; check?: CheckResult; error?: string }>('POST', 'nfqws2/settings', { source, customArgs })
+      const result = await apiCall<{ success: boolean; settings?: Settings; check?: CheckResult; error?: string }>('POST', 'nfqws2/settings', { source, customArgs, allowTcpOnly: searchMode === 'tcp' })
       if (!result.success) throw new Error(result.error || 'Не удалось сохранить nfqws2')
       if (result.settings) {
         setSettings(result.settings)
