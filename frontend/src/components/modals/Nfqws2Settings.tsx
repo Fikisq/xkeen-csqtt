@@ -44,8 +44,13 @@ type ProbeResult = NonNullable<CheckResult['results']>[number]
 function probeStatus(item?: ProbeResult) {
   if (!item) return <span className="text-muted-foreground">—</span>
   return <span className={item.ok ? 'text-green-400' : 'text-amber-400'} title={item.error || undefined}>
-    {item.ok ? `✓ ${item.status ? `HTTP ${item.status}` : 'Ответ есть'}` : `○ ${item.error || 'Нет ответа'}`}
+    {item.ok ? `✓ ${item.status ? `HTTP ${item.status}` : 'Ответ есть'}` : '○ Нет ответа'}
   </span>
+}
+
+function checkCount(label: string, passed?: number, checked = true) {
+  const color = !checked || passed === undefined ? 'text-muted-foreground' : passed === 3 ? 'text-green-400' : passed > 0 ? 'text-amber-400' : 'text-red-400'
+  return <span className={`whitespace-nowrap font-medium tabular-nums ${color}`}>{label} {checked && passed !== undefined ? `${passed}/3` : '—'}</span>
 }
 
 export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRefresh: () => void }) {
@@ -169,16 +174,15 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="text-sm font-medium">Стратегия
           <select className="bg-input-background border-border mt-1 h-9 w-full rounded-md border px-2 text-sm" value={source} onChange={(event) => { setSource(event.target.value as 'preset' | 'custom'); setReport(null) }}>
-            <option value="preset">Автоподбор стратегии и транспорта</option>
+            <option value="preset">Автоподбор</option>
             <option value="custom">Своя</option>
           </select>
         </label>
         <div className="rounded-md border p-3 text-sm">
           <div className="font-medium">Настроено: {source === 'custom' ? customArgs.split('\n').some((line) => line.trim() === '--filter-udp=443') ? 'TCP + QUIC' : 'TCP' : mode === 'tcp' ? 'TCP' : 'TCP + QUIC'}</div>
-          <div className="text-muted-foreground text-xs">{report?.success ? `Последняя проверка: TCP ${report.tcpSites ?? report.results?.filter(item => item.protocol === 'tcp' && item.ok).length ?? 0}/3, HTTP/3 ${report.http3Sites ?? report.results?.filter(item => item.protocol === 'h3' && item.ok).length ?? 0}/3` : 'Транспорт считается рабочим только после ответа сайта через диагностическую очередь.'}</div>
+          <div className="mt-1 flex gap-3 text-xs">{checkCount('TCP', displayReport?.tcpSites)}{checkCount('QUIC', displayReport?.http3Sites, displayReport?.mode === 'tcp-quic')}</div>
         </div>
       </div>
-      <p className="text-muted-foreground text-xs">{settings?.scope}</p>
       {!settings?.globalReady && <p className="rounded-md border border-amber-500/40 px-3 py-2 text-xs text-amber-500">Выход nfqws2 ещё не доступен в Xray.</p>}
       {source === 'custom' && <label className="block text-sm font-medium">Своя стратегия · один параметр nfqws2 в строке
         <Textarea className="mt-1 min-h-44 font-mono text-xs" value={customArgs} onChange={(event) => { setCustomArgs(event.target.value); setReport(null) }} onPaste={(event) => {
@@ -190,28 +194,25 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
           void check('custom', next)
         }} spellCheck={false} placeholder={'--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=...'} />
       </label>}
-      {source === 'preset' && <div className="rounded-md border p-3">
-        <p className="text-sm font-medium">Параметры выбранной стратегии</p>
-        <p className="text-muted-foreground text-xs">В подбор включены {searchJob?.flowsealCount ?? 38} адаптаций TLS/QUIC из Flowseal 1.10.3 и 1.10.2. Это варианты для маршрутов панели; Windows-списки и игровые порты не копируются на все устройства.</p>
-        <p className="text-muted-foreground text-xs">«Проверить» проверяет выбранные параметры. «Подобрать» генерирует сочетания Fake TLS, Multisplit, Multidisorder и числа повторов QUIC. Сохранённые рабочие варианты проверяются первыми. Подбор занимает до двух минут и не меняет активную стратегию до применения.</p>
+      {source === 'preset' && <details className="rounded-md border p-3">
+        <summary className="cursor-pointer text-sm font-medium">Параметры стратегии</summary>
         <div className="text-muted-foreground mt-2 text-xs">TCP</div>
-        <pre className="overflow-x-auto whitespace-pre-wrap break-all text-xs">{report?.args?.split('--new')[0] || settings?.tcpLua.join('\n')}</pre>
-        {mode === 'tcp-quic' && <><div className="text-muted-foreground mt-2 text-xs">QUIC</div><pre className="overflow-x-auto whitespace-pre-wrap break-all text-xs">{settings?.quicLua}</pre></>}
-      </div>}
+        <pre className="overflow-x-auto whitespace-pre-wrap break-all text-xs">{withGames(customArgs).split('--new')[0]}</pre>
+        {mode === 'tcp-quic' && <><div className="text-muted-foreground mt-2 text-xs">QUIC</div><pre className="overflow-x-auto whitespace-pre-wrap break-all text-xs">{withGames(customArgs).split('--new').find(block => block.includes('--filter-udp=443'))?.trim() || settings?.quicLua}</pre></>}
+      </details>}
       <div className="space-y-3 rounded-md border p-3">
         <div className="flex flex-wrap items-center gap-2"><select className="bg-input-background rounded-md border px-2 py-2 text-sm" value={searchMode} disabled={searching} onChange={event => setSearchMode(event.target.value as 'tcp' | 'tcp-quic')}><option value="tcp-quic">TCP + QUIC</option><option value="tcp">Только TCP</option></select><Button variant="outline" disabled={saving || checking || searching} onClick={() => void startSearch()}>Подобрать стратегию</Button>{searching && <Button variant="outline" onClick={() => void apiCall('POST', 'nfqws2/search/cancel')}>Отменить подбор</Button>}</div>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={games} disabled={searching || checking || saving || !searchJob?.gamesArgs} onChange={event => { setGames(event.target.checked); setReport(null) }} />Голос Discord и игры (Roblox) · UDP</label>
-        <p className="text-muted-foreground text-xs">Опция добавляет голосовой профиль Discord и фейки для первых двух неизвестных UDP-пакетов игры. Трафик должен быть направлен в nfqws2 правилами маршрутизации. Таблица сайтов не проверяет звонок или игровой сеанс.</p>
         {searching && <p role="status" className="text-sm">{searchJob?.phase || 'Подготовка'} · проверено {searchJob?.completed || 0} из {searchJob?.total || '…'}</p>}
-        <p className="text-muted-foreground text-xs">TCP и QUIC проверяются одновременно. Быстрая проверка ограничена 5 секундами на запрос; найденный вариант подтверждается повторной проверкой до 8 секунд. Неудачный подбор сохраняет действующую стратегию.</p>
-        <h4 className="text-sm font-medium">Сохранённые рабочие варианты</h4>
-        <div className="max-h-44 space-y-2 overflow-y-auto">{(searchJob?.library || settings?.library || []).map(item => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm"><span>{item.name ? `${item.name} · ` : ''}{item.games ? 'Голос/игры · ' : ''}{item.mode.toUpperCase()} · TCP {item.tcpSites}/3 · QUIC {item.http3Sites}/3 · {new Date(item.checkedAt).toLocaleString('ru-RU')}</span><Button size="sm" variant="outline" disabled={searching || checking || saving} onClick={() => { setSource('custom'); setCustomArgs(item.args); setMode(item.mode); setGames(!!item.games); setReport(null) }}>Выбрать</Button></div>)}{!(searchJob?.library || settings?.library || []).length && <p className="text-muted-foreground text-sm">Пока нет подтверждённых вариантов.</p>}</div>
+        <p className="text-muted-foreground text-xs">Подбор — до 2 минут. Применение — после сохранения.</p>
+        <h4 className="text-sm font-medium">Проверенные стратегии</h4>
+        <div className="max-h-44 space-y-2 overflow-y-auto">{(searchJob?.library || settings?.library || []).map(item => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm"><div className="min-w-0 flex-1"><p className="break-words">{item.name || item.args.split('\n').filter(line => line.startsWith('--lua-desync=') && !line.includes('quic_initial')).slice(0, 2).map(line => line.slice(13).split(':')[0]).join(' + ') || 'Своя стратегия'}{item.games ? ' · Голос/игры' : ''}</p><div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs">{checkCount('TCP', item.tcpSites)}{checkCount('QUIC', item.http3Sites, item.mode === 'tcp-quic')}<span className="text-muted-foreground">{new Date(item.checkedAt).toLocaleString('ru-RU')}</span></div></div><Button size="sm" variant="outline" disabled={searching || checking || saving} onClick={() => { setSource('custom'); setCustomArgs(item.args); setMode(item.mode); setGames(!!item.games); setReport(null) }}>Выбрать</Button></div>)}{!(searchJob?.library || settings?.library || []).length && <p className="text-muted-foreground text-sm">Пока нет проверенных стратегий.</p>}</div>
       </div>
       <div className="rounded-md border p-3 text-sm">
         <p className="font-medium">Проверка сайтов {displayReport?.checkedAt ? `· ${new Date(displayReport.checkedAt).toLocaleString('ru-RU')}` : ''}</p>
         {!displayReport?.results && <p className="text-muted-foreground mt-1 text-xs">Сайты ещё не проверены. Нажмите «Проверить стратегию».</p>}
-        {staleReport && <p className="mt-1 text-xs text-amber-400">Результат старше 30 минут. Для актуальных данных повторите проверку.</p>}
-        {!report && displayReport && <p className="text-muted-foreground mt-1 text-xs">Последняя проверка применённой стратегии. Изменённые параметры ещё не проверены.</p>}
+        {staleReport && <p className="mt-1 text-xs text-amber-400">Результат устарел — повторите проверку.</p>}
+        {!report && displayReport && <p className="text-muted-foreground mt-1 text-xs">Показана прежняя проверка.</p>}
         {(searching || checking) && <p role="status" className="text-muted-foreground mt-1 text-xs">Проверка идёт; ниже остаётся предыдущий результат.</p>}
         <div className="mt-2 overflow-x-auto rounded-md border">
           <table className="w-full min-w-[650px] table-fixed text-left text-sm">
@@ -224,20 +225,19 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
             </tr>)}</tbody>
           </table>
         </div>
-        {report?.candidates && <div className="mt-3 space-y-1 border-t pt-3">
-          <p className="text-xs font-medium">Автоподбор · {report.candidates.length} проверок</p>
+        {report?.candidates && <details className="mt-3 space-y-1 border-t pt-3">
+          <summary className="cursor-pointer text-xs font-medium">Ход подбора · {report.candidates.length} проверок</summary>
           {report.candidates.map((item) => {
             const selected = typeof item.variant === 'number' && item.variant === report.selectedVariant && (item.mode === 'tcp' ? report.mode === 'tcp' : item.quicVariant === report.selectedQuicVariant && report.mode === 'tcp-quic')
             const name = item.name || ['TLS + Multisplit', 'Fake TLS', 'Multisplit', 'Fake TLS + Multidisorder'][item.variant] || 'Вариант'
             return <div key={item.name || `${item.variant}:${item.mode}:${item.quicVariant ?? 0}`} className={`flex flex-wrap justify-between gap-x-3 rounded px-2 py-1 text-xs ${selected ? 'bg-green-500/10 text-green-400' : 'text-muted-foreground'}`}>
               <span>{selected ? '✓ ' : ''}{name} · {item.name ? item.mode.toUpperCase() : item.mode === 'tcp-quic' ? `QUIC ${item.quicVariant === 1 ? '6' : '11'} повторов` : 'TCP'}</span>
-              <span title={item.error}>{item.error ? 'проверка не удалась' : `TCP ${item.tcpSites ?? 0}/3 · HTTP/3 ${item.http3Sites ?? 0}/3`}</span>
+              <span className="flex gap-3" title={item.error}>{item.error ? 'Проверка не удалась' : <>{checkCount('TCP', item.tcpSites)}{checkCount('QUIC', item.http3Sites, item.mode === 'tcp-quic')}</>}</span>
             </div>
           })}
-        </div>}
-        <p className="text-muted-foreground mt-2 text-xs">Проверка показывает ответ каждого сайта в момент замера; она не гарантирует доступность всех ресурсов.</p>
+        </details>}
       </div>
-      <p className="text-muted-foreground text-xs">После проверки кнопка «Сохранить и применить» использует её результат в течение 5 минут. Если параметры изменились или срок истёк, проверка запускается снова.</p>
+      <details className="text-muted-foreground text-xs"><summary className="cursor-pointer">О проверке</summary><p className="mt-2">Проверяются ответы сайтов, не звонки и игры. Результат можно применить в течение 5 минут; затем параметры проверяются снова. Подбор включает {searchJob?.flowsealCount ?? 38} адаптаций Flowseal.</p></details>
       {error && <p role="alert" className="text-destructive text-sm">{error}</p>}
       <div className="flex flex-wrap justify-end gap-2"><Button variant="outline" onClick={onBack}>Назад</Button><Button variant="outline" disabled={saving || checking || searching || (source === 'custom' && !customArgs.trim())} onClick={() => void check()}>{checking ? 'Проверка…' : 'Проверить стратегию'}</Button><Button disabled={saving || checking || searching || (source === 'custom' && !customArgs.trim())} onClick={() => void save()}>{saving ? 'Сохраняется…' : 'Сохранить и применить'}</Button></div>
     </>}
