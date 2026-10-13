@@ -16,8 +16,8 @@ interface Settings {
   library?: SavedStrategy[]
 }
 
-interface SavedStrategy { id: string; mode: 'tcp' | 'tcp-quic'; args: string; checkedAt: string; tcpSites: number; http3Sites: number }
-interface SearchStatus { running: boolean; phase?: string; completed?: number; total?: number; result?: CheckResult; error?: string; library?: SavedStrategy[] }
+interface SavedStrategy { id: string; name?: string; games?: boolean; mode: 'tcp' | 'tcp-quic'; args: string; checkedAt: string; tcpSites: number; http3Sites: number }
+interface SearchStatus { running: boolean; phase?: string; completed?: number; total?: number; result?: CheckResult; error?: string; library?: SavedStrategy[]; gamesArgs?: string; flowsealCount?: number }
 
 interface CheckResult {
   success: boolean
@@ -62,6 +62,7 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
   const [searching, setSearching] = useState(false)
   const [searchMode, setSearchMode] = useState<'tcp' | 'tcp-quic'>('tcp-quic')
   const [searchJob, setSearchJob] = useState<SearchStatus | null>(null)
+  const [games, setGames] = useState(false)
   const sawRunning = useRef(false)
 
   useEffect(() => {
@@ -76,7 +77,7 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
           setSearching(false)
           if (sawRunning.current) {
             sawRunning.current = false
-            if (job.result) { setReport(job.result); setCustomArgs(job.result.args || ''); setSource('preset'); setMode(job.result.mode || 'tcp') }
+            if (job.result) { setReport(job.result); setCustomArgs(job.result.args || ''); setGames(!!job.result.args?.includes('--filter-udp=1024-65535')); setSource('preset'); setMode(job.result.mode || 'tcp') }
             else if (job.error) setError(job.error)
           }
         }
@@ -89,7 +90,7 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
   async function startSearch() {
     setError('')
     try {
-      const result = await apiCall<{success: boolean; error?: string}>('POST', 'nfqws2/search', {mode: searchMode})
+      const result = await apiCall<{success: boolean; error?: string}>('POST', 'nfqws2/search', {mode: searchMode, games})
       if (!result.success) throw new Error(result.error || 'Не удалось начать подбор')
       sawRunning.current = true; setSearching(true)
     } catch (error) { setError(error instanceof Error ? error.message : 'Ошибка подбора') }
@@ -103,6 +104,7 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
       setMode(value.mode)
       setSource(value.source)
       setCustomArgs(value.customArgs)
+      setGames(value.customArgs.includes('--filter-udp=1024-65535'))
       setReport(value.lastCheck ?? null)
     }).catch((cause) => {
       if (active) setError(cause instanceof Error ? cause.message : 'Не удалось загрузить настройки')
@@ -110,11 +112,18 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
     return () => { active = false }
   }, [])
 
+  function withGames(args: string) {
+    const extra = searchJob?.gamesArgs || ''
+    const base = args.trim() ? args : `--filter-tcp=443\n--payload=tls_client_hello\n${settings?.tcpLua.join('\n') || ''}\n${mode === 'tcp-quic' ? `--new\n--filter-udp=443\n--payload=quic_initial\n${settings?.quicLua || ''}\n` : ''}`
+    const clean = extra && base.endsWith(extra) ? base.slice(0, -extra.length) : base
+    return games && extra ? `${clean.trimEnd()}\n${extra}` : clean
+  }
+
   async function save() {
     setSaving(true)
     setError('')
     try {
-      const result = await apiCall<{ success: boolean; settings?: Settings; check?: CheckResult; error?: string }>('POST', 'nfqws2/settings', { source, customArgs, allowTcpOnly: searchMode === 'tcp' })
+      const result = await apiCall<{ success: boolean; settings?: Settings; check?: CheckResult; error?: string }>('POST', 'nfqws2/settings', { source, customArgs: withGames(customArgs), allowTcpOnly: searchMode === 'tcp' })
       if (!result.success) throw new Error(result.error || 'Не удалось сохранить nfqws2')
       if (result.settings) {
         setSettings(result.settings)
@@ -135,7 +144,7 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
     setChecking(true)
     setError('')
     try {
-      const result = await apiCall<CheckResult>('POST', 'nfqws2/check', { source: draftSource, customArgs: draftArgs })
+      const result = await apiCall<CheckResult>('POST', 'nfqws2/check', { source: draftSource, customArgs: withGames(draftArgs) })
       if (!result.success) throw new Error(result.error || 'Проверка не завершилась')
       setReport(result)
       onRefresh()
@@ -183,6 +192,7 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
       </label>}
       {source === 'preset' && <div className="rounded-md border p-3">
         <p className="text-sm font-medium">Параметры выбранной стратегии</p>
+        <p className="text-muted-foreground text-xs">В подбор включены {searchJob?.flowsealCount ?? 38} адаптаций TLS/QUIC из Flowseal 1.10.3 и 1.10.2. Это варианты для маршрутов панели; Windows-списки и игровые порты не копируются на все устройства.</p>
         <p className="text-muted-foreground text-xs">«Проверить» проверяет выбранные параметры. «Подобрать» генерирует сочетания Fake TLS, Multisplit, Multidisorder и числа повторов QUIC. Сохранённые рабочие варианты проверяются первыми. Подбор занимает до двух минут и не меняет активную стратегию до применения.</p>
         <div className="text-muted-foreground mt-2 text-xs">TCP</div>
         <pre className="overflow-x-auto whitespace-pre-wrap break-all text-xs">{report?.args?.split('--new')[0] || settings?.tcpLua.join('\n')}</pre>
@@ -190,10 +200,12 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
       </div>}
       <div className="space-y-3 rounded-md border p-3">
         <div className="flex flex-wrap items-center gap-2"><select className="bg-input-background rounded-md border px-2 py-2 text-sm" value={searchMode} disabled={searching} onChange={event => setSearchMode(event.target.value as 'tcp' | 'tcp-quic')}><option value="tcp-quic">TCP + QUIC</option><option value="tcp">Только TCP</option></select><Button variant="outline" disabled={saving || checking || searching} onClick={() => void startSearch()}>Подобрать стратегию</Button>{searching && <Button variant="outline" onClick={() => void apiCall('POST', 'nfqws2/search/cancel')}>Отменить подбор</Button>}</div>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={games} disabled={searching || checking || saving || !searchJob?.gamesArgs} onChange={event => { setGames(event.target.checked); setReport(null) }} />Голос Discord и игры (Roblox) · UDP</label>
+        <p className="text-muted-foreground text-xs">Опция добавляет голосовой профиль Discord и фейки для первых двух неизвестных UDP-пакетов игры. Трафик должен быть направлен в nfqws2 правилами маршрутизации. Таблица сайтов не проверяет звонок или игровой сеанс.</p>
         {searching && <p role="status" className="text-sm">{searchJob?.phase || 'Подготовка'} · проверено {searchJob?.completed || 0} из {searchJob?.total || '…'}</p>}
         <p className="text-muted-foreground text-xs">TCP и QUIC проверяются одновременно. Быстрая проверка ограничена 5 секундами на запрос; найденный вариант подтверждается повторной проверкой до 8 секунд. Неудачный подбор сохраняет действующую стратегию.</p>
         <h4 className="text-sm font-medium">Сохранённые рабочие варианты</h4>
-        <div className="max-h-44 space-y-2 overflow-y-auto">{(searchJob?.library || settings?.library || []).map(item => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm"><span>{item.mode.toUpperCase()} · TCP {item.tcpSites}/3 · QUIC {item.http3Sites}/3 · {new Date(item.checkedAt).toLocaleString('ru-RU')}</span><Button size="sm" variant="outline" disabled={searching || checking || saving} onClick={() => { setSource('custom'); setCustomArgs(item.args); setMode(item.mode); setReport(null) }}>Выбрать</Button></div>)}{!(searchJob?.library || settings?.library || []).length && <p className="text-muted-foreground text-sm">Пока нет подтверждённых вариантов.</p>}</div>
+        <div className="max-h-44 space-y-2 overflow-y-auto">{(searchJob?.library || settings?.library || []).map(item => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm"><span>{item.name ? `${item.name} · ` : ''}{item.games ? 'Голос/игры · ' : ''}{item.mode.toUpperCase()} · TCP {item.tcpSites}/3 · QUIC {item.http3Sites}/3 · {new Date(item.checkedAt).toLocaleString('ru-RU')}</span><Button size="sm" variant="outline" disabled={searching || checking || saving} onClick={() => { setSource('custom'); setCustomArgs(item.args); setMode(item.mode); setGames(!!item.games); setReport(null) }}>Выбрать</Button></div>)}{!(searchJob?.library || settings?.library || []).length && <p className="text-muted-foreground text-sm">Пока нет подтверждённых вариантов.</p>}</div>
       </div>
       <div className="rounded-md border p-3 text-sm">
         <p className="font-medium">Проверка сайтов {displayReport?.checkedAt ? `· ${new Date(displayReport.checkedAt).toLocaleString('ru-RU')}` : ''}</p>

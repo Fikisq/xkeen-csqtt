@@ -19,16 +19,31 @@ XRAY_CONFIG=/opt/etc/xray/configs/00_config.json
 JQ=/opt/bin/jq
 IPT=/opt/sbin/iptables
 
-trial_rule() {
-    "$IPT" -t mangle "$1" FORWARD -i "$LAN" -o "$WAN" -s "$CLIENT/32" \
-        -p "$2" --dport 443 -m comment --comment "$COMMENT" \
-        -j NFQUEUE --queue-num "$QUEUE" --queue-bypass
+queue_rule() {
+    kind=$1
+    operation=$2
+    protocol=$3
+    capture=${4:-configured}
+    ports=443
+    if [ "$capture" = full ] || { [ "$capture" = configured ] && [ -s "$CUSTOM" ] && grep -qx -- '--filter-udp=1024-65535' "$CUSTOM"; }; then
+        if [ "$protocol" = tcp ]; then ports=443,2053,2083,2087,2096,8443; else ports=443,1024:65535; fi
+    fi
+    if [ "$kind" = trial ]; then
+        set -- -t mangle "$operation" FORWARD -i "$LAN" -o "$WAN" -s "$CLIENT/32" -p "$protocol"
+        comment=$COMMENT
+    else
+        set -- -t mangle "$operation" OUTPUT -o "$WAN" -m mark --mark "$MARK/0xffffffff" -p "$protocol"
+        comment=$GLOBAL_COMMENT
+    fi
+    if [ "$ports" = 443 ]; then set -- "$@" --dport 443; else set -- "$@" -m multiport --dports "$ports"; fi
+    "$IPT" "$@" -m comment --comment "$comment" -j NFQUEUE --queue-num "$QUEUE" --queue-bypass
 }
 
-global_rule() {
-    "$IPT" -t mangle "$1" OUTPUT -o "$WAN" -m mark --mark "$MARK/0xffffffff" \
-        -p "$2" --dport 443 -m comment --comment "$GLOBAL_COMMENT" \
-        -j NFQUEUE --queue-num "$QUEUE" --queue-bypass
+trial_rule() { queue_rule trial "$@"; }
+global_rule() { queue_rule global "$@"; }
+
+udp_enabled() {
+    [ "$(profile)" = tcp-quic ] || { [ -s "$CUSTOM" ] && grep -qx -- '--filter-udp=1024-65535' "$CUSTOM"; }
 }
 
 trial_enabled() {
@@ -48,9 +63,11 @@ global_enabled() {
 remove_rules() {
     kind=$1
     for protocol in tcp udp; do
-        while "${kind}_rule" -C "$protocol" >/dev/null 2>&1; do
-            "${kind}_rule" -D "$protocol"
+      for capture in legacy full; do
+        while "${kind}_rule" -C "$protocol" "$capture" >/dev/null 2>&1; do
+            "${kind}_rule" -D "$protocol" "$capture"
         done
+      done
     done
 }
 
@@ -90,7 +107,7 @@ run_engine() {
     if [ -s "$CUSTOM" ]; then
         while IFS= read -r arg || [ -n "$arg" ]; do
             case "$arg" in
-                --new|--filter-tcp=443|--filter-udp=443|--payload=tls_client_hello|--payload=quic_initial|--lua-desync=*)
+                --new|--filter-tcp=443|--filter-udp=443|--payload=tls_client_hello|--payload=quic_initial|--payload=empty,tls_client_hello|--filter-tcp=2053,2083,2087,2096,8443|--filter-udp=19294-19344,50000-50100|--filter-udp=1024-65535|--filter-l7=discord,stun|--filter-l7=unknown|--payload=discord_ip_discovery,stun|--payload=unknown|--out-range=-n2|--lua-desync=*)
                     set -- "$@" "$arg" ;;
                 *) echo 'invalid custom strategy argument' >&2; return 1 ;;
             esac
@@ -131,14 +148,14 @@ case "${1:-}" in
           alive || { echo 'nfqws2 did not start' >&2; exit 1; }
         fi
         for protocol in tcp udp; do
-            [ "$protocol" = tcp ] || [ "$selected" = tcp-quic ] || continue
+            [ "$protocol" = tcp ] || udp_enabled || continue
             if [ "$trial" -eq 1 ]; then ensure_rule trial "$protocol"; fi
             if [ "$global" -eq 1 ]; then ensure_rule global "$protocol"; fi
         done
-        if [ "$trial" -eq 0 ] || [ "$selected" = tcp ]; then
+        if [ "$trial" -eq 0 ] || ! udp_enabled; then
             while trial_rule -C udp >/dev/null 2>&1; do trial_rule -D udp; done
         fi
-        if [ "$global" -eq 0 ] || [ "$selected" = tcp ]; then
+        if [ "$global" -eq 0 ] || ! udp_enabled; then
             while global_rule -C udp >/dev/null 2>&1; do global_rule -D udp; done
         fi
         if [ "$trial" -eq 0 ]; then remove_rules trial; fi

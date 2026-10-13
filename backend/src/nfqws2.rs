@@ -259,13 +259,16 @@ fn candidate(request: &SettingsRequest) -> Result<(String, String), String> {
     }
     let lines: Vec<&str> = request.custom_args.lines().map(str::trim)
         .filter(|line| !line.is_empty()).collect();
-    if lines.is_empty() || lines.len() > 32 || request.custom_args.len() > 4096
+    if lines.is_empty() || lines.len() > 64 || request.custom_args.len() > 32768
         || !lines.iter().any(|line| *line == "--filter-tcp=443")
         || !lines.iter().any(|line| line.starts_with("--lua-desync="))
-        || lines.iter().any(|line| line.len() > 1024 || line.bytes().any(|byte| byte.is_ascii_whitespace() || byte < 33 || byte > 126)
-            || !matches!(*line, "--new" | "--filter-tcp=443" | "--filter-udp=443" | "--payload=tls_client_hello" | "--payload=quic_initial")
+        || lines.iter().any(|line| line.len() > 8192 || line.bytes().any(|byte| byte.is_ascii_whitespace() || byte < 33 || byte > 126)
+            || !matches!(*line, "--new" | "--filter-tcp=443" | "--filter-udp=443" | "--payload=tls_client_hello" | "--payload=quic_initial"
+                | "--payload=empty,tls_client_hello" | "--filter-tcp=2053,2083,2087,2096,8443"
+                | "--filter-udp=19294-19344,50000-50100" | "--filter-udp=1024-65535"
+                | "--filter-l7=discord,stun" | "--filter-l7=unknown" | "--payload=discord_ip_discovery,stun" | "--payload=unknown" | "--out-range=-n2")
                 && !line.starts_with("--lua-desync=")) {
-        return Err("Укажите до 32 отдельных параметров nfqws2; нужны TCP/443 и --lua-desync, без пробелов и команд оболочки".into());
+        return Err("Укажите до 64 отдельных параметров nfqws2; нужны TCP/443 и --lua-desync, без пробелов и команд оболочки".into());
     }
     let custom = format!("{}\n", lines.join("\n"));
     let mode = if lines.contains(&"--filter-udp=443") { "tcp-quic" } else { "tcp" };

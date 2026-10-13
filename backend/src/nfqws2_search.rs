@@ -4,6 +4,20 @@ use std::sync::atomic::{AtomicBool, Ordering};
 const LIBRARY: &str = "/opt/etc/xkeen/nfqws2-stage/working-strategies.json";
 static JOB: OnceLock<Mutex<Value>> = OnceLock::new();
 static CANCEL: AtomicBool = AtomicBool::new(false);
+pub(super) const GAMES_ARGS: &str = include_str!("../../router/nfqws2-games.args");
+
+fn flowseal() -> Vec<Value> {
+    serde_json::from_str::<Value>(include_str!("../../router/nfqws2-flowseal.json")).ok()
+        .and_then(|value| value["entries"].as_array().cloned()).unwrap_or_default()
+}
+
+fn strategy_name(args: &str) -> Option<String> {
+    let args = args.strip_suffix(GAMES_ARGS).unwrap_or(args);
+    let entries = flowseal();
+    entries.iter().find(|item| item["args"].as_str() == Some(args))
+        .or_else(|| entries.iter().find(|item| item["args"].as_str().is_some_and(|full| full.split("--new").next() == args.split("--new").next())))
+        .and_then(|item| item["name"].as_str().map(str::to_string))
+}
 
 pub fn saved() -> Vec<Value> {
     std::fs::read(LIBRARY).ok().and_then(|bytes| serde_json::from_slice(&bytes).ok()).unwrap_or_default()
@@ -14,7 +28,7 @@ pub(super) async fn remember(mode: &str, args: &str, report: &Value) -> Result<(
     let id = strategy_key("preset", mode, args);
     let mut entries = saved();
     entries.retain(|item| item["id"] != id);
-    entries.insert(0, json!({"id": id, "mode": mode, "args": args, "checkedAt": report["checkedAt"], "tcpSites": report["tcpSites"], "http3Sites": report["http3Sites"], "results": report["results"]}));
+    entries.insert(0, json!({"id": id, "name": strategy_name(args), "games": args.contains("--filter-udp=1024-65535"), "mode": mode, "args": args, "checkedAt": report["checkedAt"], "tcpSites": report["tcpSites"], "http3Sites": report["http3Sites"], "results": report["results"]}));
     entries.truncate(16);
     let temp = format!("{LIBRARY}.new");
     tokio::fs::write(&temp, serde_json::to_vec(&entries).map_err(|e| e.to_string())?).await.map_err(|e| e.to_string())?;
@@ -24,11 +38,16 @@ pub(super) async fn remember(mode: &str, args: &str, report: &Value) -> Result<(
 
 fn generated_tcp() -> Vec<String> {
     let mut pool = Vec::new();
-    for entry in saved() {
-        if let Some(args) = entry["args"].as_str() { pool.push(args.split("--new").next().unwrap_or(args).trim().to_string() + "\n"); }
-    }
     if let Ok(args) = std::fs::read_to_string(CUSTOM) {
         if !args.trim().is_empty() { pool.push(args.split("--new").next().unwrap_or(&args).trim().to_string() + "\n"); }
+    }
+    let mut working = saved();
+    working.sort_by_key(|entry| std::cmp::Reverse(entry["tcpSites"].as_u64().unwrap_or(0) * 10 + entry["http3Sites"].as_u64().unwrap_or(0) * 6));
+    for entry in working {
+        if let Some(args) = entry["args"].as_str() { pool.push(args.split("--new").next().unwrap_or(args).trim().to_string() + "\n"); }
+    }
+    for entry in flowseal() {
+        if let Some(args) = entry["args"].as_str() { pool.push(args.split("--new").next().unwrap_or(args).to_string()); }
     }
     for variant in 0..4 { pool.push(preset_args(variant, "tcp", 0)); }
     for seq in [10000, -10000, 1] {
@@ -43,7 +62,7 @@ fn generated_tcp() -> Vec<String> {
     for args in pool {
         if !unique.contains(&args) && candidate(&SettingsRequest { source: "custom".into(), custom_args: args.clone(), allow_tcp_only: false }).is_ok() { unique.push(args); }
     }
-    unique.truncate(20);
+    unique.truncate(64);
     unique
 }
 
@@ -67,7 +86,7 @@ pub async fn scan(user: bool, requested_mode: &str) -> Result<(Value, String, St
         match run_probe_timeout("preset", "tcp", args, 4).await {
             Ok(report) => {
                 let score = report["tcpSites"].as_u64().unwrap_or(0);
-                candidates.push(json!({"name": format!("TCP {}", index + 1), "mode": "tcp", "tcpSites": score, "http3Sites": 0}));
+                candidates.push(json!({"name": strategy_name(args).unwrap_or_else(|| format!("TCP {}", index + 1)), "mode": "tcp", "tcpSites": score, "http3Sites": 0}));
                 remember("tcp", args, &report).await?;
                 if best.as_ref().is_none_or(|(old, _, _)| score > old["tcpSites"].as_u64().unwrap_or(0)) { best = Some((report, "tcp".into(), args.clone())); }
                 if score == 3 { break; }
@@ -79,8 +98,12 @@ pub async fn scan(user: bool, requested_mode: &str) -> Result<(Value, String, St
     if !healthy_report(&tcp_report, "tcp") { return Err("Не найден вариант с ответом хотя бы от двух сайтов по TCP; активная стратегия сохранена".into()); }
     let mut selected = (tcp_report, "tcp".to_string(), tcp_args.clone());
     if requested_mode == "tcp-quic" {
-        let mut quic_args: Vec<String> = saved().into_iter().filter(|entry| entry["mode"] == "tcp-quic")
-            .filter_map(|entry| entry["args"].as_str().and_then(|args| args.split_once("--new").map(|(_, udp)| format!("{tcp_args}--new{udp}")))).collect();
+        let mut quic_args = Vec::new();
+        for entry in saved().into_iter().filter(|entry| entry["mode"] == "tcp-quic") {
+            if let Some(args) = entry["args"].as_str().and_then(|args| args.strip_suffix(GAMES_ARGS).unwrap_or(args).split_once("--new").map(|(_, udp)| format!("{tcp_args}--new{udp}"))) {
+                if !quic_args.contains(&args) { quic_args.push(args); }
+            }
+        }
         for repeats in [11, 6, 2, 4, 8, 16] {
             let args = format!("{tcp_args}--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats={repeats}\n");
             if !quic_args.contains(&args) { quic_args.push(args); }
@@ -115,7 +138,7 @@ pub async fn scan(user: bool, requested_mode: &str) -> Result<(Value, String, St
 }
 
 #[derive(Deserialize)]
-pub struct SearchRequest { mode: String }
+pub struct SearchRequest { mode: String, #[serde(default)] games: bool }
 
 pub async fn start(Json(request): Json<SearchRequest>) -> Json<Value> {
     if !matches!(request.mode.as_str(), "tcp" | "tcp-quic") || !Path::new(ROOT).is_dir() { return Json(json!({"success": false, "error": "Выберите TCP или TCP + QUIC; nfqws2 должен быть установлен"})); }
@@ -125,7 +148,26 @@ pub async fn start(Json(request): Json<SearchRequest>) -> Json<Value> {
     *JOB.get_or_init(|| Mutex::new(json!({}))).lock().await = json!({"running": true, "phase": "Подготовка", "completed": 0, "total": 0});
     tokio::spawn(async move {
         let _guard = guard;
+        let started = Instant::now();
         let result = scan(true, &request.mode).await;
+        let result = match result {
+            Ok((previous_report, mode, args)) if request.games => {
+                let args = args.strip_suffix(GAMES_ARGS).unwrap_or(&args).to_string() + GAMES_ARGS;
+                match run_probe_timeout("preset", &mode, &args, 8).await {
+                    Ok(mut report) if healthy_report(&report, &mode) && !CANCEL.load(Ordering::Relaxed) => {
+                        report["gamesVerified"] = json!(false);
+                        report["candidates"] = previous_report["candidates"].clone();
+                        report["durationSeconds"] = json!(started.elapsed().as_secs());
+                        match remember(&mode, &args, &report).await {
+                            Ok(()) => Ok((report, mode, args)), Err(error) => Err(error),
+                        }
+                    }
+                    Ok(_) => Err("Проверка профиля с игровыми правилами не подтверждена; активная стратегия сохранена".into()),
+                    Err(error) => Err(error),
+                }
+            }
+            result => result,
+        };
         let mut job = JOB.get().unwrap().lock().await;
         job["running"] = json!(false);
         match result {
@@ -142,6 +184,8 @@ pub async fn start(Json(request): Json<SearchRequest>) -> Json<Value> {
 pub async fn status() -> Json<Value> {
     let mut job = JOB.get_or_init(|| Mutex::new(json!({"running": false}))).lock().await.clone();
     job["library"] = json!(saved());
+    job["gamesArgs"] = json!(GAMES_ARGS);
+    job["flowsealCount"] = json!(flowseal().len());
     Json(job)
 }
 

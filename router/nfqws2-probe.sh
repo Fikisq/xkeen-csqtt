@@ -57,7 +57,7 @@ build_args() {
         [ -r "$candidate" ] || return 1
         while IFS= read -r arg || [ -n "$arg" ]; do
             case "$arg" in
-                --new|--filter-tcp=443|--filter-udp=443|--payload=tls_client_hello|--payload=quic_initial|--lua-desync=*)
+                --new|--filter-tcp=443|--filter-udp=443|--payload=tls_client_hello|--payload=quic_initial|--payload=empty,tls_client_hello|--filter-tcp=2053,2083,2087,2096,8443|--filter-udp=19294-19344,50000-50100|--filter-udp=1024-65535|--filter-l7=discord,stun|--filter-l7=unknown|--payload=discord_ip_discovery,stun|--payload=unknown|--out-range=-n2|--lua-desync=*)
                     set -- "$@" "$arg" ;;
                 *) echo 'invalid candidate argument' >&2; return 1 ;;
             esac
