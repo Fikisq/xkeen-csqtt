@@ -221,7 +221,7 @@ AUXILIARY_STARTED=1
 ADAPTER=$!
 echo "$ADAPTER" > "$DIR/csqtt-native-events.pid"
 
-"$DIR/csqtt-tun-fd" csqtt0 csqtt_router_tun_uds "$DIR/csqtt.log" &
+"$DIR/csqtt-tun-fd" csqtt0 csqtt_router_tun_uds "$DIR/csqtt.log" fd-only &
 HELPER=$!
 echo "$HELPER" > "$DIR/csqtt-tun-fd.pid"
 

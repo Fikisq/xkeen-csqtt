@@ -427,7 +427,7 @@ pub async fn status() -> Json<Value> {
     let interface = Path::new("/sys/class/net/csqtt0").exists();
     let ready = if running && interface {
         tokio::process::Command::new("/opt/sbin/ip")
-            .args(["-4", "addr", "show", "dev", "csqtt0"])
+            .args(["-f", "inet", "addr", "show", "dev", "csqtt0"])
             .output().await.ok().is_some_and(|output| output.status.success() && String::from_utf8_lossy(&output.stdout).contains("inet "))
     } else { false };
     let log_recent = std::fs::metadata("/opt/etc/csqtt/csqtt.log")

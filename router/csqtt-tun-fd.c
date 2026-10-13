@@ -33,9 +33,9 @@ static int run_ip(const char *a, const char *b, const char *c,
 }
 
 int main(int argc, char **argv) {
-    if (argc != 4 || strlen(argv[1]) == 0 || strlen(argv[1]) >= IFNAMSIZ ||
+    if ((argc != 4 && argc != 5) || (argc == 5 && strcmp(argv[4], "fd-only") != 0) || strlen(argv[1]) == 0 || strlen(argv[1]) >= IFNAMSIZ ||
         strlen(argv[2]) == 0 || strlen(argv[2]) >= sizeof(((struct sockaddr_un *)0)->sun_path) - 1) {
-        fprintf(stderr, "usage: csqtt-tun-fd IFACE ABSTRACT_SOCKET LOG\n");
+        fprintf(stderr, "usage: csqtt-tun-fd IFACE ABSTRACT_SOCKET LOG [fd-only]\n");
         return 2;
     }
     int fd = open("/dev/net/tun", O_RDWR | O_CLOEXEC | O_NONBLOCK);
@@ -45,7 +45,8 @@ int main(int argc, char **argv) {
     request.ifr_flags = IFF_TUN | IFF_NO_PI;
     if (ioctl(fd, TUNSETIFF, &request) < 0) { perror("TUNSETIFF"); return 1; }
 
-    if (run_ip("link", "set", "dev", argv[1], "mtu", "1300") != 0 ||
+    const char *mtu = argc == 5 ? "1160" : "1300";
+    if (run_ip("link", "set", "dev", argv[1], "mtu", mtu) != 0 ||
         run_ip("link", "set", "dev", argv[1], "up", NULL) != 0) {
         fprintf(stderr, "cannot configure TUN link\n"); return 1;
     }
@@ -83,7 +84,9 @@ int main(int argc, char **argv) {
     }
     close(sock);
     close(fd);
-    fprintf(stderr, "[TUN] csqtt0 descriptor passed to CSQTT 2.1.9\n");
+    fprintf(stderr, "[TUN] %s descriptor passed to CSQTT (MTU %s)\n", argv[1], mtu);
+    /* APK 2.5.0's event adapter assigns the CONFIG address itself. */
+    if (argc == 5) { fclose(log); return 0; }
 
     deadline = time(NULL) + 180;
     char line[4096];
