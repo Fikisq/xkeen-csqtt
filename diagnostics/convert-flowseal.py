@@ -126,7 +126,7 @@ def main():
                 seen.add(args)
                 entries.append({'name': name, 'release': release, 'source': f'https://github.com/Flowseal/zapret-discord-youtube/blob/{release}/{path.name}', 'scope': scope, 'args': args})
     output = Path(__file__).resolve().parents[1] / 'router' / 'nfqws2-flowseal.json'
-    output.write_text(json.dumps({'entries': entries, 'skipped': skipped}, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    output.write_text(json.dumps({'entries': entries, 'skipped': skipped}, ensure_ascii=False, indent=2) + '\n', encoding='utf-8', newline='\n')
     root = Path(sys.argv[1])
     voice = '0x' + (root / 'bin' / 'ACTIVE_DISCORD_UDP.bin').read_bytes().hex()
     game = '0x' + (root / 'bin' / 'ACTIVE_GAME_UDP.bin').read_bytes().hex()
@@ -147,7 +147,7 @@ def main():
 --out-range=-n2
 --lua-desync=fake:blob={game}:repeats=12:payload=unknown
 '''
-    (output.parent / 'nfqws2-games.args').write_text(extras, encoding='utf-8')
+    (output.parent / 'nfqws2-games.args').write_text(extras, encoding='utf-8', newline='\n')
     print(json.dumps({'converted': len(entries), 'skipped': len(skipped), 'output': str(output)}))
 
 
