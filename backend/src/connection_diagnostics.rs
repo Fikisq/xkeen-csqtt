@@ -53,6 +53,7 @@ fn any_match(values: &[Value], mut matches: impl FnMut(&str) -> Option<bool>) ->
 }
 
 fn prediction(config: &Value, device: Ipv4Addr, host: &str, ip: IpAddr, port: u16, protocol: &str, cache: &mut HashMap<String, Option<Vec<String>>>) -> Value {
+    let mut unchecked = Vec::new();
     for rule in config.pointer("/routing/rules").and_then(Value::as_array).into_iter().flatten() {
         let mut unknown = false;
         if let Some(values) = rule["sourceIP"].as_array() {
@@ -81,9 +82,16 @@ fn prediction(config: &Value, device: Ipv4Addr, host: &str, ip: IpAddr, port: u1
             if matched == Some(false) { continue; } unknown |= matched.is_none();
         }
         if rule.as_object().is_some_and(|object| object.keys().any(|key| !["type","ruleTag","sourceIP","network","inboundTag","port","domain","ip","outboundTag","balancerTag","xkeenRouteGroup"].contains(&key.as_str()))) { unknown = true; }
-        return json!({"ip": ip, "protocol": protocol, "rule": rule["ruleTag"].as_str().unwrap_or("Служебное правило"), "outbound": rule["outboundTag"], "balancer": rule["balancerTag"], "uncertain": unknown});
+        if unknown {
+            unchecked.push(rule["ruleTag"].as_str().map(str::to_owned).unwrap_or_else(|| {
+                if let Some(values) = rule["protocol"].as_array() { format!("Протокол приложения: {}", values.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")) }
+                else { "Служебное правило с дополнительными условиями".into() }
+            }));
+            continue;
+        }
+        return json!({"ip": ip, "protocol": protocol, "rule": rule["ruleTag"].as_str().unwrap_or("Служебное правило"), "outbound": rule["outboundTag"], "balancer": rule["balancerTag"], "uncertain": !unchecked.is_empty(), "unchecked": unchecked});
     }
-    json!({"ip": ip, "protocol": protocol, "rule": "Нет совпадения", "outbound": config.pointer("/outbounds/0/tag"), "uncertain": true})
+    json!({"ip": ip, "protocol": protocol, "rule": "Нет определённого совпадения", "outbound": config.pointer("/outbounds/0/tag"), "uncertain": true, "unchecked": unchecked})
 }
 
 pub async fn inspect(Query(request): Query<Request>) -> Json<Value> {

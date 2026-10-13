@@ -297,7 +297,7 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
         <Button size="sm" variant="outline" onClick={() => setDiagnosticsOpen(true)}>Диагностика</Button>
       </div>
     </div>
-    <ConnectionDiagnostics open={diagnosticsOpen} onOpenChange={setDiagnosticsOpen} devices={deviceTabs} selectedDevice={deviceIp} />
+    <ConnectionDiagnostics open={diagnosticsOpen} onOpenChange={setDiagnosticsOpen} devices={deviceTabs} selectedDevice={deviceIp} titles={Object.fromEntries(outbounds.map(out => [out.tag, out.label]))} />
     <ConnectionPicker open={pickerOpen} onOpenChange={setPickerOpen} connections={orderedCards.map(out => ({tag: out.tag, label: out.label, details: outboundTransport((parsed.outbounds as any[]).find(raw => raw.tag === out.tag))}))} shown={visibleCards.map(out => out.tag)} limit={cardLimit} activeTag={selectedVpn?.outboundTag} onToggle={toggleCard} latencies={latencies} pingPending={pingPending} ping={ping} />
     <Dialog open={addIpOpen} onOpenChange={open => { setAddIpOpen(open); if (!open) setNewIp('') }}>
       <DialogContent className="sm:max-w-sm">
