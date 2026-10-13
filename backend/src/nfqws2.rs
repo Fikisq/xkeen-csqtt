@@ -82,11 +82,11 @@ fn strategy_key(source: &str, mode: &str, custom: &str) -> String {
     format!("{:x}", md5::compute(format!("{source}\n{mode}\n{custom}")))
 }
 
-fn active_check() -> Option<Value> {
+fn matching_check() -> Option<Value> {
     let custom = std::fs::read_to_string(CUSTOM).unwrap_or_default();
     let source = active_source(&custom);
     let key = strategy_key(source, &profile(), &custom);
-    let value = std::fs::read_to_string(LAST_CHECK).ok()
+    let mut value = std::fs::read_to_string(LAST_CHECK).ok()
         .and_then(|text| serde_json::from_str::<Value>(&text).ok())?;
     let fresh = value.get("checkedAt").and_then(Value::as_str)
         .and_then(|stamp| chrono::DateTime::parse_from_rfc3339(stamp).ok())
@@ -94,7 +94,13 @@ fn active_check() -> Option<Value> {
             let age = chrono::Utc::now().signed_duration_since(stamp);
             age.num_seconds() >= 0 && age.num_minutes() < 30
         });
-    (fresh && value.get("strategyKey").and_then(Value::as_str) == Some(key.as_str())).then_some(value)
+    if value.get("strategyKey").and_then(Value::as_str) != Some(key.as_str()) { return None; }
+    value["stale"] = json!(!fresh);
+    Some(value)
+}
+
+fn active_check() -> Option<Value> {
+    matching_check().filter(|value| value.get("stale").and_then(Value::as_bool) == Some(false))
 }
 
 fn settings_json() -> Value {
@@ -115,7 +121,7 @@ fn settings_json() -> Value {
         "strategyName": format!("{} · {}", if active_source(&custom_args) == "preset" { "Автоподбор" } else { "Своя" }, if mode == "tcp" { "TCP" } else { "TCP + QUIC" }),
         "tcpLua": if custom_args.trim().is_empty() { TCP_LUA.to_vec() } else { custom_args.lines().filter(|line| line.starts_with("--lua-desync=") && !line.contains("quic_initial")).collect::<Vec<_>>() },
         "quicLua": if custom_args.trim().is_empty() { QUIC_LUA[0] } else { custom_args.lines().find(|line| line.contains("quic_initial") && line.starts_with("--lua-desync=")).unwrap_or(QUIC_LUA[0]) },
-        "lastCheck": active_check(),
+        "lastCheck": matching_check(),
         "library": search::saved(),
         "globalReady": global_ready,
         "scope": if global_ready {

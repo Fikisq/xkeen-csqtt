@@ -23,6 +23,7 @@ interface CheckResult {
   success: boolean
   error?: string
   checkedAt?: string
+  stale?: boolean
   mode?: 'tcp' | 'tcp-quic'
   selectedVariant?: number
   selectedQuicVariant?: number | null
@@ -86,7 +87,7 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
   }, [searching])
 
   async function startSearch() {
-    setError(''); setReport(null)
+    setError('')
     try {
       const result = await apiCall<{success: boolean; error?: string}>('POST', 'nfqws2/search', {mode: searchMode})
       if (!result.success) throw new Error(result.error || 'Не удалось начать подбор')
@@ -145,11 +146,13 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
     }
   }
 
-  const siteRows = [...new Set(report?.results?.map(item => item.url) ?? [])].map(url => ({
+  const displayReport = report ?? settings?.lastCheck
+  const staleReport = displayReport?.stale || (!!displayReport?.checkedAt && Date.now() - Date.parse(displayReport.checkedAt) >= 30 * 60 * 1000)
+  const siteRows = ['https://www.youtube.com/generate_204', 'https://discord.com/', 'https://www.instagram.com/'].map(url => ({
     url,
     name: url.includes('youtube') ? 'YouTube' : url.includes('discord') ? 'Discord' : url.includes('instagram') ? 'Instagram' : url,
-    tcp: report?.results?.find(item => item.url === url && item.protocol === 'tcp'),
-    quic: report?.results?.find(item => item.url === url && item.protocol === 'h3'),
+    tcp: displayReport?.results?.find(item => item.url === url && item.protocol === 'tcp'),
+    quic: displayReport?.results?.find(item => item.url === url && item.protocol === 'h3'),
   }))
 
   return <div className="space-y-4">
@@ -192,8 +195,12 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
         <h4 className="text-sm font-medium">Сохранённые рабочие варианты</h4>
         <div className="max-h-44 space-y-2 overflow-y-auto">{(searchJob?.library || settings?.library || []).map(item => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm"><span>{item.mode.toUpperCase()} · TCP {item.tcpSites}/3 · QUIC {item.http3Sites}/3 · {new Date(item.checkedAt).toLocaleString('ru-RU')}</span><Button size="sm" variant="outline" disabled={searching || checking || saving} onClick={() => { setSource('custom'); setCustomArgs(item.args); setMode(item.mode); setReport(null) }}>Выбрать</Button></div>)}{!(searchJob?.library || settings?.library || []).length && <p className="text-muted-foreground text-sm">Пока нет подтверждённых вариантов.</p>}</div>
       </div>
-      {report?.results && <div className="rounded-md border p-3 text-sm">
-        <p className="font-medium">Проверка сайтов {report.checkedAt ? `· ${new Date(report.checkedAt).toLocaleTimeString('ru-RU')}` : ''}</p>
+      <div className="rounded-md border p-3 text-sm">
+        <p className="font-medium">Проверка сайтов {displayReport?.checkedAt ? `· ${new Date(displayReport.checkedAt).toLocaleString('ru-RU')}` : ''}</p>
+        {!displayReport?.results && <p className="text-muted-foreground mt-1 text-xs">Сайты ещё не проверены. Нажмите «Проверить стратегию».</p>}
+        {staleReport && <p className="mt-1 text-xs text-amber-400">Результат старше 30 минут. Для актуальных данных повторите проверку.</p>}
+        {!report && displayReport && <p className="text-muted-foreground mt-1 text-xs">Последняя проверка применённой стратегии. Изменённые параметры ещё не проверены.</p>}
+        {(searching || checking) && <p role="status" className="text-muted-foreground mt-1 text-xs">Проверка идёт; ниже остаётся предыдущий результат.</p>}
         <div className="mt-2 overflow-x-auto rounded-md border">
           <table className="w-full min-w-[650px] table-fixed text-left text-sm">
             <thead className="bg-input-background text-foreground"><tr><th className="w-[18%] px-3 py-2 font-medium">Ресурс</th><th className="w-[27%] px-3 py-2 font-medium">TCP</th><th className="w-[27%] px-3 py-2 font-medium">QUIC</th><th className="w-[28%] px-3 py-2 font-medium">TCP + QUIC</th></tr></thead>
@@ -205,7 +212,7 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
             </tr>)}</tbody>
           </table>
         </div>
-        {report.candidates && <div className="mt-3 space-y-1 border-t pt-3">
+        {report?.candidates && <div className="mt-3 space-y-1 border-t pt-3">
           <p className="text-xs font-medium">Автоподбор · {report.candidates.length} проверок</p>
           {report.candidates.map((item) => {
             const selected = typeof item.variant === 'number' && item.variant === report.selectedVariant && (item.mode === 'tcp' ? report.mode === 'tcp' : item.quicVariant === report.selectedQuicVariant && report.mode === 'tcp-quic')
@@ -217,7 +224,7 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
           })}
         </div>}
         <p className="text-muted-foreground mt-2 text-xs">Проверка показывает ответ каждого сайта в момент замера; она не гарантирует доступность всех ресурсов.</p>
-      </div>}
+      </div>
       <p className="text-muted-foreground text-xs">После проверки кнопка «Сохранить и применить» использует её результат в течение 5 минут. Если параметры изменились или срок истёк, проверка запускается снова.</p>
       {error && <p role="alert" className="text-destructive text-sm">{error}</p>}
       <div className="flex flex-wrap justify-end gap-2"><Button variant="outline" onClick={onBack}>Назад</Button><Button variant="outline" disabled={saving || checking || searching || (source === 'custom' && !customArgs.trim())} onClick={() => void check()}>{checking ? 'Проверка…' : 'Проверить стратегию'}</Button><Button disabled={saving || checking || searching || (source === 'custom' && !customArgs.trim())} onClick={() => void save()}>{saving ? 'Сохраняется…' : 'Сохранить и применить'}</Button></div>
