@@ -23,10 +23,8 @@ set -- "$DIR/csqtt-client" \
     --captcha-mode "${CSQTT_CAPTCHA_MODE:-$CAPTCHA_MODE}" \
     --tun-uds csqtt_router_tun_uds
 
-set -- "$@" --bootstrap-dns system
-if [ -n "${CUSTOM_TURN_IPS:-}" ]; then
-    set -- "$@" --custom-turn-ips "$CUSTOM_TURN_IPS"
-fi
+# Native 2.1.9 uses the router resolver and its own TURN selection.
+# --bootstrap-dns and --custom-turn-ips belong to the newer runtime.
 
 case "${VK_HASH_MODE:-auto_js}" in
     manual)
