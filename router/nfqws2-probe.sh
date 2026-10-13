@@ -86,7 +86,12 @@ ip route show default | grep -q "dev $WAN " || { echo 'WAN interface changed' >&
 trap cleanup EXIT HUP INT TERM
 cleanup
 build_args "$2" "$3" "${4:-/dev/null}"
-sleep 0.1
+# Router sleep implementations may accept integer seconds only.
+if command -v usleep >/dev/null 2>&1; then
+    usleep 100000
+else
+    sleep 1
+fi
 [ -f "$PID" ] || { echo 'probe engine did not start' >&2; exit 1; }
 rule -A tcp
 [ "$3" = tcp-quic ] && rule -A udp
