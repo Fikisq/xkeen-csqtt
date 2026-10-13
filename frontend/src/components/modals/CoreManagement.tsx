@@ -169,7 +169,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
       const result = await apiCall<{ success: boolean; error?: string }>('PUT', 'csqtt/settings', {
         hashes: Number(csqttHashes), workers: Number(csqttWorkers), peer: csqttPeer.trim(),
         password: csqttPassword, vkToken: csqttVkToken.trim(), hashMode: csqttHashMode,
-        obfs: csqttObfs, turnTransport: csqttTurnTransport, turnSubnet: csqttTurnSubnet, turnIpLimit: Number(csqttTurnIpLimit), customTurnIps: csqttCustomTurnIps.trim(), manualHashes: csqttManualHashes.trim(),
+        obfs: csqttObfs, turnTransport: csqttTurnTransport, ...(csqttApkClient ? { turnSubnet: csqttTurnSubnet, turnIpLimit: Number(csqttTurnIpLimit), customTurnIps: csqttCustomTurnIps.trim() } : {}), manualHashes: csqttManualHashes.trim(),
       })
       if (!result.success) throw new Error(result.error || 'Не удалось сохранить параметры CSQTT')
       setCsqttRestartRequired(true)
@@ -413,7 +413,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
               <label className="min-w-0 text-sm font-medium">Потоки<select className="bg-input-background border-border mt-1 h-9 w-full rounded-md border px-2 text-sm" value={csqttWorkers} onChange={(event) => setCsqttWorkers(event.target.value)}>{(csqttApkClient ? Array.from({ length: 97 }, (_, i) => i + 3) : Array.from({ length: 14 }, (_, i) => (i + 1) * 9)).map((workers) => <option key={workers} value={workers}>{workers}</option>)}</select></label>
             </div>
           </div>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          {csqttApkClient && <><div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div className="relative min-w-0 text-sm font-medium">VK TURN
               <button type="button" className="bg-input-background border-border mt-1 flex min-h-9 w-full items-center justify-between rounded-md border px-2 py-2 text-left text-sm" disabled={csqttTurnTransport !== 'udp'} aria-expanded={turnPickerOpen} onClick={() => setTurnPickerOpen(!turnPickerOpen)}>
                 <span>{csqttTurnSubnet === 'custom' ? 'Свои IP-адреса' : csqttTurnPresets.find((p) => p.id === csqttTurnSubnet)?.title ?? 'Автоматически · адреса от VK'}{csqttTurnSubnet && csqttTurnSubnet !== 'custom' && ` · ${csqttTurnPresets.find((p) => p.id === csqttTurnSubnet)?.ips.length} IP`}</span><span>⌄</span>
@@ -429,7 +429,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
             {csqttTurnSubnet === 'custom' && <label className="text-sm font-medium md:col-span-2">IP серверов TURN<Input value={csqttCustomTurnIps} onChange={(event) => setCsqttCustomTurnIps(event.target.value)} placeholder="IP-адреса через запятую, без портов" /></label>}
           </div>
           <p className="text-muted-foreground text-xs">Наборы TURN взяты из APK 2.5.0. Выбор набора доступен для UDP; адреса распределяются между потоками. Адреса VK и TURN определяются автоматически. DNS интернет-трафика выбирается на сервере CSQTT, а сайты и устройства — в маршрутизации роутера.</p>
-          <p className="text-muted-foreground text-xs">Лимит IP ограничивает используемую часть набора. Например, 64 разрешает все 64 адреса; число одновременных подключений задаётся полем «Потоки».</p>
+          <p className="text-muted-foreground text-xs">Лимит IP ограничивает используемую часть набора. Например, 64 разрешает все 64 адреса; число одновременных подключений задаётся полем «Потоки».</p></>}
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-muted-foreground text-xs">ARM64:</span>
             <Button size="sm" variant="outline" onClick={() => { setCsqttHashes('1'); setCsqttWorkers('27') }}>{csqttClientVersion.startsWith('2.1.9') ? '27 потоков' : '1 / 27'}</Button>

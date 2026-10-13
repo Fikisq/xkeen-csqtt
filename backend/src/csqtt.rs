@@ -14,7 +14,15 @@ const CONFIG: &str = "/opt/etc/csqtt/csqtt.conf";
 const VK_TOKEN: &str = "/opt/etc/csqtt/vk_token";
 static TURN_PING_GATE: Semaphore = Semaphore::const_new(1);
 
+async fn apk_client() -> bool {
+    tokio::fs::read_to_string("/opt/etc/csqtt/client-version").await
+        .map(|version| version.trim() == "2.5.0-apk-router").unwrap_or(false)
+}
+
 pub async fn turn_ping() -> Json<Value> {
+    if !apk_client().await {
+        return Json(json!({"success": false, "error": "Выбор серверов TURN доступен только в CSQTT 2.5.0"}));
+    }
     let Ok(_permit) = TURN_PING_GATE.try_acquire() else {
         return Json(json!({"success": false, "error": "Замер TURN уже выполняется"}));
     };
@@ -106,7 +114,8 @@ fn number(content: &str, key: &str) -> Option<u32> {
 
 pub async fn settings() -> Json<Value> {
     match tokio::fs::read_to_string(CONFIG).await {
-        Ok(content) => Json(json!({
+        Ok(content) => {
+          let mut response = json!({
             "success": true,
             "hashes": number(&content, "HASHES"),
             "workers": number(&content, "WORKERS"),
@@ -122,7 +131,14 @@ pub async fn settings() -> Json<Value> {
             "hasVkToken": tokio::fs::metadata(VK_TOKEN).await.is_ok_and(|m| m.len() > 0),
             "hasManualHashes": value(&content, "VK_HASHES").is_some_and(|v| !v.is_empty()),
             "clientVersion": tokio::fs::read_to_string("/opt/etc/csqtt/client-version").await.ok().map(|v| v.trim().to_string()).unwrap_or_else(|| "2.0".into()),
-        })),
+          });
+          if !apk_client().await {
+              for key in ["turnSubnet", "turnIpLimit", "customTurnIps", "turnPresets"] {
+                  response.as_object_mut().unwrap().remove(key);
+              }
+          }
+          Json(response)
+        },
         Err(_) => Json(json!({ "success": false, "error": "Конфигурация CSQTT не найдена" })),
     }
 }
@@ -155,8 +171,10 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
     let Ok(_permit) = gate.try_acquire() else {
         return Json(json!({ "success": false, "error": "Сохранение CSQTT уже выполняется" }));
     };
-    let apk_client = tokio::fs::read_to_string("/opt/etc/csqtt/client-version").await
-        .map(|version| version.trim() == "2.5.0-apk-router").unwrap_or(false);
+    let apk_client = apk_client().await;
+    if !apk_client && (request.turn_subnet.is_some() || request.turn_ip_limit.is_some() || request.custom_turn_ips.is_some()) {
+        return Json(json!({"success": false, "error": "Параметры выбора TURN не поддерживаются в CSQTT 2.1.9. Обновите страницу"}));
+    }
     let workers_valid = if apk_client { (3..=99).contains(&request.workers) }
         else { (9..=126).contains(&request.workers) && request.workers % 9 == 0 };
     if !(1..=6).contains(&request.hashes) || !workers_valid {
@@ -178,9 +196,9 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
     if number(&content, "HASHES").is_none() || number(&content, "WORKERS").is_none() {
         return Json(json!({ "success": false, "error": "В конфигурации CSQTT нет параметров HASHES/WORKERS" }));
     }
-    let turn_subnet = request.turn_subnet.as_deref().map(str::to_owned)
-        .unwrap_or_else(|| value(&content, "TURN_SUBNET").unwrap_or_default());
-    let turn_ip_limit = request.turn_ip_limit.unwrap_or_else(|| number(&content, "TURN_IP_LIMIT").unwrap_or(8));
+    let turn_subnet = if apk_client { request.turn_subnet.as_deref().map(str::to_owned)
+        .unwrap_or_else(|| value(&content, "TURN_SUBNET").unwrap_or_default()) } else { String::new() };
+    let turn_ip_limit = if apk_client { request.turn_ip_limit.unwrap_or_else(|| number(&content, "TURN_IP_LIMIT").unwrap_or(8)) } else { 8 };
     if !(1..=256).contains(&turn_ip_limit) {
         return Json(json!({ "success": false, "error": "Количество IP TURN должно быть от 1 до 256" }));
     }
@@ -273,7 +291,7 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
     for (key, val) in [("TURN_SUBNET", turn_subnet), ("TURN_IP_LIMIT", turn_ip_limit.to_string()), ("CUSTOM_TURN_IPS", custom_turn_ips), ("BOOTSTRAP_DNS", bootstrap_dns)] {
         let prefix = format!("{key}=");
         updated = updated.lines().filter(|line| !line.starts_with(&prefix)).collect::<Vec<_>>().join("\n") + "\n";
-        updated.push_str(&format!("{key}={}\n", shell_quote(&val)));
+        if apk_client { updated.push_str(&format!("{key}={}\n", shell_quote(&val))); }
     }
     let backup = format!("{CONFIG}.codex-prev");
     if write_private(&backup, content.as_bytes()).await.is_err() {
