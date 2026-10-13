@@ -5,12 +5,17 @@ use crate::types::AppState;
 use axum::{extract::State, Json};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::{process::Stdio, sync::OnceLock, time::Duration};
+use std::{collections::BTreeMap, process::Stdio, sync::OnceLock, time::Duration};
 use tokio::{io::AsyncWriteExt, process::Command, sync::Mutex};
 
 const CONFIG_FILE: &str = "/opt/etc/xray/configs/00_config.json";
 const API_LISTEN: &str = "127.0.0.1:18085";
 static ROUTE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static LIVE_SWITCHES: OnceLock<Mutex<Option<LiveSwitches>>> = OnceLock::new();
+struct LiveSwitches { process: String, shape: Value, targets: BTreeMap<String, String> }
+pub(crate) async fn invalidate_switches() {
+    *LIVE_SWITCHES.get_or_init(|| Mutex::new(None)).lock().await = None;
+}
 pub(crate) fn routing_lock() -> &'static Mutex<()> { ROUTE_LOCK.get_or_init(|| Mutex::new(())) }
 
 #[derive(Deserialize)]
@@ -31,6 +36,25 @@ pub(crate) async fn replace_live_rules(config: &Value) -> Result<(), String> {
     prioritize_device_rules(&mut ordered);
     let mut runtime = crate::xray_subscription_refresh::live::runtime_config(&ordered).await?;
     omit_shadowed_device_rules(&mut runtime);
+    let process = crate::xray_subscription_refresh::live::process_identity()?;
+    let mut switches = LIVE_SWITCHES.get_or_init(|| Mutex::new(None)).lock().await;
+    let targets = prepare_switches(&mut runtime)?;
+    let mut shape = runtime["routing"].clone();
+    for balancer in shape["balancers"].as_array_mut().into_iter().flatten() {
+        if targets.contains_key(balancer["tag"].as_str().unwrap_or("")) {
+            balancer.as_object_mut().unwrap().remove("fallbackTag");
+        }
+    }
+    if let Some(active) = switches.as_mut().filter(|active| active.process == process && active.shape == shape) {
+        for (balancer, target) in &targets {
+            if active.targets.get(balancer) == Some(target) { continue; }
+            let result = override_target(balancer, target).await;
+            if result.is_err() { *switches = None; return result; }
+            active.targets.insert(balancer.clone(), target.clone());
+        }
+        return Ok(());
+    }
+    *switches = None;
     let config = &runtime;
     let routing = config.get("routing").ok_or("В JSON нет маршрутизации")?;
     let input = serde_json::to_vec(&json!({ "routing": routing })).map_err(|e| e.to_string())?;
@@ -45,9 +69,46 @@ pub(crate) async fn replace_live_rules(config: &Value) -> Result<(), String> {
     let output = tokio::time::timeout(Duration::from_secs(18), child.wait_with_output()).await
         .map_err(|_| "API Xray не ответил за 18 секунд".to_string())?
         .map_err(|e| format!("Ошибка API Xray: {e}"))?;
-    if output.status.success() { return Ok(()) }
+    if output.status.success() {
+        *switches = Some(LiveSwitches { process, shape, targets });
+        return Ok(());
+    }
     let error = String::from_utf8_lossy(&output.stderr);
     Err(format!("Xray не принял правила: {}", error.trim().chars().take(300).collect::<String>()))
+}
+
+// Keep selectors in the runtime only. Saved configs retain ordinary outboundTag
+// rules and work after a core restart even before the next API update.
+fn prepare_switches(config: &mut Value) -> Result<BTreeMap<String, String>, String> {
+    let mut targets = BTreeMap::new();
+    let mut balancers = config["routing"]["balancers"].as_array().cloned().unwrap_or_default();
+    let rules = config["routing"]["rules"].as_array_mut().ok_or("Нет правил маршрутизации")?;
+    for (index, rule) in rules.iter_mut().enumerate() {
+        let Some(tag) = rule["ruleTag"].as_str() else { continue; };
+        let base = tag.split('|').next().unwrap_or(tag);
+        if !(base == "VPN" || (base.starts_with("device:") && base.ends_with(":VPN")) || tag.ends_with("|selector")) { continue; }
+        let Some(target) = rule["outboundTag"].as_str().map(str::to_owned) else { continue; };
+        let balancer = format!("__xkeen_switch_{index}");
+        if balancers.iter().any(|item| item["tag"] == balancer) { return Err("Зарезервированный тег балансировщика XКeen занят".into()); }
+        // No prefix matching against real outbounds: the fallback is the exact
+        // selected handler. OverrideBalancerTarget changes it without Geo reload.
+        balancers.push(json!({"tag": balancer, "selector": [format!("{balancer}_no_handler")], "fallbackTag": target, "strategy": {"type": "random"}}));
+        rule.as_object_mut().unwrap().remove("outboundTag");
+        rule["balancerTag"] = json!(balancer);
+        targets.insert(balancer, target);
+    }
+    config["routing"]["balancers"] = json!(balancers);
+    Ok(targets)
+}
+
+async fn override_target(balancer: &str, target: &str) -> Result<(), String> {
+    let output = tokio::time::timeout(Duration::from_secs(4), Command::new("/opt/sbin/xray")
+        .args(["api", "bo", "-s", API_LISTEN, "-t", "3", "-b", balancer, target])
+        .kill_on_drop(true).output()).await
+        .map_err(|_| "Тайм-аут переключения выхода Xray".to_string())?
+        .map_err(|e| e.to_string())?;
+    if output.status.success() { Ok(()) }
+    else { Err(format!("Xray не переключил выход: {}", String::from_utf8_lossy(&output.stderr).trim().chars().take(200).collect::<String>())) }
 }
 
 // Device fallbacks must win over every general service rule, including RU.
@@ -114,6 +175,7 @@ fn omit_shadowed_device_rules(config: &mut Value) {
 }
 
 pub async fn apply_routes(State(state): State<AppState>, Json(request): Json<ApplyRoutesRequest>) -> Json<Value> {
+    let started = std::time::Instant::now();
     let _guard = ROUTE_LOCK.get_or_init(|| Mutex::new(())).lock().await;
     let _config_guard = state.app_config_lock.lock().await;
     if state.core.read().unwrap().name != "xray" || request.file != CONFIG_FILE {
@@ -219,5 +281,5 @@ pub async fn apply_routes(State(state): State<AppState>, Json(request): Json<App
         let note = "Новый сервер уже выбран для новых соединений клиентов. Открытое TCP-соединение нельзя перенести между серверами: оно завершится на прежнем выходе. Перезагрузка роутера, компьютера или Wi-Fi не требуется";
         warning = Some(warning.map_or_else(|| note.to_string(), |message| format!("{message}. {note}")));
     }
-    Json(json!({ "success": true, "warning": warning }))
+    Json(json!({ "success": true, "warning": warning, "elapsedMs": started.elapsed().as_millis() }))
 }

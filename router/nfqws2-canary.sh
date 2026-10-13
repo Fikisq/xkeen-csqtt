@@ -144,7 +144,11 @@ case "${1:-}" in
         if ! alive; then
           run_engine --dry-run >/dev/null
           run_engine --daemon
-          sleep 1
+          n=0
+          while ! alive && [ "$n" -lt 10 ]; do
+            if command -v usleep >/dev/null 2>&1; then usleep 100000; else sleep 1; fi
+            n=$((n+1))
+          done
           alive || { echo 'nfqws2 did not start' >&2; exit 1; }
         fi
         for protocol in tcp udp; do

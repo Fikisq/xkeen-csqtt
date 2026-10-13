@@ -15,7 +15,7 @@ pub(crate) struct LiveState {
     aliases: HashMap<String, String>,
 }
 
-fn process_identity() -> Result<String, String> {
+pub(crate) fn process_identity() -> Result<String, String> {
     let pids: Vec<_> = crate::controller::get_pid("xray").into_iter().filter(|pid| {
         // Panel-owned latency probes are isolated helpers, not the live core.
         !std::fs::read(format!("/proc/{pid}/cmdline")).is_ok_and(|command| command.split(|byte| *byte == 0)
@@ -205,6 +205,7 @@ pub(crate) async fn prepare(old_config: &Value, new_config: &Value) -> Result<Up
 impl Update {
     pub(crate) async fn apply(&self, config: &Value) -> Result<(), String> {
         if process_identity()? != self.old.process { return Err("Процесс Xray изменился".into()); }
+        crate::xray_routes::invalidate_switches().await;
         api("adrules", Some(&json!({"routing": mapped_routing(config, &self.next.aliases)?}))).await?;
         let temporary = format!("{STATE}.{}.tmp", uuid::Uuid::new_v4());
         let data = serde_json::to_string(&self.next).map_err(|_| "Не удалось записать карту узлов")?;
@@ -213,6 +214,7 @@ impl Update {
     }
 
     pub(crate) async fn rollback(&self, config: &Value) -> Result<(), String> {
+        crate::xray_routes::invalidate_switches().await;
         api("adrules", Some(&json!({"routing": mapped_routing(config, &self.old.aliases)?}))).await?;
         let data = serde_json::to_string(&self.old).map_err(|_| "Не удалось восстановить карту узлов")?;
         super::write_private(STATE, &data).await.map_err(|_| "Не удалось восстановить карту узлов".to_string())
