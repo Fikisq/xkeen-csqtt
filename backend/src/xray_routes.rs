@@ -84,9 +84,9 @@ fn prepare_switches(config: &mut Value) -> Result<BTreeMap<String, String>, Stri
     let mut balancers = config["routing"]["balancers"].as_array().cloned().unwrap_or_default();
     let rules = config["routing"]["rules"].as_array_mut().ok_or("Нет правил маршрутизации")?;
     for (index, rule) in rules.iter_mut().enumerate() {
-        let Some(tag) = rule["ruleTag"].as_str() else { continue; };
-        let base = tag.split('|').next().unwrap_or(tag);
-        if !(base == "VPN" || (base.starts_with("device:") && base.ends_with(":VPN")) || tag.ends_with("|selector")) { continue; }
+        // Any named row can change its connection independently, including RU,
+        // YouTube and custom rules. Conditions and order remain in the shape.
+        if !rule["ruleTag"].as_str().is_some_and(|tag| !tag.is_empty()) { continue; }
         let Some(target) = rule["outboundTag"].as_str().map(str::to_owned) else { continue; };
         let balancer = format!("__xkeen_switch_{index}");
         if balancers.iter().any(|item| item["tag"] == balancer) { return Err("Зарезервированный тег балансировщика XКeen занят".into()); }
