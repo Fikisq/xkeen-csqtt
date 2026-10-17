@@ -1,0 +1,175 @@
+{
+  "log": {
+    "access": "/opt/var/log/xray/access.log",
+    "error": "/opt/var/log/xray/error.log",
+    "loglevel": "warning"
+  },
+  "api": {
+    "services": [
+      "RoutingService"
+    ],
+    "tag": "xkeen-routing-api",
+    "listen": "127.0.0.1:18085"
+  },
+  "inbounds": [
+    {
+      "sniffing": {
+        "enabled": true,
+        "routeOnly": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ]
+      },
+      "port": 61219,
+      "tag": "redirect",
+      "settings": {
+        "network": "tcp",
+        "followRedirect": true
+      },
+      "protocol": "dokodemo-door"
+    },
+    {
+      "sniffing": {
+        "enabled": true,
+        "routeOnly": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ]
+      },
+      "port": 61219,
+      "settings": {
+        "network": "udp",
+        "followRedirect": true
+      },
+      "tag": "tproxy",
+      "protocol": "dokodemo-door",
+      "streamSettings": {
+        "sockopt": {
+          "tproxy": "tproxy"
+        }
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "freedom",
+      "tag": "direct"
+    },
+    {
+      "protocol": "freedom",
+      "streamSettings": {
+        "sockopt": {
+          "interface": "csqtt0"
+        }
+      },
+      "tag": "csqtt"
+    },
+    {
+      "protocol": "socks",
+      "tag": "wdtt-plus",
+      "settings": {
+        "servers": [
+          {
+            "address": "127.0.0.1",
+            "port": 1088
+          }
+        ]
+      }
+    },
+    {
+      "protocol": "freedom",
+      "streamSettings": {
+        "sockopt": {
+          "mark": 832,
+          "domainStrategy": "UseIPv4"
+        }
+      },
+      "tag": "nfqws-direct",
+      "settings": {}
+    },
+    {
+      "protocol": "blackhole",
+      "tag": "block"
+    }
+  ],
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "ip": [
+          "10.0.0.0/8",
+          "172.16.0.0/12",
+          "192.168.0.0/16",
+          "127.0.0.0/8",
+          "169.254.0.0/16",
+          "fc00::/7",
+          "fe80::/10"
+        ],
+        "type": "field",
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "ruleTag": "custom:Реклама VK",
+        "network": "tcp,udp",
+        "domain": [
+          "ext:roscomvpn-geosite.dat:category-ads"
+        ],
+        "outboundTag": "block"
+      },
+      {
+        "type": "field",
+        "ruleTag": "AI|selector",
+        "network": "tcp,udp",
+        "domain": [
+          "geosite:openai",
+          "geosite:anthropic",
+          "geosite:perplexity",
+          "domain:gemini.google.com",
+          "domain:aistudio.google.com"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Youtube|selector",
+        "network": "tcp",
+        "domain": [
+          "ext:roscomvpn-geosite.dat:youtube"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "ruleTag": "RU",
+        "network": "tcp,udp",
+        "domain": [
+          "ext:roscomvpn-geosite.dat:category-ru",
+          "ext:roscomvpn-geosite.dat:whitelist"
+        ],
+        "outboundTag": "direct",
+        "xkeenRouteGroup": "roscomvpn-ru"
+      },
+      {
+        "type": "field",
+        "ruleTag": "RU_IP",
+        "network": "tcp,udp",
+        "ip": [
+          "ext:roscomvpn-geoip.dat:direct"
+        ],
+        "outboundTag": "direct",
+        "xkeenRouteGroup": "roscomvpn-ru"
+      },
+      {
+        "type": "field",
+        "ruleTag": "VPN",
+        "network": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  }
+}

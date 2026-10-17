@@ -22,19 +22,92 @@ LIGHTTPD_DIR="/opt/etc/lighttpd"
 LIGHTTPD_CONF="$LIGHTTPD_DIR/conf.d/90-xkeenui.conf"
 
 BETA=false
+AUTO=false
+for setup_arg in "$@"; do
+  case "$setup_arg" in beta) BETA=true ;; auto) AUTO=true ;; esac
+done
 LOCAL=false
 BIN_STAGED=
 SUM_FILE=
 NFQWS_STAGED=
 NFQWS_STAGED_OWNED=false
 NFQWS_ROOT="/opt/etc/xkeen/nfqws2-stage"
+BOOTSTRAP_STAGED=
+FRESH_CORE=false
 cleanup_download() {
   [ -z "$BIN_STAGED" ] || rm -f "$BIN_STAGED"
   [ -z "$SUM_FILE" ] || rm -f "$SUM_FILE"
   [ "$NFQWS_STAGED_OWNED" != true ] || rm -f "$NFQWS_STAGED"
+  [ -z "$BOOTSTRAP_STAGED" ] || rm -f "$BOOTSTRAP_STAGED"
 }
 trap cleanup_download EXIT
-[ "$1" = "beta" ] && BETA=true
+
+prepare_entware() {
+  export PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  [ "$(id -u)" = 0 ] || { echo 'Запустите установщик от root.' >&2; exit 1; }
+  [ -x /opt/bin/opkg ] && [ -f /opt/etc/init.d/rc.func ] || {
+    echo 'Сначала включите Entware в KeeneticOS и подключитесь к его SSH. После этого повторите эту команду.' >&2
+    exit 1
+  }
+  mkdir -p /opt/tmp /opt/sbin /opt/etc/init.d
+  if ! command -v curl >/dev/null || ! command -v jq >/dev/null || ! command -v sha256sum >/dev/null; then
+    opkg update && opkg install curl jq coreutils-sha256sum ca-bundle || exit 1
+  fi
+}
+
+prepare_core() {
+  if [ -x /opt/sbin/xray ] && [ -x /opt/etc/init.d/S05xkeen ]; then
+    printf '\n Существующие Xray и XKeen сохранены.\n'
+    return 0
+  fi
+  # Do not silently replace an unrelated/partial existing installation.
+  if [ -e /opt/sbin/xkeen ] || [ -e /opt/sbin/xray ] || [ -e /opt/etc/init.d/S05xkeen ]; then
+    echo 'Обнаружена неполная установка XKeen/Xray. Автоматическая перезапись остановлена; существующие настройки сохранены.' >&2
+    exit 1
+  fi
+  for fragment in /opt/etc/xray/configs/*.json; do
+    [ ! -f "$fragment" ] || {
+      echo 'Найдены настройки Xray без установленного ядра. Автоматическая перезапись остановлена; сохраните и восстановите установку.' >&2
+      exit 1
+    }
+  done
+  [ -n "$BOOTSTRAP_STAGED" ] || { echo 'В релизе отсутствует комплект первоначальной настройки.' >&2; exit 1; }
+  local work actual
+  work=$(mktemp -d /opt/tmp/xkeen-core.XXXXXX) || exit 1
+  printf '\n Установка XKeen и Xray без дополнительных вопросов...\n'
+  curl -fLsS --retry 2 https://github.com/jameszeroX/XKeen/releases/download/2.1/xkeen.tar.gz -o "$work/xkeen.tar.gz" || exit 1
+  actual=$(sha256sum "$work/xkeen.tar.gz" | awk '{print $1}')
+  [ "$actual" = 4b9350b11fab7fd3e4973db609db0fb780994f4b5ab0096f0549bc52acac8c73 ] || {
+    echo 'Контрольная сумма XKeen не совпадает.' >&2; exit 1
+  }
+  mkdir "$work/core" "$work/panel"
+  tar -xzf "$work/xkeen.tar.gz" -C "$work/core" || exit 1
+  tar -xzf "$BOOTSTRAP_STAGED" -C "$work/panel" || exit 1
+  [ -f "$work/core/xkeen" ] && [ -d "$work/core/_xkeen" ] &&
+    [ -s "$work/panel/S05xkeen" ] && [ -s "$work/panel/00_config.json" ] || exit 1
+  # Install the same pinned modules as the official installer, then use its
+  # documented unattended mode. No Mihomo or competing geodata cron jobs.
+  mv "$work/core/xkeen" /opt/sbin/xkeen && mv "$work/core/_xkeen" /opt/sbin/.xkeen || exit 1
+  chmod 755 /opt/sbin/xkeen
+  XKEEN_FOREGROUND=1 /opt/sbin/xkeen -i auto cores=xray xray=v26.9.9 geo=off geoipset=off cron=off autostart=off || exit 1
+  [ -x /opt/sbin/xray ] && [ -f /opt/etc/init.d/S05xkeen ] || {
+    echo 'Установка Xray/XKeen не завершилась.' >&2; exit 1
+  }
+  # Only newly generated upstream fragments are moved; an existing core took
+  # the early return above. Keep them available for diagnosis or rollback.
+  local initial_backup="/opt/etc/xkeen/initial-configs-$(date +%Y%m%d%H%M%S)"
+  mkdir -p "$initial_backup" /opt/etc/xray/configs /opt/var/log/xray
+  for fragment in /opt/etc/xray/configs/*.json; do
+    [ ! -f "$fragment" ] || mv "$fragment" "$initial_backup/" || exit 1
+  done
+  cp "$work/panel/00_config.json" /opt/etc/xray/configs/00_config.json || exit 1
+  cp "$work/panel/S05xkeen" /opt/etc/init.d/S05xkeen || exit 1
+  chmod 600 /opt/etc/xray/configs/00_config.json
+  chmod 755 /opt/etc/init.d/S05xkeen
+  XRAY_LOCATION_ASSET=/opt/etc/xray/dat /opt/sbin/xray -test -confdir /opt/etc/xray/configs || exit 1
+  FRESH_CORE=true
+  rm -rf "$work"
+}
 
 spinner() {
   local pid=$1 msg=$2
@@ -104,6 +177,16 @@ download_files() {
       exit 1
     fi
     chmod +x "$BIN_STAGED"
+    if [ ! -x /opt/sbin/xray ] || [ ! -x /opt/etc/init.d/S05xkeen ]; then
+      local bootstrap_name="xkeen-bootstrap-arm64-v8a.tar.gz"
+      BOOTSTRAP_STAGED=$(mktemp /opt/tmp/xkeen-bootstrap.XXXXXX) || exit 1
+      curl -fLsS -o "$BOOTSTRAP_STAGED" "$download_url/$bootstrap_name" || exit 1
+      expected=$(awk -v name="$bootstrap_name" '$2 == name { print $1; exit }' "$SUM_FILE")
+      actual=$(sha256sum "$BOOTSTRAP_STAGED" | awk '{print $1}')
+      [ -n "$expected" ] && [ "$expected" = "$actual" ] || {
+        echo 'Контрольная сумма первоначальной настройки не совпадает.' >&2; exit 1
+      }
+    fi
     if [ "$ARCH" = arm64-v8a ]; then
       local nfqws_name="xkeen-nfqws2-arm64-v8a.tar.gz"
       NFQWS_STAGED=$(mktemp /opt/tmp/xkeen-nfqws2.XXXXXX) || exit 1
@@ -199,6 +282,7 @@ install_xkeenui() {
   [ -f "/opt/tmp/xkeen-ui-$ARCH" ] && LOCAL=true
   download_files
   install_geodata
+  prepare_core
   install_nfqws2
   if [[ -d $STATIC_DIR || -f $XKEENUI_BIN || -f $XKEENUI_INIT || -f $LIGHTTPD_CONF ]]; then
     printf "${YELLOW}\n Обнаружены файлы XKeen UI, запуск переустановки...\n${NC}"
@@ -208,6 +292,14 @@ install_xkeenui() {
   printf "${INFO} Начинаем установку...${NCN}"
 
   install_prepared; create_xkeenui_init
+  "$XKEENUI_BIN" install-clients || {
+    echo 'Панель установлена, но загрузка дополнительных клиентов не завершилась. Повторите команду или установите их кнопкой в панели.' >&2
+    exit 1
+  }
+  if [ "$FRESH_CORE" = true ]; then
+    /opt/etc/init.d/S05xkeen start on || exit 1
+    pidof xray >/dev/null || { echo 'Xray не запустился; проверьте /opt/var/log/xray/error.log.' >&2; exit 1; }
+  fi
 
   sync & spinner $! "Запись данных..."
 
@@ -226,6 +318,7 @@ update_xkeenui() {
   [ -f "/opt/tmp/xkeen-ui-$ARCH" ] && LOCAL=true
   download_files
   install_geodata
+  prepare_core
   install_nfqws2
 
   printf "${INFO} Начинаем обновление...${NCN}"
@@ -249,6 +342,11 @@ update_xkeenui() {
   fi
 
   legacy_installation_check; install_prepared
+  "$XKEENUI_BIN" install-clients || exit 1
+  if [ "$FRESH_CORE" = true ]; then
+    /opt/etc/init.d/S05xkeen start on || exit 1
+    pidof xray >/dev/null || { echo 'Xray не запустился; проверьте /opt/var/log/xray/error.log.' >&2; exit 1; }
+  fi
 
   sync & spinner $! "Запись данных..."
 
@@ -342,8 +440,14 @@ get_status() {
   printf "Статус панели: $status ${NC}[$version]"
 }
 
-clear
+prepare_entware
+[ ! -t 1 ] || clear
 get_arch
+[ "$ARCH" = arm64-v8a ] || { echo 'Готовая установка пока доступна только для ARM64.' >&2; exit 1; }
+if [ "$AUTO" = true ]; then
+  if [ -f "$XKEENUI_BIN" ]; then update_xkeenui; else install_xkeenui; fi
+  exit $?
+fi
 printf "${CYAN}"
 cat <<'EOF'
    _  __  __ __                       __  __ ____

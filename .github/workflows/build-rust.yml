@@ -181,9 +181,11 @@ jobs:
           path: artifacts
       - name: Write release checksums
         run: |
+          sh router/build-bootstrap.sh
+          sha256sum xkeen-bootstrap-arm64-v8a.tar.gz setup.sh > SHA256SUMS
           for file in artifacts/xkeen-ui-*/* artifacts/xkeen-nfqws2-*/* artifacts/csqtt-client-*/* artifacts/wdtt-plus-client-*/*; do
             printf '%s  %s\n' "$(sha256sum "$file" | cut -d ' ' -f 1)" "$(basename "$file")"
-          done > SHA256SUMS
+          done >> SHA256SUMS
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.version }}
@@ -193,4 +195,6 @@ jobs:
             artifacts/xkeen-nfqws2-*/*
             artifacts/csqtt-client-*/*
             artifacts/wdtt-plus-client-*/*
+            xkeen-bootstrap-arm64-v8a.tar.gz
+            setup.sh
             SHA256SUMS

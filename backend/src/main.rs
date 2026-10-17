@@ -80,6 +80,8 @@ struct Cli {
 enum Command {
     /// Скачать и проверить базы GeoSite/GeoIP для установки панели
     GeodataDownload,
+    /// Установить дополнительные клиенты без запуска и запроса токена
+    InstallClients,
     /// Создать init скрипт
     CreateInit,
     /// Запустить сервис (трeбуется init скрипт)
@@ -307,6 +309,12 @@ async fn main() {
 
     if let Some(command) = cli.command {
         match command {
+            Command::InstallClients => {
+                if let Err(error) = addon_manager::install_clients().await {
+                    eprintln!("{error}"); exit(1);
+                }
+                return;
+            }
             Command::GeodataDownload => {
                 match geodata_update::update(None).await {
                     Ok(value) => println!("{value}"),
@@ -319,7 +327,7 @@ async fn main() {
                 let err = std::process::Command::new("sh")
                     .args([
                         "-c",
-                        "curl -L https://raw.githubusercontent.com/zxc-rv/XKeen-UI/main/setup.sh | sh",
+                        "curl -fsSL https://raw.githubusercontent.com/Fikisq/xkeen-csqtt/codex/setup.sh -o /opt/tmp/xkeen-ui-setup.sh && sh /opt/tmp/xkeen-ui-setup.sh beta auto",
                     ])
                     .exec();
                 eprintln!(" {} {}", " Ошибка запуска setup:".red().bold(), err);

@@ -242,7 +242,7 @@ async fn remove_inner(state: AppState, name: &str) -> Result<Value, String> {
     Ok(json!({"success": true, "restarted": false}))
 }
 
-async fn install_inner(state: AppState, name: &str) -> Result<Value, String> {
+async fn install_runtime(name: &str) -> Result<(), String> {
     let def = addon(name).ok_or("Неизвестный компонент")?;
     if Path::new(def.binary).exists() { return Err("Компонент уже установлен".into()); }
     if std::env::consts::ARCH != "aarch64" { return Err("Для этой архитектуры пакет пока не опубликован".into()); }
@@ -265,6 +265,27 @@ async fn install_inner(state: AppState, name: &str) -> Result<Value, String> {
     if name == "wdtt-plus" && !Path::new("/opt/etc/wdtt-plus/device_id").exists() {
         private_write("/opt/etc/wdtt-plus/device_id", uuid::Uuid::new_v4().to_string().as_bytes())?;
     }
+    Ok(())
+}
+
+/// Installer entry point. No HTTP server, account token or running tunnel needed.
+pub(crate) async fn install_clients() -> Result<(), String> {
+    let _lock = LOCK.lock().await;
+    for name in ["csqtt", "wdtt-plus"] {
+        let def = addon(name).ok_or("Неизвестный компонент")?;
+        if Path::new(def.binary).is_file() {
+            println!("{name}: существующая установка сохранена");
+            continue;
+        }
+        install_runtime(name).await?;
+        println!("{name}: установлен; настройте подключение в панели");
+    }
+    Ok(())
+}
+
+async fn install_inner(state: AppState, name: &str) -> Result<Value, String> {
+    let def = addon(name).ok_or("Неизвестный компонент")?;
+    install_runtime(name).await?;
     let backup = format!("{BACKUP}/{name}.json");
     let mut restarted = false;
     if let Ok(outbound) = fs::read(&backup).await {
