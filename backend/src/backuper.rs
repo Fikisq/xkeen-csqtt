@@ -372,6 +372,8 @@ fn is_tar_file(path: &Path) -> bool {
 
 fn collect_backup_files() -> io::Result<Vec<(PathBuf, String)>> {
     let mut files = Vec::new();
+    let device_id = Path::new(crate::router_device_id::ID_FILE);
+    if device_id.is_file() { files.push((device_id.to_path_buf(), to_archive_relative(device_id))); }
     files.extend(collect_dir_files(XKEEN_CONF_DIR, &["lst", "json"])?);
     for name in ["xray-subscription-url", "global_direct_xray.flag", "global_direct_mihomo.flag"] {
         let path = Path::new(XKEEN_CONF_DIR).join(name);
@@ -509,7 +511,7 @@ fn archive_relative_to_target(relative: &str) -> Option<PathBuf> {
 }
 
 fn detect_content_key(relative: &str) -> Option<&'static str> {
-    if relative == APP_CONFIG.trim_start_matches('/') {
+    if relative == APP_CONFIG.trim_start_matches('/') || relative == crate::router_device_id::ID_FILE.trim_start_matches('/') {
         return Some("xkeen-ui");
     }
 

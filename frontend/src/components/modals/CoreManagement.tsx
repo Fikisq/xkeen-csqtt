@@ -82,6 +82,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
   const [turnPickerOpen, setTurnPickerOpen] = useState(false)
   const [turnPings, setTurnPings] = useState<{ id: string; title: string; total: number; answered: number; minMs: number | null; avgMs: number | null; bestIp: string | null }[]>([])
   const [csqttPeer, setCsqttPeer] = useState('')
+  const [csqttDeviceId, setCsqttDeviceId] = useState('')
   const [csqttPassword, setCsqttPassword] = useState('')
   const [csqttVkToken, setCsqttVkToken] = useState('')
   const [vkAuthOpen, setVkAuthOpen] = useState(false)
@@ -136,12 +137,13 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
   async function openCsqttSettings() {
     setCsqttError('')
     try {
-      const result = await apiCall<{ success: boolean; hashes?: number; workers?: number; peer?: string; hashMode?: string; obfs?: string; turnTransport?: string; turnSubnet?: string; turnIpLimit?: number; customTurnIps?: string; turnPresets?: { id: string; title: string; ips: string[] }[]; hasPassword?: boolean; hasVkToken?: boolean; hasManualHashes?: boolean; clientVersion?: string; error?: string }>('GET', 'csqtt/settings')
+      const result = await apiCall<{ success: boolean; hashes?: number; workers?: number; peer?: string; deviceId?: string; hashMode?: string; obfs?: string; turnTransport?: string; turnSubnet?: string; turnIpLimit?: number; customTurnIps?: string; turnPresets?: { id: string; title: string; ips: string[] }[]; hasPassword?: boolean; hasVkToken?: boolean; hasManualHashes?: boolean; clientVersion?: string; error?: string }>('GET', 'csqtt/settings')
       if (!result.success || !result.hashes || !result.workers) throw new Error(result.error || 'Не удалось прочитать параметры CSQTT')
       setCsqttHashes(String(result.hashes))
       setCsqttClientVersion(result.clientVersion ?? '2.0')
       setCsqttWorkers(String(result.workers))
       setCsqttPeer(result.peer ?? '')
+      setCsqttDeviceId(result.deviceId ?? '')
       setCsqttHashMode(result.hashMode ?? 'auto_js')
       setCsqttObfs(result.obfs ?? 'audio')
       setCsqttTurnTransport(result.turnTransport ?? 'udp')
@@ -394,6 +396,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
 
         {editingWdtt ? <WdttPlusSettings onBack={() => setEditingWdtt(false)} onRefresh={() => void refreshWdttStatus()} /> : editingNfqws ? <Nfqws2Settings onBack={() => setEditingNfqws(false)} onRefresh={() => void refreshNfqwsStatus()} /> : editingCsqtt ? <div className="flex min-h-0 flex-col gap-3"><div className="min-h-0 space-y-2 overflow-y-auto pr-2">
           <p className="text-xs text-green-400">Клиент CSQTT {csqttClientVersion}</p>
+          {csqttDeviceId && <p className="text-muted-foreground break-all text-xs">Device ID: <span className="select-all">{csqttDeviceId}</span></p>}
           <p className="text-muted-foreground text-xs">Ссылка разбирается на адрес и пароль; исходная ссылка не хранится. Сохранённые секреты скрыты. Пустые поля пароля и токена оставляют прежние значения. Изменения вступят в силу после «Применить».</p>
           <p className="text-muted-foreground text-xs">Ручной использует сохранённые ссылки или хеши VK. Авто API создаёт звонки через calls.start и завершает их при остановке. Для токена откройте вход VK: пароль вводится только на сайте VK.</p>
           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2">

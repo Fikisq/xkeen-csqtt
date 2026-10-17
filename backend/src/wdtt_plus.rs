@@ -49,6 +49,7 @@ pub async fn settings() -> Json<Value> {
         "success": true,
         "clientVersion": std::fs::read_to_string(format!("{DIR}/client-version")).unwrap_or_else(|_| "v18".into()).trim(),
         "server": server,
+        "deviceId": std::fs::read_to_string(format!("{DIR}/device_id")).ok().map(|value| value.trim().to_string()),
         "dtlsPort": dtls_port.parse::<u16>().ok(),
         "wgPort": value(&content, "WG_PORT").and_then(|v| v.parse::<u16>().ok()),
         "workers": value(&content, "WORKERS").and_then(|v| v.parse::<u32>().ok()).unwrap_or(27),

@@ -10,6 +10,7 @@ import { useAppContext } from '../../lib/store'
 interface Settings {
   success: boolean
   clientVersion?: string
+  deviceId?: string
   server?: string
   dtlsPort?: number
   wgPort?: number
@@ -33,6 +34,7 @@ export function WdttPlusSettings({ onBack, onRefresh }: { onBack: () => void; on
   const [wgPort, setWgPort] = useState('56001')
   const [workers, setWorkers] = useState('27')
   const [clientVersion, setClientVersion] = useState('')
+  const [deviceId, setDeviceId] = useState('')
   const [hashesCount, setHashesCount] = useState('4')
   const [manualHashes, setManualHashes] = useState('')
   const [hasManualHashes, setHasManualHashes] = useState(false)
@@ -54,6 +56,7 @@ export function WdttPlusSettings({ onBack, onRefresh }: { onBack: () => void; on
       if (result.wgPort) setWgPort(String(result.wgPort))
       if (result.workers) setWorkers(String(result.workers))
       setClientVersion(result.clientVersion ?? 'v18')
+      setDeviceId(result.deviceId ?? '')
       setHashesCount(String(result.hashesCount ?? 4))
       setHasManualHashes(!!result.hasManualHashes)
       setHasPassword(!!result.hasPassword)
@@ -107,6 +110,7 @@ export function WdttPlusSettings({ onBack, onRefresh }: { onBack: () => void; on
 
   return <div className="flex min-h-0 flex-col gap-3"><div className="min-h-0 space-y-3 overflow-y-auto pr-2">
     <p className="text-muted-foreground text-xs">Клиент WDTT Plus {clientVersion} открывает локальный SOCKS5 с UDP для Xray. Панель не создаёт звонки VK: вставьте уже полученные ссылки или хеши.</p>
+    {deviceId && <p className="text-muted-foreground break-all text-xs">Device ID: <span className="select-all">{deviceId}</span></p>}
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
       <label className="text-sm font-medium">Сервер<Input className="mt-1" value={server} onChange={(event) => setServer(event.target.value)} placeholder="Адрес вашего сервера" /></label>
       <label className="text-sm font-medium">DTLS-порт сервера<Input className="mt-1" inputMode="numeric" value={dtlsPort} onChange={(event) => setDtlsPort(event.target.value)} /></label>

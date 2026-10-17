@@ -120,6 +120,7 @@ pub async fn settings() -> Json<Value> {
             "hashes": number(&content, "HASHES"),
             "workers": number(&content, "WORKERS"),
             "peer": value(&content, "PEER"),
+            "deviceId": value(&content, "DEVICE_ID"),
             "hashMode": value(&content, "VK_HASH_MODE").unwrap_or_else(|| "auto_js".into()),
             "obfs": value(&content, "OBFS").unwrap_or_else(|| "audio".into()),
             "turnTransport": value(&content, "TURN_TRANSPORT").unwrap_or_else(|| "udp".into()),

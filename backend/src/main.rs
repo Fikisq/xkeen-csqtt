@@ -1,6 +1,7 @@
 mod api_relay;
 mod access_journal;
 mod addon_manager;
+mod router_device_id;
 mod auth;
 mod backuper;
 mod configs;

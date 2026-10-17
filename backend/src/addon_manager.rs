@@ -259,12 +259,12 @@ async fn install_runtime(name: &str) -> Result<(), String> {
     if name == "csqtt" && !Path::new("/opt/etc/csqtt/csqtt.conf").exists() {
         let initial = format!(
             "HASHES='4'\nWORKERS='81'\nPEER=''\nPASSWORD=''\nDEVICE_ID='{}'\nLISTEN='127.0.0.1:9000'\nFINGERPRINT='chrome'\nCLIENT_IDS=''\nOBFS='audio'\nTURN_TRANSPORT='udp'\nCAPTCHA_MODE='auto'\nVK_HASH_MODE='auto_js'\nVK_HASHES=''\n",
-            uuid::Uuid::new_v4()
+            crate::router_device_id::for_new_client()?
         );
         private_write("/opt/etc/csqtt/csqtt.conf", initial.as_bytes())?;
     }
     if name == "wdtt-plus" && !Path::new("/opt/etc/wdtt-plus/device_id").exists() {
-        private_write("/opt/etc/wdtt-plus/device_id", uuid::Uuid::new_v4().to_string().as_bytes())?;
+        private_write("/opt/etc/wdtt-plus/device_id", crate::router_device_id::for_new_client()?.as_bytes())?;
     }
     Ok(())
 }
