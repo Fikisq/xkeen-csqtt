@@ -14,7 +14,13 @@ export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc
 export CARGO_TARGET_DIR="$work/target"
 cargo build --release --locked --target aarch64-unknown-linux-musl --manifest-path rust-client/Cargo.toml
 cp "$work/target/aarch64-unknown-linux-musl/release/client" "$work/package/client"
-musl-gcc -Os -static -s "$repo/router/csqtt-tun-fd.c" -o "$work/package/csqtt-tun-fd"
+# musl-tools supplies libc headers but deliberately excludes Linux UAPI headers.
+# Expose only kernel headers, without adding glibc's headers to the search path.
+mkdir -p "$work/kernel-headers"
+ln -s /usr/include/linux "$work/kernel-headers/linux"
+ln -s /usr/include/asm-generic "$work/kernel-headers/asm-generic"
+ln -s /usr/include/aarch64-linux-gnu/asm "$work/kernel-headers/asm"
+musl-gcc -I "$work/kernel-headers" -Os -static -s "$repo/router/csqtt-tun-fd.c" -o "$work/package/csqtt-tun-fd"
 cp "$repo/router/S99csqtt" "$repo/router/csqtt-run-219.sh" "$repo/router/csqtt-js-calls.sh" "$repo/router/csqtt-api-calls.sh" "$repo/router/vk-manual-hashes.sh" "$work/package/"
 cp LICENSE "$work/package/LICENSE.CSQTT"
 printf '%s\n' 2.1.9-router.1 > "$work/package/client-version"
