@@ -89,6 +89,10 @@ jobs:
         run: |
           cp -r ../frontend/dist ./dist
           sed -i 's|\.\./frontend/dist|./dist|' src/frontend_embedder.rs
+          # cross mounts backend/ only; embedded strategy inputs live in router/.
+          mkdir -p router-assets
+          cp ../router/nfqws2-games.args ../router/nfqws2-flowseal.json router-assets/
+          sed -i 's|../../router/nfqws2-|../router-assets/nfqws2-|g' src/nfqws2_search.rs
 
       - name: Build binary
         working-directory: backend
