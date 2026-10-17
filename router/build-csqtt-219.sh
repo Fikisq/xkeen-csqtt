@@ -8,8 +8,7 @@ curl -fLsS --retry 2 https://github.com/amurcanov/csqtt/archive/446293aa2e873ac5
 echo "45f98c3eab8bd08aeaf94cf63132a7bc0f815c41dbc5f8603e51d0f18d87c7e9  $work/source.tar.gz" | sha256sum -c -
 tar -xzf "$work/source.tar.gz" --strip-components=1 -C "$work/source"
 cd "$work/source"
-patch -p1 < "$repo/router/patches/csqtt-2.1.9-router-call-closure.patch"
-patch -p1 < "$repo/router/patches/csqtt-2.1.9-musl.patch"
+patch --batch --forward -p1 < "$repo/router/patches/csqtt-2.1.9-router-call-closure.patch"
 export CC_aarch64_unknown_linux_musl=musl-gcc
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc
 export CARGO_TARGET_DIR="$work/target"
