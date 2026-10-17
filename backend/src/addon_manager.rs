@@ -258,7 +258,7 @@ async fn install_runtime(name: &str) -> Result<(), String> {
     // new user's settings locally; never include or overwrite live settings.
     if name == "csqtt" && !Path::new("/opt/etc/csqtt/csqtt.conf").exists() {
         let initial = format!(
-            "HASHES='4'\nWORKERS='81'\nPEER=''\nPASSWORD=''\nDEVICE_ID='{}'\nLISTEN='127.0.0.1:9000'\nFINGERPRINT='chrome'\nCLIENT_IDS=''\nOBFS='audio'\nTURN_TRANSPORT='udp'\nCAPTCHA_MODE='auto'\nVK_HASH_MODE='auto_js'\nVK_HASHES=''\n",
+            "HASHES='4'\nWORKERS='81'\nPEER=''\nPASSWORD=''\nDEVICE_ID='{}'\nLISTEN='127.0.0.1:9000'\nFINGERPRINT='firefox'\nCLIENT_IDS=''\nOBFS='audio'\nTURN_TRANSPORT='udp'\nCAPTCHA_MODE='auto'\nVK_HASH_MODE='auto_js'\nVK_HASHES=''\n",
             crate::router_device_id::for_new_client()?
         );
         private_write("/opt/etc/csqtt/csqtt.conf", initial.as_bytes())?;

@@ -121,6 +121,7 @@ pub async fn settings() -> Json<Value> {
             "workers": number(&content, "WORKERS"),
             "peer": value(&content, "PEER"),
             "deviceId": value(&content, "DEVICE_ID"),
+            "fingerprint": value(&content, "FINGERPRINT").unwrap_or_else(|| "firefox".into()).to_ascii_lowercase(),
             "hashMode": value(&content, "VK_HASH_MODE").unwrap_or_else(|| "auto_js".into()),
             "obfs": value(&content, "OBFS").unwrap_or_else(|| "audio".into()),
             "turnTransport": value(&content, "TURN_TRANSPORT").unwrap_or_else(|| "udp".into()),
@@ -150,6 +151,7 @@ pub struct SettingsRequest {
     workers: u32,
     peer: Option<String>,
     password: Option<String>,
+    fingerprint: Option<String>,
     #[serde(rename = "vkToken")]
     vk_token: Option<String>,
     #[serde(rename = "hashMode")]
@@ -194,6 +196,11 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
     let Ok(content) = tokio::fs::read_to_string(CONFIG).await else {
         return Json(json!({ "success": false, "error": "Конфигурация CSQTT не найдена" }));
     };
+    let fingerprint = request.fingerprint.clone().or_else(|| value(&content, "FINGERPRINT"))
+        .unwrap_or_else(|| "firefox".into()).trim().to_ascii_lowercase();
+    if !matches!(fingerprint.as_str(), "chrome" | "firefox" | "safari" | "edge" | "opera") {
+        return Json(json!({ "success": false, "error": "Выберите поддерживаемый отпечаток браузера" }));
+    }
     if number(&content, "HASHES").is_none() || number(&content, "WORKERS").is_none() {
         return Json(json!({ "success": false, "error": "В конфигурации CSQTT нет параметров HASHES/WORKERS" }));
     }
@@ -276,6 +283,7 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
     let mut updated = content.lines().map(|line| {
         if line.starts_with("HASHES=") { format!("HASHES=\"{}\"", request.hashes) }
         else if line.starts_with("WORKERS=") { format!("WORKERS=\"{}\"", request.workers) }
+        else if line.starts_with("FINGERPRINT=") { format!("FINGERPRINT={}", shell_quote(&fingerprint)) }
         else if line.starts_with("PEER=") && !peer.is_empty() { format!("PEER={}", shell_quote(peer)) }
         else if line.starts_with("PASSWORD=") && !password.is_empty() { format!("PASSWORD={}", shell_quote(password)) }
         else if line.starts_with("VK_MODE=") { format!("VK_MODE=\"{hash_mode}\"") }
@@ -288,6 +296,9 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
     }).collect::<Vec<_>>().join("\n") + "\n";
     if !content.lines().any(|line| line.starts_with("VK_HASHES=")) {
         updated.push_str(&format!("VK_HASHES={}\n", shell_quote(&manual_hashes)));
+    }
+    if !content.lines().any(|line| line.starts_with("FINGERPRINT=")) {
+        updated.push_str(&format!("FINGERPRINT={}\n", shell_quote(&fingerprint)));
     }
     for (key, val) in [("TURN_SUBNET", turn_subnet), ("TURN_IP_LIMIT", turn_ip_limit.to_string()), ("CUSTOM_TURN_IPS", custom_turn_ips), ("BOOTSTRAP_DNS", bootstrap_dns)] {
         let prefix = format!("{key}=");
