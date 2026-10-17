@@ -1,0 +1,1766 @@
+[
+  {
+    "rules": [
+      {
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "domain": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "domain": 443,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "domain": true,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "domain": [
+          "a",
+          "b"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "domain": {},
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "domain": null,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "domain": "",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "domains": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "domains": 443,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "domains": true,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "domains": [
+          "a",
+          "b"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "domains": {},
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "domains": null,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "domains": "",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "source": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "source": 443,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "source": true,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "source": [
+          "a",
+          "b"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "source": {},
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "source": null,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "source": "",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "sourceIP": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "sourceIP": 443,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "sourceIP": true,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "sourceIP": [
+          "a",
+          "b"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "sourceIP": {},
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "sourceIP": null,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "sourceIP": "",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "ip": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "ip": 443,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "ip": true,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "ip": [
+          "a",
+          "b"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "ip": {},
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "ip": null,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "ip": "",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "localIP": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "localIP": 443,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "localIP": true,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "localIP": [
+          "a",
+          "b"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "localIP": {},
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "localIP": null,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "localIP": "",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "port": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "port": 443,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "port": true,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "port": [
+          "a",
+          "b"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "port": {},
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "port": null,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "port": "",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "sourcePort": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "sourcePort": 443,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "sourcePort": true,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "sourcePort": [
+          "a",
+          "b"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "sourcePort": {},
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "sourcePort": null,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "sourcePort": "",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "network": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "network": 443,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "network": true,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "network": [
+          "a",
+          "b"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "network": {},
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "network": null,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "network": "",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "protocol": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "protocol": 443,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "protocol": true,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "protocol": [
+          "a",
+          "b"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "protocol": {},
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "protocol": null,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "protocol": "",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "user": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "user": 443,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "user": true,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "user": [
+          "a",
+          "b"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "user": {},
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "user": null,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "user": "",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "inboundTag": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "inboundTag": 443,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "inboundTag": true,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "inboundTag": [
+          "a",
+          "b"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "inboundTag": {},
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "inboundTag": null,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "inboundTag": "",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "attrs": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "attrs": 443,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "attrs": true,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "attrs": [
+          "a",
+          "b"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "attrs": {},
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "attrs": null,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "attrs": "",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "process": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "process": 443,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "process": true,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "process": [
+          "a",
+          "b"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "process": {},
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "process": null,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "process": "",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "localOS": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "localOS": 443,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "localOS": true,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "localOS": [
+          "a",
+          "b"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "localOS": {},
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "localOS": null,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "localOS": "",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "vlessRoute": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "vlessRoute": 443,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "vlessRoute": true,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "vlessRoute": [
+          "a",
+          "b"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "vlessRoute": {},
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "vlessRoute": null,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "vlessRoute": "",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "webhook": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "webhook": 443,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "webhook": true,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "webhook": [
+          "a",
+          "b"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "webhook": {},
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "webhook": null,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "webhook": "",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "ruleTag": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "ruleTag": 443,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "ruleTag": true,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "ruleTag": [
+          "a",
+          "b"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "ruleTag": {},
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "ruleTag": null,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "ruleTag": "",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "outboundTag": "tcp,udp"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "outboundTag": 443
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "outboundTag": true
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "outboundTag": [
+          "a",
+          "b"
+        ]
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "outboundTag": {}
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "outboundTag": null
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "outboundTag": ""
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "balancerTag": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "balancerTag": 443,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "balancerTag": true,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "balancerTag": [
+          "a",
+          "b"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "balancerTag": {},
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "balancerTag": null,
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "balancerTag": "",
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "domainStrategy": "IPOnDemand",
+    "balancers": [
+      {
+        "fallbackTag": "direct",
+        "strategy": {
+          "type": "random",
+          "settings": {
+            "expected": 2,
+            "costs": [
+              {
+                "value": 1.2,
+                "regexp": true,
+                "match": "x"
+              }
+            ],
+            "maxRTT": "1s",
+            "tolerance": 0.2,
+            "baselines": [
+              "50ms",
+              "100ms",
+              "-1s"
+            ]
+          }
+        },
+        "tag": "pool",
+        "selector": [
+          "proxy"
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "domain": [
+          "keyword:abc",
+          "regexp:.*abc",
+          "domain:example.org",
+          "full:example.net",
+          "dotless:",
+          "dotless:local"
+        ],
+        "localIP": [
+          "127.0.0.1"
+        ],
+        "network": [
+          "TCP",
+          "udp",
+          "unix",
+          "invalid"
+        ],
+        "balancerTag": "pool",
+        "port": 443,
+        "localPort": "8080",
+        "localOS": "linux",
+        "vlessRoute": "1-2",
+        "ruleTag": "all",
+        "ip": [
+          "203.0.113.1/24",
+          "::ffff:192.0.2.1/24",
+          "!2001:db8::/32"
+        ],
+        "protocol": "http,tls",
+        "attrs": {
+          "x": "y",
+          "a": "b"
+        },
+        "inboundTag": "in",
+        "sourcePort": "1000-2000",
+        "webhook": {
+          "headers": {
+            "x": "y"
+          },
+          "url": "https://example.org",
+          "deduplication": 2
+        },
+        "sourceIP": "192.0.2.1",
+        "user": "user@example.org",
+        "process": "app"
+      }
+    ]
+  },
+  {
+    "domainStrategy": "IPOnDemand",
+    "balancers": [
+      {
+        "fallbackTag": "direct",
+        "strategy": {
+          "type": "roundrobin",
+          "settings": {
+            "expected": 2,
+            "costs": [
+              {
+                "value": 1.2,
+                "regexp": true,
+                "match": "x"
+              }
+            ],
+            "maxRTT": "1s",
+            "tolerance": 0.2,
+            "baselines": [
+              "50ms",
+              "100ms",
+              "-1s"
+            ]
+          }
+        },
+        "tag": "pool",
+        "selector": [
+          "proxy"
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "domain": [
+          "keyword:abc",
+          "regexp:.*abc",
+          "domain:example.org",
+          "full:example.net",
+          "dotless:",
+          "dotless:local"
+        ],
+        "localIP": [
+          "127.0.0.1"
+        ],
+        "network": [
+          "TCP",
+          "udp",
+          "unix",
+          "invalid"
+        ],
+        "balancerTag": "pool",
+        "port": 443,
+        "localPort": "8080",
+        "localOS": "linux",
+        "vlessRoute": "1-2",
+        "ruleTag": "all",
+        "ip": [
+          "203.0.113.1/24",
+          "::ffff:192.0.2.1/24",
+          "!2001:db8::/32"
+        ],
+        "protocol": "http,tls",
+        "attrs": {
+          "x": "y",
+          "a": "b"
+        },
+        "inboundTag": "in",
+        "sourcePort": "1000-2000",
+        "webhook": {
+          "headers": {
+            "x": "y"
+          },
+          "url": "https://example.org",
+          "deduplication": 2
+        },
+        "sourceIP": "192.0.2.1",
+        "user": "user@example.org",
+        "process": "app"
+      }
+    ]
+  },
+  {
+    "domainStrategy": "IPOnDemand",
+    "balancers": [
+      {
+        "fallbackTag": "direct",
+        "strategy": {
+          "type": "leastping",
+          "settings": {
+            "expected": 2,
+            "costs": [
+              {
+                "value": 1.2,
+                "regexp": true,
+                "match": "x"
+              }
+            ],
+            "maxRTT": "1s",
+            "tolerance": 0.2,
+            "baselines": [
+              "50ms",
+              "100ms",
+              "-1s"
+            ]
+          }
+        },
+        "tag": "pool",
+        "selector": [
+          "proxy"
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "domain": [
+          "keyword:abc",
+          "regexp:.*abc",
+          "domain:example.org",
+          "full:example.net",
+          "dotless:",
+          "dotless:local"
+        ],
+        "localIP": [
+          "127.0.0.1"
+        ],
+        "network": [
+          "TCP",
+          "udp",
+          "unix",
+          "invalid"
+        ],
+        "balancerTag": "pool",
+        "port": 443,
+        "localPort": "8080",
+        "localOS": "linux",
+        "vlessRoute": "1-2",
+        "ruleTag": "all",
+        "ip": [
+          "203.0.113.1/24",
+          "::ffff:192.0.2.1/24",
+          "!2001:db8::/32"
+        ],
+        "protocol": "http,tls",
+        "attrs": {
+          "x": "y",
+          "a": "b"
+        },
+        "inboundTag": "in",
+        "sourcePort": "1000-2000",
+        "webhook": {
+          "headers": {
+            "x": "y"
+          },
+          "url": "https://example.org",
+          "deduplication": 2
+        },
+        "sourceIP": "192.0.2.1",
+        "user": "user@example.org",
+        "process": "app"
+      }
+    ]
+  },
+  {
+    "domainStrategy": "IPOnDemand",
+    "balancers": [
+      {
+        "fallbackTag": "direct",
+        "strategy": {
+          "type": "leastload",
+          "settings": {
+            "expected": 2,
+            "costs": [
+              {
+                "value": 1.2,
+                "regexp": true,
+                "match": "x"
+              }
+            ],
+            "maxRTT": "1s",
+            "tolerance": 0.2,
+            "baselines": [
+              "50ms",
+              "100ms",
+              "-1s"
+            ]
+          }
+        },
+        "tag": "pool",
+        "selector": [
+          "proxy"
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "domain": [
+          "keyword:abc",
+          "regexp:.*abc",
+          "domain:example.org",
+          "full:example.net",
+          "dotless:",
+          "dotless:local"
+        ],
+        "localIP": [
+          "127.0.0.1"
+        ],
+        "network": [
+          "TCP",
+          "udp",
+          "unix",
+          "invalid"
+        ],
+        "balancerTag": "pool",
+        "port": 443,
+        "localPort": "8080",
+        "localOS": "linux",
+        "vlessRoute": "1-2",
+        "ruleTag": "all",
+        "ip": [
+          "203.0.113.1/24",
+          "::ffff:192.0.2.1/24",
+          "!2001:db8::/32"
+        ],
+        "protocol": "http,tls",
+        "attrs": {
+          "x": "y",
+          "a": "b"
+        },
+        "inboundTag": "in",
+        "sourcePort": "1000-2000",
+        "webhook": {
+          "headers": {
+            "x": "y"
+          },
+          "url": "https://example.org",
+          "deduplication": 2
+        },
+        "sourceIP": "192.0.2.1",
+        "user": "user@example.org",
+        "process": "app"
+      }
+    ]
+  },
+  {
+    "domainStrategy": "IPOnDemand",
+    "balancers": [
+      {
+        "fallbackTag": "direct",
+        "strategy": {
+          "type": "unknown",
+          "settings": {
+            "expected": 2,
+            "costs": [
+              {
+                "value": 1.2,
+                "regexp": true,
+                "match": "x"
+              }
+            ],
+            "maxRTT": "1s",
+            "tolerance": 0.2,
+            "baselines": [
+              "50ms",
+              "100ms",
+              "-1s"
+            ]
+          }
+        },
+        "tag": "pool",
+        "selector": [
+          "proxy"
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "domain": [
+          "keyword:abc",
+          "regexp:.*abc",
+          "domain:example.org",
+          "full:example.net",
+          "dotless:",
+          "dotless:local"
+        ],
+        "localIP": [
+          "127.0.0.1"
+        ],
+        "network": [
+          "TCP",
+          "udp",
+          "unix",
+          "invalid"
+        ],
+        "balancerTag": "pool",
+        "port": 443,
+        "localPort": "8080",
+        "localOS": "linux",
+        "vlessRoute": "1-2",
+        "ruleTag": "all",
+        "ip": [
+          "203.0.113.1/24",
+          "::ffff:192.0.2.1/24",
+          "!2001:db8::/32"
+        ],
+        "protocol": "http,tls",
+        "attrs": {
+          "x": "y",
+          "a": "b"
+        },
+        "inboundTag": "in",
+        "sourcePort": "1000-2000",
+        "webhook": {
+          "headers": {
+            "x": "y"
+          },
+          "url": "https://example.org",
+          "deduplication": 2
+        },
+        "sourceIP": "192.0.2.1",
+        "user": "user@example.org",
+        "process": "app"
+      }
+    ]
+  },
+  {
+    "domainStrategy": "IPOnDemand",
+    "balancers": [
+      {
+        "fallbackTag": "direct",
+        "strategy": {
+          "type": "",
+          "settings": {
+            "expected": 2,
+            "costs": [
+              {
+                "value": 1.2,
+                "regexp": true,
+                "match": "x"
+              }
+            ],
+            "maxRTT": "1s",
+            "tolerance": 0.2,
+            "baselines": [
+              "50ms",
+              "100ms",
+              "-1s"
+            ]
+          }
+        },
+        "tag": "pool",
+        "selector": [
+          "proxy"
+        ]
+      }
+    ],
+    "rules": [
+      {
+        "domain": [
+          "keyword:abc",
+          "regexp:.*abc",
+          "domain:example.org",
+          "full:example.net",
+          "dotless:",
+          "dotless:local"
+        ],
+        "localIP": [
+          "127.0.0.1"
+        ],
+        "network": [
+          "TCP",
+          "udp",
+          "unix",
+          "invalid"
+        ],
+        "balancerTag": "pool",
+        "port": 443,
+        "localPort": "8080",
+        "localOS": "linux",
+        "vlessRoute": "1-2",
+        "ruleTag": "all",
+        "ip": [
+          "203.0.113.1/24",
+          "::ffff:192.0.2.1/24",
+          "!2001:db8::/32"
+        ],
+        "protocol": "http,tls",
+        "attrs": {
+          "x": "y",
+          "a": "b"
+        },
+        "inboundTag": "in",
+        "sourcePort": "1000-2000",
+        "webhook": {
+          "headers": {
+            "x": "y"
+          },
+          "url": "https://example.org",
+          "deduplication": 2
+        },
+        "sourceIP": "192.0.2.1",
+        "user": "user@example.org",
+        "process": "app"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "domain": [
+          "geosite:ru"
+        ],
+        "ip": [
+          "!geoip:!ru",
+          "ext-ip:fixture-ip.dat:!!ru"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "domain": [
+          "ext:fixture-site.dat:youtube@test"
+        ],
+        "ip": [
+          "!geoip:!ru",
+          "ext-ip:fixture-ip.dat:!!ru"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "domain": [
+          "ext-domain:fixture-site.dat:ru"
+        ],
+        "ip": [
+          "!geoip:!ru",
+          "ext-ip:fixture-ip.dat:!!ru"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "domain": [
+          "ext-site:fixture-site.dat:ru"
+        ],
+        "ip": [
+          "!geoip:!ru",
+          "ext-ip:fixture-ip.dat:!!ru"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "domain": [
+          "dotless:bad.name"
+        ],
+        "ip": [
+          "!geoip:!ru",
+          "ext-ip:fixture-ip.dat:!!ru"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "domain": [
+          "ext::"
+        ],
+        "ip": [
+          "!geoip:!ru",
+          "ext-ip:fixture-ip.dat:!!ru"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  },
+  {
+    "rules": [
+      {
+        "domain": [
+          "ext:fixture-site.dat:ru@@"
+        ],
+        "ip": [
+          "!geoip:!ru",
+          "ext-ip:fixture-ip.dat:!!ru"
+        ],
+        "outboundTag": "direct"
+      }
+    ]
+  }
+]

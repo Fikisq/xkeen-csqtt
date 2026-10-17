@@ -30,9 +30,9 @@ function destination(rule: XrayRule, ip: string): string {
   return rule.balancerTag ? `@balancer:${rule.balancerTag}` : rule.outboundTag ?? ''
 }
 
-function toTable(rule: XrayRule, index: number, ip: string): TableRule {
+function toTable(rule: XrayRule, ip: string): TableRule {
   return {
-    id: String(index), enabled: !isDisabled(rule), description: label(rule, ip),
+    id: ownName(rule), enabled: !isDisabled(rule), description: label(rule, ip),
     network: (rule.network ?? '') as TableRule['network'], inboundTag: [],
     outboundTag: destination(rule, ip), domain: rule.domain ?? [], ip: rule.ip ?? [],
     port: typeof rule.port === 'string' ? rule.port : '',
@@ -97,7 +97,7 @@ export function XrayDeviceRoutingTable({ deviceIp = '192.168.0.130', content, on
   const run = (change: (rules: XrayRule[]) => XrayRule[], immediate = true) => {
     void onChange(change, immediate).catch(error => onError(error instanceof Error ? error.message : 'Не удалось изменить правило'))
   }
-  const edit = (index: number, row: TableRule, isNew: boolean) => {
+  const edit = (id: string, row: TableRule, isNew: boolean) => {
     try { validate(row, availableOutbounds, availableBalancers, isNew) } catch (error) { onError((error as Error).message); return }
     run(current => {
       if (isNew) {
@@ -108,7 +108,8 @@ export function XrayDeviceRoutingTable({ deviceIp = '192.168.0.130', content, on
         if (insert < 0) throw new Error(`Сначала создайте отдельный маршрут для ${deviceIp}`)
         return [...current.slice(0, insert), created, ...current.slice(insert)]
       }
-      if (!current[index] || !isOwn(current[index], DEVICE_IP)) throw new Error('Правило изменилось. Обновите страницу')
+      const index = current.findIndex(rule => ownName(rule) === id)
+      if (index < 0 || !isOwn(current[index], DEVICE_IP)) throw new Error('Правило уже удалено. Откройте актуальную строку')
       if (isRuGroup(current[index]) && (!row.domain.length || !row.ip.length)) throw new Error('Для RU укажите категории доменов и IP')
       const changed = current.map((rule, position) => position === index || sameRuGroup(rule, current[index]) ? updateOwn(rule, row, DEVICE_IP) : rule)
       if (ownName(current[index]) !== FALLBACK) return changed
@@ -156,25 +157,32 @@ export function XrayDeviceRoutingTable({ deviceIp = '192.168.0.130', content, on
 
   return <div className="p-3">
     <RoutingTable
-      deviceMode rules={own.map(({ rule, index }) => toTable(rule, index, DEVICE_IP))}
+      deviceMode rules={own.map(({ rule }) => toTable(rule, DEVICE_IP))}
       disabled={fullBypass}
       latencies={latencies} pingPending={pingPending} onPing={tag => void ping(tag)}
       toolbarAction={<><Button size="sm" variant={fullBypass ? 'default' : 'outline'} aria-pressed={fullBypass} onClick={toggleFullBypass}>🔓 Полный обход без VPN: {fullBypass ? 'включён' : 'выключен'}</Button>{utilities}</>}
       onImportFile={onImportFile} onExportRules={onExportRules}
       outbounds={destinations} inbounds={[]}
-      onAddRule={row => edit(-1, row, true)}
-      onEditRule={(id, row) => edit(Number(id), row, false)}
-      onDeleteRule={id => run(current => current.filter((rule, index) => (index !== Number(id) && !sameRuGroup(rule, current[Number(id)])) || !isOwn(rule, DEVICE_IP)))}
+      onAddRule={row => edit('', row, true)}
+      onEditRule={(id, row) => edit(id, row, false)}
+      onDeleteRule={id => run(current => {
+        const selected = current.find(rule => ownName(rule) === id)
+        if (!selected) throw new Error('Правило уже удалено')
+        return current.filter(rule => (ownName(rule) !== id && !sameRuGroup(rule, selected)) || !isOwn(rule, DEVICE_IP))
+      })}
       onReorder={(from, to) => run(current => reorderRuGroups(current, rule => isOwn(rule, DEVICE_IP), from, to))}
-      onToggleEnabled={id => run(current => current.map((rule, index) => {
-        if ((index !== Number(id) && !sameRuGroup(rule, current[Number(id)])) || !isOwn(rule, DEVICE_IP) || ownName(rule) === FALLBACK) return rule
+      onToggleEnabled={id => run(current => {
+        const selected = current.find(rule => ownName(rule) === id)
+        if (!selected) throw new Error('Правило уже удалено')
+        return current.map(rule => {
+        if ((ownName(rule) !== id && !sameRuGroup(rule, selected)) || !isOwn(rule, DEVICE_IP) || ownName(rule) === FALLBACK) return rule
         return isDisabled(rule)
           ? { ...rule, ruleTag: rule.ruleTag?.replace(/^disabled:/, ''), sourceIP: [DEVICE_IP] }
           : { ...rule, ruleTag: `disabled:${rule.ruleTag}`, sourceIP: [DISABLED_SOURCE] }
-      }))}
-      canDelete={row => ownName(rules[Number(row.id)]) !== FALLBACK}
-      canReorder={row => ownName(rules[Number(row.id)]) !== FALLBACK}
-      canToggle={row => ownName(rules[Number(row.id)]) !== FALLBACK}
+      })})}
+      canDelete={row => row.id !== FALLBACK}
+      canReorder={row => row.id !== FALLBACK}
+      canToggle={row => row.id !== FALLBACK}
     />
   </div>
 }

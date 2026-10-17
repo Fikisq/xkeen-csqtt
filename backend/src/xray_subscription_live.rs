@@ -82,7 +82,7 @@ async fn remove_aliases(tags: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn mapped_routing(config: &Value, aliases: &HashMap<String, String>) -> Result<Value, String> {
+pub(crate) fn mapped_routing(config: &Value, aliases: &HashMap<String, String>) -> Result<Value, String> {
     let mut routing = config.get("routing").cloned().ok_or("В JSON нет routing")?;
     if let Some(rules) = routing.get_mut("rules").and_then(Value::as_array_mut) {
         for rule in rules {
@@ -205,8 +205,7 @@ pub(crate) async fn prepare(old_config: &Value, new_config: &Value) -> Result<Up
 impl Update {
     pub(crate) async fn apply(&self, config: &Value) -> Result<(), String> {
         if process_identity()? != self.old.process { return Err("Процесс Xray изменился".into()); }
-        crate::xray_routes::invalidate_switches().await;
-        api("adrules", Some(&json!({"routing": mapped_routing(config, &self.next.aliases)?}))).await?;
+        crate::xray_routes::replace_mapped_rules(config, &self.next.aliases).await?;
         let temporary = format!("{STATE}.{}.tmp", uuid::Uuid::new_v4());
         let data = serde_json::to_string(&self.next).map_err(|_| "Не удалось записать карту узлов")?;
         super::write_private(&temporary, &data).await.map_err(|_| "Не удалось записать карту узлов")?;
@@ -214,8 +213,7 @@ impl Update {
     }
 
     pub(crate) async fn rollback(&self, config: &Value) -> Result<(), String> {
-        crate::xray_routes::invalidate_switches().await;
-        api("adrules", Some(&json!({"routing": mapped_routing(config, &self.old.aliases)?}))).await?;
+        crate::xray_routes::replace_mapped_rules(config, &self.old.aliases).await?;
         let data = serde_json::to_string(&self.old).map_err(|_| "Не удалось восстановить карту узлов")?;
         super::write_private(STATE, &data).await.map_err(|_| "Не удалось восстановить карту узлов".to_string())
     }

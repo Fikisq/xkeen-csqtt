@@ -48,9 +48,9 @@ function destination(rule: XrayRule): string {
   return rule.balancerTag ? `@balancer:${rule.balancerTag}` : rule.outboundTag ?? ''
 }
 
-function toTable(rule: XrayRule, index: number): TableRule {
+function toTable(rule: XrayRule): TableRule {
   return {
-    id: String(index), enabled: !disabled(rule), description: isRuGroup(rule) ? 'RU · RoscomVPN' : routeLabel(baseRuleTag(rule)),
+    id: baseRuleTag(rule), enabled: !disabled(rule), description: isRuGroup(rule) ? 'RU · RoscomVPN' : routeLabel(baseRuleTag(rule)),
     network: (rule.network ?? '') as TableRule['network'],
     inboundTag: Array.isArray(rule.inboundTag) ? rule.inboundTag as string[] : [],
     outboundTag: destination(rule), domain: rule.domain ?? [], ip: rule.ip ?? [],
@@ -230,8 +230,8 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
     } catch (error) { onError(error instanceof Error ? error.message : 'Не удалось импортировать правила') }
   }
 
-  const edit = (index: number, row: TableRule, isNew: boolean) => {
-    const targetValid = row.outboundTag === '@bypass' ? !isNew && baseRuleTag(rules[index]) === 'VPN' : row.outboundTag.startsWith('@balancer:') ? balancers.includes(row.outboundTag.slice(10)) : outbounds.some(out => out.tag === row.outboundTag)
+  const edit = (id: string, row: TableRule, isNew: boolean) => {
+    const targetValid = row.outboundTag === '@bypass' ? !isNew && id === 'VPN' : row.outboundTag.startsWith('@balancer:') ? balancers.includes(row.outboundTag.slice(10)) : outbounds.some(out => out.tag === row.outboundTag)
     if (!targetValid) { onError('Выберите существующее исходящее подключение'); return }
     if (isNew && (!row.description.trim() || row.description.length > 40 || /[<>\r\n]/.test(row.description))) { onError('Укажите название правила: от 1 до 40 символов'); return }
     if (isNew && (!row.domain.length && !row.ip.length || !!row.domain.length && !!row.ip.length)) { onError('Для нового правила укажите домены или IP'); return }
@@ -242,7 +242,7 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
         const tag = `custom:${encodeURIComponent(row.description.trim())}`
         return applyRow(added, tag, row)
       }
-      const original = current[index]
+      const original = current.find(rule => baseRuleTag(rule) === id)
       if (!original || !managed(original, routeTags(current))) throw new Error('Правило изменилось. Обновите страницу')
       const tag = baseRuleTag(original)
       let changed = current
@@ -323,24 +323,30 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
     {deviceIp ? <XrayDeviceRoutingTable deviceIp={deviceIp} content={content} onChange={change => onDeviceChange(deviceIp, change)} onError={onError} utilities={utilities} onImportFile={importRules} onExportRules={exportRules} /> : <>
     {fullBypass && <p className="text-muted-foreground text-xs">Полный обход активен: все общие правила ниже сохранены, но временно недоступны.</p>}
     <RoutingTable
-      rules={own.map(({ rule, index }) => toTable(rule, index))}
+      rules={own.map(({ rule }) => toTable(rule))}
       showTitle={false}
       outbounds={destinations} inbounds={[]}
       disabled={fullBypass} latencies={latencies} pingPending={pingPending} onPing={tag => void ping(tag)}
       toolbarAction={<><Button size="sm" variant={fullBypass ? 'default' : 'outline'} aria-pressed={fullBypass} onClick={() => chooseVpn(fullBypass ? 'direct' : '@bypass')}>🔓 Полный обход без VPN: {fullBypass ? 'включён' : 'выключен'}</Button>{utilities}</>}
       onImportFile={importRules} onExportRules={exportRules}
-      onAddRule={row => edit(-1, row, true)}
-      onEditRule={(id, row) => edit(Number(id), row, false)}
+      onAddRule={row => edit('', row, true)}
+      onEditRule={(id, row) => edit(id, row, false)}
       onDeleteRule={id => run(current => {
-        const tag = baseRuleTag(current[Number(id)])
-        const groupTags = isRuGroup(current[Number(id)]) ? ['RU', 'RU_IP'] : [tag]
+        const selected = current.find(rule => baseRuleTag(rule) === id)
+        if (!selected) throw new Error('Правило уже удалено')
+        const tag = baseRuleTag(selected)
+        const groupTags = isRuGroup(selected) ? ['RU', 'RU_IP'] : [tag]
         return groupTags.reduce((changed, groupTag) => removeCustomRoute(changed, groupTag).filter(rule => !baseRuleTag(rule).startsWith('disabled:device:') || !baseRuleTag(rule).endsWith(`:${groupTag}`)), current)
       })}
       onReorder={(from, to) => run(current => reorderRuGroups(current, rule => managed(rule, routeTags(current)), from, to))}
-      onToggleEnabled={id => run(current => current.map((rule, index) => index === Number(id) || sameRuGroup(rule, current[Number(id)]) ? { ...rule, sourceIP: disabled(rule) ? undefined : [DISABLED_SOURCE] } : rule))}
-      canDelete={row => baseRuleTag(rules[Number(row.id)]) !== 'VPN'}
-      canReorder={row => baseRuleTag(rules[Number(row.id)]) !== 'VPN'}
-      canToggle={row => baseRuleTag(rules[Number(row.id)]) !== 'VPN'}
+      onToggleEnabled={id => run(current => {
+        const selected = current.find(rule => baseRuleTag(rule) === id)
+        if (!selected) throw new Error('Правило уже удалено')
+        return current.map(rule => baseRuleTag(rule) === id || sameRuGroup(rule, selected) ? { ...rule, sourceIP: disabled(rule) ? undefined : [DISABLED_SOURCE] } : rule)
+      })}
+      canDelete={row => row.id !== 'VPN'}
+      canReorder={row => row.id !== 'VPN'}
+      canToggle={row => row.id !== 'VPN'}
     />
     </>}
   </div>

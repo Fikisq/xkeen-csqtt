@@ -80,6 +80,10 @@ jobs:
         working-directory: backend
         run: cargo metadata --format-version 1
 
+      - name: Check native Xray API compatibility
+        working-directory: backend
+        run: cargo test --example xray_api_checks
+
       - name: Inject frontend dist for cross
         working-directory: backend
         run: |

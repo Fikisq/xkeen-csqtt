@@ -10,12 +10,23 @@ export function rebaseXrayRouting(previous: string, desired: string, latest: str
   const map = (rules: RoutingRule[]) => new Map(rules.map((rule, index) => [key(rule, index), rule]))
   const oldMap = map(before), nextMap = map(after), liveMap = map(current)
   if (oldMap.size !== before.length || nextMap.size !== after.length || liveMap.size !== current.length) throw new Error('Обновите правила: повторяются теги')
-  const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+  const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
+    : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([name, item]) => [name, canonical(item)])) : value
+  const equal = (a: unknown, b: unknown) => JSON.stringify(canonical(a)) === JSON.stringify(canonical(b))
   for (const name of new Set([...oldMap.keys(), ...nextMap.keys()])) {
     const old = oldMap.get(name), wanted = nextMap.get(name), live = liveMap.get(name)
     if (equal(old, wanted)) continue
-    if (!equal(live, old) && !equal(live, wanted)) throw new Error('Это правило изменено в другом окне. Актуальная конфигурация загружена; повторите изменение')
-    if (wanted) liveMap.set(name, wanted)
+    if (!equal(live, old) && !equal(live, wanted)) {
+      if (!old || !wanted || !live) throw new Error('Это правило изменено в другом окне. Актуальная конфигурация загружена; повторите изменение')
+      const merged = { ...live } as Record<string, unknown>
+      for (const field of new Set([...Object.keys(old), ...Object.keys(wanted)])) {
+        if (equal(old[field], wanted[field])) continue
+        if (!equal(live[field], old[field]) && !equal(live[field], wanted[field])) throw new Error('Это правило изменено в другом окне. Актуальная конфигурация загружена; повторите изменение')
+        if (wanted[field] === undefined) delete merged[field]
+        else merged[field] = wanted[field]
+      }
+      liveMap.set(name, merged as RoutingRule)
+    } else if (wanted) liveMap.set(name, wanted)
     else liveMap.delete(name)
   }
   return applyEdits(latest, modify(latest, ['routing', 'rules'], normalizeDevicePriority([...liveMap.values()]), { formattingOptions: { insertSpaces: true, tabSize: 2 } }))

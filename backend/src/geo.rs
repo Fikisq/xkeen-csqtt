@@ -451,6 +451,7 @@ pub fn list_geo_files(cache_arc: Arc<RwLock<crate::types::GeoCache>>) -> Result<
         }
 
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+        if name == ".xkeen-ui-source-cache.dat" { continue; }
         let mtime = entry
             .metadata()
             .and_then(|m| m.modified())

@@ -282,6 +282,11 @@ async fn iptables(binary: &str, table: &str, operation: &str, mac: &str, comment
 }
 
 async fn sync_firewall(old: &BTreeSet<String>, new: &BTreeSet<String>) -> Result<(), String> {
+    sync_firewall_mode(old, new, false).await
+}
+
+async fn sync_firewall_mode(old: &BTreeSet<String>, new: &BTreeSet<String>, incremental: bool) -> Result<(), String> {
+    if incremental && old == new { return Ok(()); }
     // Netfilter hooks can recreate chains without changing the saved device list.
     // Reconcile the actual rules even when the requested list is unchanged.
     let mut ipv4_chains = 0;
@@ -301,6 +306,7 @@ async fn sync_firewall(old: &BTreeSet<String>, new: &BTreeSet<String>) -> Result
             }
         }
         for mac in new {
+            if incremental && old.contains(mac) { continue; }
             if iptables(binary, table, "-C", mac, COMMENT).await?
                 || iptables(binary, table, "-C", mac, "xkeen_rule").await? { continue }
             let result = Command::new(binary).args(["-t", table, "-I", "xkeen", "1", "-m", "mac", "--mac-source", mac,
@@ -321,6 +327,14 @@ async fn sync_firewall(old: &BTreeSet<String>, new: &BTreeSet<String>) -> Result
 pub struct PreviousBypass { macs: BTreeSet<String>, content: String, global: bool, capture: String }
 
 pub async fn apply_for_config(config: &Value) -> Result<PreviousBypass, String> {
+    apply_config(config, false).await
+}
+
+pub(crate) async fn apply_route_changes(config: &Value) -> Result<PreviousBypass, String> {
+    apply_config(config, true).await
+}
+
+async fn apply_config(config: &Value, incremental: bool) -> Result<PreviousBypass, String> {
     if !Path::new(BYPASS_FILE).exists() {
         return Err("На роутере не установлен обработчик режима «Без VPN»".into());
     }
@@ -336,7 +350,7 @@ pub async fn apply_for_config(config: &Value) -> Result<PreviousBypass, String> 
         entries.insert(ip, resolve_mac(ip).await.or_else(|error| saved.get(&ip).cloned().ok_or(error))?);
     }
     let new: BTreeSet<String> = entries.values().cloned().collect();
-    if let Err(error) = sync_firewall(&old, &new).await {
+    if let Err(error) = sync_firewall_mode(&old, &new, incremental).await {
         _ = sync_firewall(&new, &old).await;
         return Err(error);
     }
@@ -349,13 +363,15 @@ pub async fn apply_for_config(config: &Value) -> Result<PreviousBypass, String> 
     let direct = direct_device_ips(config)?;
     let capture_ips = capture_device_ips(config, &direct);
     let next_capture = capture_ips.iter().map(|ip| format!("{ip}\n")).collect::<String>();
-    if let Err(error) = sync_capture(&next_capture).await {
+    if (!incremental || next_capture != capture) && let Err(error) = sync_capture(&next_capture).await {
         _ = sync_capture(&capture).await;
         _ = sync_firewall(&new, &old).await;
         _ = fs::write(BYPASS_FILE, &previous).await;
         return Err(error)
     }
-    let global = match set_global_direct("xray", global_direct(config)).await {
+    let old_global = Path::new(GLOBAL_XRAY_FILE).exists();
+    let global = match if incremental && old_global == global_direct(config) { Ok(old_global) }
+        else { set_global_direct("xray", global_direct(config)).await } {
         Ok(previous) => previous,
         Err(error) => {
             _ = sync_capture(&capture).await;

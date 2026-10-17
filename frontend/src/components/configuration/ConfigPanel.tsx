@@ -40,7 +40,7 @@ import * as jsyaml from 'js-yaml'
 import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react'
 import { apiCall, capitalize, clashFetch, getFileLanguage } from '../../lib/api'
 import { LazyBoundary, lazyLoad, useLazyMount } from '../../lib/loader'
-import { fetchClashProxies, useProxiesStore, syncClashApiPort, useAppContext, useConnectionsSync, useModalContext } from '../../lib/store'
+import { fetchClashProxies, getAppState, useProxiesStore, syncClashApiPort, useAppContext, useConnectionsSync, useModalContext } from '../../lib/store'
 import type { Config } from '../../lib/types'
 import { cn } from '../../lib/utils'
 import { normalizeDevicePriority, baseRuleTag, type RouteTag, type RoutingRule } from '../../lib/xrayDeviceRouting'
@@ -470,6 +470,7 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
 
     const targetFile = currentCfg?.file ?? activeConfigFile
     const nextConfigs = await onRefreshConfigs()
+    configsRef.current = nextConfigs
     const nextConfig = nextConfigs.find((config) => config.file === targetFile) ?? nextConfigs[0]
 
     if (nextConfig) {
@@ -640,6 +641,7 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
   }
 
   function enqueueXrayRoutingEdit(file: string, edit: (content: string) => string, message: string): Promise<boolean> {
+    configsRef.current = getAppState().configs
     const config = configsRef.current.find(item => item.file === file)
     if (!config || routingRecoveryRef.current) return Promise.resolve(false)
     const current = parseJsonc(config.savedContent)
@@ -656,18 +658,21 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
         initial: config.savedContent,
         rebase: rebaseXrayRouting,
         send: async (previous, content) => {
-          let applied = await apiCall<{ success: boolean; error?: string; warning?: string }>('POST', 'xray/routes', {
-            file, previous_content: previous, content,
-          })
-          if (!applied.success && applied.error?.includes('Конфигурация уже изменилась')) {
-            const latest = (await onRefreshConfigs()).find(item => item.file === file)?.savedContent
+          for (let attempt = 0; attempt < 3; attempt++) {
+            const applied = await apiCall<{ success: boolean; code?: string; error?: string; warning?: string; content?: string; current_content?: string }>('POST', 'xray/routes', {
+              file, previous_content: previous, content,
+            })
+            if (applied.success) {
+              if (applied.warning) showToast(applied.warning)
+              return applied.content ?? content
+            }
+            if (applied.code !== 'CONFIG_CHANGED' && !applied.error?.includes('Конфигурация уже изменилась')) throw new Error(applied.error || 'Xray не принял правила')
+            const latest = applied.current_content ?? (await onRefreshConfigs()).find(item => item.file === file)?.savedContent
             if (!latest) throw new Error('Не удалось загрузить актуальную конфигурацию')
             content = rebaseXrayRouting(previous, content, latest)
-            applied = await apiCall('POST', 'xray/routes', { file, previous_content: latest, content })
+            previous = latest
           }
-          if (!applied.success) throw new Error(applied.error || 'Xray не принял правила')
-          if (applied.warning) showToast(applied.warning)
-          return content
+          throw new Error('Конфигурация меняется параллельно. Актуальные настройки загружены; повторите действие')
         },
         onState: (content, pending) => {
           setRoutingAutoPreview(pending ? { file, content } : null)
@@ -675,6 +680,7 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
         },
         onCommit: content => {
           next.confirmed = content
+          configsRef.current = getAppState().configs
           const index = configsRef.current.findIndex(item => item.file === file)
           if (index >= 0) {
             const existing = configsRef.current[index]

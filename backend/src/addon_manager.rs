@@ -253,6 +253,18 @@ async fn install_inner(state: AppState, name: &str) -> Result<Value, String> {
         let path = target(name, name_in_bundle).ok_or("Неизвестный файл пакета")?;
         install_file(path, &files[*name_in_bundle])?;
     }
+    // Release archives contain only distributable runtime files. Initialize a
+    // new user's settings locally; never include or overwrite live settings.
+    if name == "csqtt" && !Path::new("/opt/etc/csqtt/csqtt.conf").exists() {
+        let initial = format!(
+            "HASHES='4'\nWORKERS='81'\nPEER=''\nPASSWORD=''\nDEVICE_ID='{}'\nLISTEN='127.0.0.1:9000'\nFINGERPRINT='chrome'\nCLIENT_IDS=''\nOBFS='audio'\nTURN_TRANSPORT='udp'\nCAPTCHA_MODE='auto'\nVK_HASH_MODE='auto_js'\nVK_HASHES=''\n",
+            uuid::Uuid::new_v4()
+        );
+        private_write("/opt/etc/csqtt/csqtt.conf", initial.as_bytes())?;
+    }
+    if name == "wdtt-plus" && !Path::new("/opt/etc/wdtt-plus/device_id").exists() {
+        private_write("/opt/etc/wdtt-plus/device_id", uuid::Uuid::new_v4().to_string().as_bytes())?;
+    }
     let backup = format!("{BACKUP}/{name}.json");
     let mut restarted = false;
     if let Ok(outbound) = fs::read(&backup).await {

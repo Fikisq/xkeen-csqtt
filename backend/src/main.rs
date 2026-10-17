@@ -19,6 +19,9 @@ mod mihomo_latency;
 mod mihomo_subscription_refresh;
 mod xray_subscription_refresh;
 mod xray_routes;
+mod xray_api;
+mod xray_routing_codec;
+mod xray_wire;
 mod device_bypass;
 mod node_metadata;
 mod nfqws2;
@@ -461,6 +464,7 @@ async fn main() {
     xray_subscription_refresh::start(state.clone());
     geodata_update::start(state.clone());
     nfqws2::start_reconciler();
+    xray_routes::warm_after_start(state.clone());
 
     if let Some(ref _token) = state.rci_token {
         log("INFO", "RCI токен успешно загружен".into());

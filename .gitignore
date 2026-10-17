@@ -28,6 +28,7 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+backend/assets/xray-api/*.gz
 *.local
 
 # Editor directories and files

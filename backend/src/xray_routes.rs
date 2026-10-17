@@ -5,18 +5,31 @@ use crate::types::AppState;
 use axum::{extract::State, Json};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::{collections::BTreeMap, process::Stdio, sync::OnceLock, time::Duration};
-use tokio::{io::AsyncWriteExt, process::Command, sync::Mutex};
+use std::{collections::BTreeMap, sync::OnceLock, time::Duration};
+use tokio::sync::Mutex;
 
 const CONFIG_FILE: &str = "/opt/etc/xray/configs/00_config.json";
 const API_LISTEN: &str = "127.0.0.1:18085";
 static ROUTE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 static LIVE_SWITCHES: OnceLock<Mutex<Option<LiveSwitches>>> = OnceLock::new();
 struct LiveSwitches { process: String, shape: Value, targets: BTreeMap<String, String> }
-pub(crate) async fn invalidate_switches() {
-    *LIVE_SWITCHES.get_or_init(|| Mutex::new(None)).lock().await = None;
-}
 pub(crate) fn routing_lock() -> &'static Mutex<()> { ROUTE_LOCK.get_or_init(|| Mutex::new(())) }
+
+pub(crate) fn warm_after_start(state: AppState) {
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let _route_guard = routing_lock().lock().await;
+        let _config_guard = state.app_config_lock.lock().await;
+        if state.core.read().unwrap().name != "xray" { return; }
+        let Some(config) = tokio::fs::read_to_string(CONFIG_FILE).await.ok()
+            .and_then(|text| serde_json::from_str::<Value>(&text).ok()) else { return; };
+        if routing_api_enabled(&config) && crate::xray_subscription_refresh::live::process_identity().is_ok() {
+            // Populate the selector cache before the first click, without
+            // saving a file or restarting the core/firewall.
+            let _ = replace_live_rules(&config).await;
+        }
+    });
+}
 
 #[derive(Deserialize)]
 pub struct ApplyRoutesRequest {
@@ -34,12 +47,42 @@ fn routing_api_enabled(config: &Value) -> bool {
 pub(crate) async fn replace_live_rules(config: &Value) -> Result<(), String> {
     let mut ordered = config.clone();
     prioritize_device_rules(&mut ordered);
-    let mut runtime = crate::xray_subscription_refresh::live::runtime_config(&ordered).await?;
+    let runtime = crate::xray_subscription_refresh::live::runtime_config(&ordered).await?;
+    replace_runtime_rules(runtime).await
+}
+
+pub(crate) async fn replace_mapped_rules(config: &Value, aliases: &std::collections::HashMap<String, String>) -> Result<(), String> {
+    let mut runtime = config.clone();
+    prioritize_device_rules(&mut runtime);
+    runtime["routing"] = crate::xray_subscription_refresh::live::mapped_routing(&runtime, aliases)?;
+    replace_runtime_rules(runtime).await
+}
+
+async fn replace_runtime_rules(mut runtime: Value) -> Result<(), String> {
     omit_shadowed_device_rules(&mut runtime);
     let process = crate::xray_subscription_refresh::live::process_identity()?;
     let mut switches = LIVE_SWITCHES.get_or_init(|| Mutex::new(None)).lock().await;
     let targets = prepare_switches(&mut runtime)?;
     let mut shape = runtime["routing"].clone();
+    // Stable filenames can acquire new contents during a geodata update.
+    // Include metadata so that a cache hit never suppresses that reload.
+    let mut assets = std::collections::BTreeSet::new();
+    for rule in runtime["routing"]["rules"].as_array().into_iter().flatten() {
+        for field in ["domain", "ip"] {
+            for value in rule[field].as_array().into_iter().flatten().filter_map(Value::as_str) {
+                let file = if let Some(ext) = value.strip_prefix("ext:") { ext.split(':').next() }
+                    else if value.starts_with("geosite:") { Some("geosite.dat") }
+                    else if value.starts_with("geoip:") { Some("geoip.dat") } else { None };
+                if let Some(file) = file { assets.insert(file.to_owned()); }
+            }
+        }
+    }
+    shape["__asset_versions"] = json!(assets.into_iter().map(|file| {
+        let metadata = std::fs::metadata(format!("/opt/etc/xray/dat/{file}"));
+        let version = metadata.ok().map(|m| (m.len(), m.modified().ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok()).map(|time| time.as_nanos())));
+        (file, version)
+    }).collect::<Vec<_>>());
     for balancer in shape["balancers"].as_array_mut().into_iter().flatten() {
         if targets.contains_key(balancer["tag"].as_str().unwrap_or("")) {
             balancer.as_object_mut().unwrap().remove("fallbackTag");
@@ -57,24 +100,9 @@ pub(crate) async fn replace_live_rules(config: &Value) -> Result<(), String> {
     *switches = None;
     let config = &runtime;
     let routing = config.get("routing").ok_or("В JSON нет маршрутизации")?;
-    let input = serde_json::to_vec(&json!({ "routing": routing })).map_err(|e| e.to_string())?;
-    let mut command = Command::new("/opt/sbin/xray");
-    command.args(["api", "adrules", "-s", API_LISTEN, "-t", "12", "stdin:"])
-        .env("XRAY_LOCATION_ASSET", "/opt/etc/xray/dat")
-        .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-    let mut child = command.spawn().map_err(|e| format!("Не удалось вызвать API Xray: {e}"))?;
-    let Some(mut stdin) = child.stdin.take() else { return Err("Не удалось передать правила Xray".into()) };
-    stdin.write_all(&input).await.map_err(|e| format!("Не удалось передать правила Xray: {e}"))?;
-    drop(stdin);
-    let output = tokio::time::timeout(Duration::from_secs(18), child.wait_with_output()).await
-        .map_err(|_| "API Xray не ответил за 18 секунд".to_string())?
-        .map_err(|e| format!("Ошибка API Xray: {e}"))?;
-    if output.status.success() {
-        *switches = Some(LiveSwitches { process, shape, targets });
-        return Ok(());
-    }
-    let error = String::from_utf8_lossy(&output.stderr);
-    Err(format!("Xray не принял правила: {}", error.trim().chars().take(300).collect::<String>()))
+    crate::xray_api::apply_routing(routing, &shape["__asset_versions"]).await?;
+    *switches = Some(LiveSwitches { process, shape, targets });
+    Ok(())
 }
 
 // Keep selectors in the runtime only. Saved configs retain ordinary outboundTag
@@ -102,13 +130,7 @@ fn prepare_switches(config: &mut Value) -> Result<BTreeMap<String, String>, Stri
 }
 
 async fn override_target(balancer: &str, target: &str) -> Result<(), String> {
-    let output = tokio::time::timeout(Duration::from_secs(4), Command::new("/opt/sbin/xray")
-        .args(["api", "bo", "-s", API_LISTEN, "-t", "3", "-b", balancer, target])
-        .kill_on_drop(true).output()).await
-        .map_err(|_| "Тайм-аут переключения выхода Xray".to_string())?
-        .map_err(|e| e.to_string())?;
-    if output.status.success() { Ok(()) }
-    else { Err(format!("Xray не переключил выход: {}", String::from_utf8_lossy(&output.stderr).trim().chars().take(200).collect::<String>())) }
+    crate::xray_api::override_target(balancer, target).await
 }
 
 // Device fallbacks must win over every general service rule, including RU.
@@ -187,12 +209,17 @@ pub async fn apply_routes(State(state): State<AppState>, Json(request): Json<App
     let Ok(current) = tokio::fs::read_to_string(CONFIG_FILE).await else {
         return Json(json!({ "success": false, "error": "Не удалось прочитать текущий JSON" }));
     };
-    if current != request.previous_content {
-        return Json(json!({ "success": false, "error": "Конфигурация уже изменилась. Обновите страницу" }));
-    }
     let Ok(old_config) = serde_json::from_str::<Value>(&current) else {
         return Json(json!({ "success": false, "error": "Текущий JSON повреждён" }));
     };
+    // Background writers may only reformat the JSON. Do not reject a routing
+    // edit for whitespace/key order, and return the actual snapshot for a safe
+    // client-side rebase when settings really changed.
+    if current != request.previous_content
+        && serde_json::from_str::<Value>(&request.previous_content).ok().as_ref() != Some(&old_config) {
+        return Json(json!({ "success": false, "code": "CONFIG_CHANGED",
+            "error": "Конфигурация уже изменилась", "current_content": current }));
+    }
     let Ok(new_config) = serde_json::from_str::<Value>(&request.content) else {
         return Json(json!({ "success": false, "error": "Новый JSON повреждён" }));
     };
@@ -226,6 +253,7 @@ pub async fn apply_routes(State(state): State<AppState>, Json(request): Json<App
     if routing_settings(&old_config) != routing_settings(&new_config) {
         return Json(json!({ "success": false, "error": "Настройки маршрутизатора требуют обычного применения; API меняет только правила и балансировщики" }));
     }
+    let routing_started = std::time::Instant::now();
     if let Err(error) = replace_live_rules(&new_config).await {
         // Restore through the same API. Never turn a failed rule update into a
         // household-wide process/firewall restart.
@@ -236,6 +264,8 @@ pub async fn apply_routes(State(state): State<AppState>, Json(request): Json<App
         };
         return Json(json!({ "success": false, "error": detail }));
     }
+    let routing_ms = routing_started.elapsed().as_millis();
+    let bypass_started = std::time::Instant::now();
     let bypass_changed = match device_bypass::needs_sync(&old_config, &new_config) {
         Ok(changed) => changed,
         Err(error) => {
@@ -244,7 +274,7 @@ pub async fn apply_routes(State(state): State<AppState>, Json(request): Json<App
         }
     };
     let previous_bypass = if bypass_changed {
-        match device_bypass::apply_for_config(&new_config).await {
+        match device_bypass::apply_route_changes(&new_config).await {
             Ok(previous) => Some(previous),
             Err(error) => {
                 _ = replace_live_rules(&old_config).await;
@@ -257,6 +287,7 @@ pub async fn apply_routes(State(state): State<AppState>, Json(request): Json<App
         _ = replace_live_rules(&old_config).await;
         return Json(json!({ "success": false, "error": error }));
     }
+    let bypass_ms = bypass_started.elapsed().as_millis();
     let temporary = format!("{CONFIG_FILE}.{}.tmp", uuid::Uuid::new_v4());
     let write_result = async {
         tokio::fs::write(&temporary, &request.content).await.map_err(|e| e.to_string())?;
@@ -271,6 +302,7 @@ pub async fn apply_routes(State(state): State<AppState>, Json(request): Json<App
         _ = replace_live_rules(&old_config).await;
         return Json(json!({ "success": false, "error": format!("Не удалось сохранить JSON: {error}") }));
     }
+    let cleanup_started = std::time::Instant::now();
     let mut warning = device_bypass::clear_changed_device_connections(&old_config, &new_config).await;
     let global_vpn = |config: &Value| config.pointer("/routing/rules").and_then(Value::as_array)
         .and_then(|rules| rules.iter().find(|rule| rule["ruleTag"].as_str()
@@ -281,5 +313,8 @@ pub async fn apply_routes(State(state): State<AppState>, Json(request): Json<App
         let note = "Новый сервер уже выбран для новых соединений клиентов. Открытое TCP-соединение нельзя перенести между серверами: оно завершится на прежнем выходе. Перезагрузка роутера, компьютера или Wi-Fi не требуется";
         warning = Some(warning.map_or_else(|| note.to_string(), |message| format!("{message}. {note}")));
     }
-    Json(json!({ "success": true, "warning": warning, "elapsedMs": started.elapsed().as_millis() }))
+    Json(json!({ "success": true, "warning": warning, "content": request.content,
+        "elapsedMs": started.elapsed().as_millis(), "routingDetails": crate::xray_api::last_routing_timings(), "timings": {
+            "routingMs": routing_ms, "bypassMs": bypass_ms,
+            "connectionsMs": cleanup_started.elapsed().as_millis() } }))
 }
