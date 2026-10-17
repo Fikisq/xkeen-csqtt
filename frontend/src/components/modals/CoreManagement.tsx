@@ -26,6 +26,7 @@ const CORES = [
 interface CsqttStatus {
   captcha?: { redirect_uri: string; session_token?: string } | null
   vkApiNotice?: string | null
+  vkAccountNotice?: string | null
   installed: boolean
   running: boolean
   interface: boolean
@@ -519,6 +520,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
               </div>
               <p className="text-muted-foreground mt-0.5 text-xs">Отдельный сервис{csqttStatus?.clientVersion ? ` · v${csqttStatus.clientVersion}` : ''}{csqttStatus?.interface ? ' · интерфейс csqtt0 доступен' : ''}</p>
               {csqttStatus?.vkApiNotice && <p className="mt-1 max-w-100 text-xs text-amber-400">{csqttStatus.vkApiNotice}</p>}
+              {csqttStatus?.vkAccountNotice && <p className="mt-1 max-w-100 text-xs text-amber-400">{csqttStatus.vkAccountNotice}</p>}
               {csqttStatus && !csqttStatus.ready && (csqttStatus.running || csqttStatus.diagnostic) && <p className="mt-1 max-w-100 text-xs text-amber-400">{csqttStatus.diagnostic || 'Клиент запущен, но адрес туннеля ещё не получен'}</p>}
             </div>
             <div className="ml-auto flex max-w-full flex-wrap justify-end gap-2">

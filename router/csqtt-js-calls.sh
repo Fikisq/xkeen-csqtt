@@ -12,6 +12,21 @@ fi
 TOKEN=$(cat "$DIR/vk_token" 2>/dev/null) || { echo 'Нет токена для закрытия звонка Auto VK' >&2; exit 1; }
 printf '%s' "$TOKEN" | grep -Eq '^[A-Za-z0-9._-]+$' || { echo 'Неверный формат токена Auto VK' >&2; exit 1; }
 
+# A paused account must not be hammered by the fallback cleanup either.
+# Keep the call IDs for cleanup after the pause or explicit reauthorization.
+GUARD="$DIR/vk-account-pause.json"
+if [ -f "$GUARD" ]; then
+    /opt/bin/jq -e '(.account | type == "string") and (.until | type == "number") and (.manual | type == "boolean")' "$GUARD" >/dev/null || {
+        echo 'Повреждён файл паузы VK; ID звонков сохранены' >&2; exit 1;
+    }
+    token_hash=$(printf '%s' "$TOKEN" | sha256sum | awk '{print $1}')
+    if /opt/bin/jq -e --arg account "$token_hash" --argjson current "$(date +%s)" \
+        '.account == $account and (.manual or .until > $current)' "$GUARD" >/dev/null; then
+        echo 'Запросы VK приостановлены; ID звонков сохранены для последующего закрытия' >&2
+        exit 1
+    fi
+fi
+
 while IFS= read -r call_id; do
     [ -n "$call_id" ] || continue
     case "$call_id" in *[!A-Za-z0-9-]*) echo 'Неверный ID звонка Auto VK' >&2; exit 1 ;; esac

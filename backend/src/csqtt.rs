@@ -79,6 +79,23 @@ fn vk_api_notice(running: bool) -> Option<&'static str> {
     } else { None }
 }
 
+fn vk_account_notice() -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let config = std::fs::read_to_string(CONFIG).ok()?;
+    if value(&config, "VK_HASH_MODE").as_deref() != Some("auto_js") { return None; }
+    let pause: Value = serde_json::from_slice(&std::fs::read("/opt/etc/csqtt/vk-account-pause.json").ok()?).ok()?;
+    let token = std::fs::read_to_string(VK_TOKEN).ok()?;
+    let account = format!("{:x}", Sha256::digest(token.trim().as_bytes()));
+    if pause["account"].as_str() != Some(account.as_str()) { return None; }
+    let reason = pause["reason"].as_str().unwrap_or("Ограничение VK").chars().take(128).collect::<String>();
+    if pause["manual"].as_bool() == Some(true) {
+        return Some(format!("Auto VK приостановлен: {reason}. Остановите клиент и повторно войдите в VK."));
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+    let remaining = pause["until"].as_u64()?.saturating_sub(now);
+    (remaining > 0).then(|| format!("Запросы Auto VK приостановлены: {reason}. Осталось {} мин.", remaining.div_ceil(60)))
+}
+
 async fn write_private(path: &str, value: &[u8]) -> std::io::Result<()> {
     static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
     let temp = format!("{path}.tmp.{}.{}", std::process::id(), NEXT_TEMP.fetch_add(1, Ordering::Relaxed));
@@ -449,7 +466,7 @@ pub async fn status() -> Json<Value> {
         .is_some_and(|age| age < std::time::Duration::from_secs(900));
     let diagnostic = if !ready && log_recent { last_diagnostic() } else { None };
     let client_version = std::fs::read_to_string("/opt/etc/csqtt/client-version").ok().map(|v| v.trim().to_string()).unwrap_or_else(|| "2.0".into());
-    Json(json!({ "installed": installed, "running": running, "interface": interface, "ready": ready, "diagnostic": diagnostic, "clientVersion": client_version, "vkApiNotice": vk_api_notice(running), "captcha": if running { captcha_state() } else { None } }))
+    Json(json!({ "installed": installed, "running": running, "interface": interface, "ready": ready, "diagnostic": diagnostic, "clientVersion": client_version, "vkApiNotice": vk_api_notice(running), "vkAccountNotice": vk_account_notice(), "captcha": if running { captcha_state() } else { None } }))
 }
 
 fn captcha_state() -> Option<Value> {

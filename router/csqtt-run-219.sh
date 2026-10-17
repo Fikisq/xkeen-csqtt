@@ -3,6 +3,9 @@
 DIR=$(dirname "$0")
 . "$DIR/csqtt.conf"
 umask 077
+export CSQTT_PROFILE_FILE="$DIR/browser-profile.json"
+export CSQTT_VK_DEVICE_ID_FILE="$DIR/vk_device_id"
+export CSQTT_VK_GUARD_FILE="$DIR/vk-account-pause.json"
 
 SESSION_EPOCH=$(date +%s)
 SESSION_SALT=$(hexdump -v -n 16 -e '1/1 "%02x"' /dev/urandom)

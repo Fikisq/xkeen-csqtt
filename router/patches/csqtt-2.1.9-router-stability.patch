@@ -1,0 +1,214 @@
+--- a/rust-client/main.rs
++++ b/rust-client/main.rs
+@@ -34,6 +34,7 @@
+ mod turn_stream;
+ mod udp_batch;
+ mod vk_js_calls;
++mod vk_account_guard;
+ #[path = "../shared/wire_protocol.rs"]
+ mod wire_protocol;
+ mod worker;
+--- a/rust-client/auth.rs
++++ b/rust-client/auth.rs
+@@ -120,6 +120,7 @@
+     }
+ 
+     pub async fn get_credentials(&self, link: &str, stream_id: usize) -> Result<TurnCredentials> {
++        crate::vk_account_guard::check()?;
+         if self.mode.as_ref() == "auto_js" {
+             let credential_id = stream_id / 100;
+             let auto_js_result = match self.auto_js.as_ref() {
+@@ -129,6 +130,7 @@
+             return match auto_js_result {
+                 Ok(credentials) => Ok(credentials),
+                 Err(auto_js_error) => {
++                    crate::vk_account_guard::check()?;
+                     crate::log_error!(
+                         "[VK JS] Креды аккаунта {credential_id}/{MAX_ACCOUNT_CREDENTIALS} недоступны: {auto_js_error:#} · переход на Авто"
+                     );
+--- a/rust-client/profiles.rs
++++ b/rust-client/profiles.rs
+@@ -172,13 +172,28 @@
+ }
+ 
+ pub fn random_profile(fingerprint: &str) -> Profile {
+-    let (impersonate, os) = match fingerprint {
+-        "safari" => pick_weighted(&safari_pool()),
+-        "firefox" => pick_weighted(&firefox_pool()),
+-        "edge" => pick_weighted(&edge_pool()),
+-        "opera" => pick_weighted(&opera_pool()),
+-        _ => pick_weighted(&chrome_pool()),
++    let pool = match fingerprint {
++        "safari" => safari_pool(), "firefox" => firefox_pool(),
++        "edge" => edge_pool(), "opera" => opera_pool(), _ => chrome_pool(),
+     };
++    let path = std::env::var_os("CSQTT_PROFILE_FILE").map(std::path::PathBuf::from);
++    let saved = path.as_ref().and_then(|path| std::fs::read(path).ok())
++        .and_then(|bytes| serde_json::from_slice::<Vec<String>>(&bytes).ok());
++    let chosen = saved.as_ref().filter(|values| values.len() == 3 && values[0] == fingerprint)
++        .and_then(|values| pool.iter().find(|entry|
++            format!("{:?}", entry.impersonate) == values[1] && format!("{:?}", entry.os) == values[2]))
++        .map(|entry| (entry.impersonate, entry.os));
++    let (impersonate, os) = chosen.unwrap_or_else(|| pick_weighted(&pool));
++    if chosen.is_none() { if let Some(path) = path {
++        use std::{io::Write, os::unix::fs::OpenOptionsExt};
++        let save = || -> anyhow::Result<()> {
++            let temp = path.with_extension("new");
++            let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&temp)?;
++            file.write_all(&serde_json::to_vec(&[fingerprint.to_string(), format!("{impersonate:?}"), format!("{os:?}")])?)?;
++            file.sync_all()?; std::fs::rename(temp, &path)?; Ok(())
++        };
++        if let Err(error) = save() { crate::log_error!("[PROFILE] Не удалось сохранить профиль: {error}"); }
++    }}
+     Profile {
+         impersonate,
+         os,
+--- a/rust-client/vk_js_calls.rs
++++ b/rust-client/vk_js_calls.rs
+@@ -11,7 +11,7 @@
+ use serde::Deserialize;
+ use serde_json::Value;
+ use sha2::{Digest, Sha256};
+-use std::{collections::HashSet, io::Write, path::PathBuf, sync::Arc, time::Duration};
++use std::{collections::{HashMap, HashSet}, io::Write, path::PathBuf, sync::Arc, time::{Duration, Instant}};
+ use tokio::sync::Mutex;
+ use url::{Url, form_urlencoded};
+ use uuid::Uuid;
+@@ -43,6 +43,7 @@
+     access_token: String,
+     conversation_id: String,
+     issued_credentials: Arc<Mutex<HashSet<[u8; 32]>>>,
++    sessions: Mutex<HashMap<usize, (Instant, ApiSession)>>,
+ }
+ 
+ pub struct StartedCalls {
+@@ -81,7 +82,9 @@
+         .build()
+         .context("инициализация браузерного HTTP-клиента")?;
+     let access_token = bootstrap.token;
+-    let creator_session = open_account_session(&client, &access_token, device_id).await?;
++    crate::vk_account_guard::configure(&access_token)?;
++    let vk_device_id = crate::vk_account_guard::vk_device_id(device_id)?;
++    let creator_session = open_account_session(&client, &access_token, &vk_device_id).await?;
+     let api_url = creator_session.api_url;
+     let session_key = creator_session.session_key;
+     let info = post_form(
+@@ -168,6 +171,7 @@
+         access_token,
+         conversation_id,
+         issued_credentials: Arc::new(Mutex::new(HashSet::new())),
++        sessions: Mutex::new(HashMap::new()),
+     });
+     match hash {
+         Ok(hash) => {
+@@ -195,10 +199,20 @@
+         if !(1..=MAX_ACCOUNT_CREDENTIALS).contains(&credential_id) {
+             bail!("Auto JS credential id вне диапазона: {credential_id}");
+         }
+-        let device_id = Uuid::new_v4().to_string();
+-        let session = open_account_session(&self.client, &self.access_token, &device_id)
+-            .await
+-            .with_context(|| format!("Auto JS session #{credential_id}"))?;
++        crate::vk_account_guard::check()?;
++        let session = {
++            let mut sessions = self.sessions.lock().await;
++            if let Some((created, session)) = sessions.get(&credential_id)
++                && created.elapsed() < Duration::from_secs(600) {
++                session.clone()
++            } else {
++                let device_id = Uuid::new_v4().to_string();
++                let session = open_account_session(&self.client, &self.access_token, &device_id)
++                    .await.with_context(|| format!("Auto JS session #{credential_id}"))?;
++                sessions.insert(credential_id, (Instant::now(), session.clone()));
++                session
++            }
++        };
+         let params = retry(3, || async {
+             let value = post_form(
+                 &self.client,
+@@ -423,12 +437,17 @@
+ {
+     let mut last_error = None;
+     for attempt in 0..attempts {
++        crate::vk_account_guard::check()?;
+         match request().await {
+             Ok(value) => return Ok(value),
+-            Err(error) => last_error = Some(error),
++            Err(error) => {
++                crate::vk_account_guard::check()?;
++                crate::vk_account_guard::transport_failure()?;
++                last_error = Some(error);
++            },
+         }
+         if attempt + 1 < attempts {
+-            tokio::time::sleep(Duration::from_millis(250 * (attempt as u64 + 1))).await;
++            tokio::time::sleep(Duration::from_secs(2u64.saturating_mul(1u64 << attempt.min(4)))).await;
+         }
+     }
+     Err(last_error.unwrap_or_else(|| anyhow::anyhow!("запрос не выполнен")))
+@@ -440,6 +459,7 @@
+     fields: &[(&str, &str)],
+     site: RequestSite,
+ ) -> Result<Value> {
++    crate::vk_account_guard::request()?;
+     let body = form(fields);
+     let response = client
+         .post(endpoint)
+@@ -449,6 +469,9 @@
+         .await
+         .context("HTTP-запрос")?;
+     let status = response.status();
++    let retry_after = response.headers().get("retry-after").and_then(|value| value.to_str().ok())
++        .and_then(crate::vk_account_guard::retry_after);
++    if !status.is_success() { crate::vk_account_guard::http_error(status.as_u16(), retry_after)?; }
+     let bytes = response.bytes().await.context("чтение HTTP-ответа")?;
+     if bytes.len() > MAX_RESPONSE_BYTES {
+         bail!("слишком большой HTTP-ответ");
+@@ -456,7 +479,10 @@
+     if !status.is_success() {
+         bail!("HTTP {status}");
+     }
+-    serde_json::from_slice(&bytes).context("некорректный JSON-ответ")
++    let value = serde_json::from_slice(&bytes).context("некорректный JSON-ответ")?;
++    check_api_error(&value)?;
++    crate::vk_account_guard::success();
++    Ok(value)
+ }
+ 
+ fn headers(site: RequestSite) -> Result<HeaderMap> {
+@@ -510,6 +536,7 @@
+             .or_else(|| error.get("message"))
+             .and_then(Value::as_str)
+             .unwrap_or("API error");
++        if let Ok(code) = code.parse::<i64>() { crate::vk_account_guard::api_error(code)?; }
+         bail!("API {code}: {message}");
+     }
+     if let Some(code) = value.get("error_code").and_then(json_scalar_string)
+@@ -519,6 +546,7 @@
+             .get("error_msg")
+             .and_then(Value::as_str)
+             .unwrap_or("API error");
++        if let Ok(code) = code.parse::<i64>() { crate::vk_account_guard::api_error(code)?; }
+         bail!("API {code}: {message}");
+     }
+     Ok(())
+--- a/rust-client/worker.rs
++++ b/rust-client/worker.rs
+@@ -517,6 +517,17 @@
+                 state.reserve()
+             }
+             Err(error) => {
++                if error.chain().any(|cause| cause.to_string().contains("VK_ACCOUNT_PAUSED")) {
++                    let delay = Duration::from_secs(crate::vk_account_guard::pause_seconds());
++                    drop(state);
++                    crate::log_error!("[VK] Запросы приостановлены: {error:#}");
++                    tokio::select! {
++                        _ = self.context.cancel.cancelled() => return None,
++                        _ = self.availability.cancel.cancelled() => return None,
++                        _ = tokio::time::sleep(delay) => {}
++                    }
++                    return None;
++                }
+                 if let Some(call) = error.downcast_ref::<CallUnavailable>() {
+                     self.availability.mark_unavailable();
+                     self.context.events.call_unavailable(&self.hash, call.code);
