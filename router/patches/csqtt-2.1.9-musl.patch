@@ -1,0 +1,45 @@
+diff --git a/rust-client/udp_batch.rs b/rust-client/udp_batch.rs
+index debc34e..09e02ae 100644
+--- a/rust-client/udp_batch.rs
++++ b/rust-client/udp_batch.rs
+@@ -550,7 +550,7 @@ mod platform {
+         }
+         #[cfg(target_os = "linux")]
+         {
+-            unsafe { libc::recvmmsg(fd, messages, count, flags, timeout) }
++            unsafe { libc::recvmmsg(fd, messages, count, flags as _, timeout) }
+         }
+     }
+ 
+@@ -574,7 +574,7 @@ mod platform {
+         }
+         #[cfg(target_os = "linux")]
+         {
+-            unsafe { libc::sendmmsg(fd, messages, count, flags) }
++            unsafe { libc::sendmmsg(fd, messages, count, flags as _) }
+         }
+     }
+ 
+@@ -639,16 +639,13 @@ mod platform {
+     }
+ 
+     fn mmsg_header(iovec: *mut libc::iovec) -> libc::mmsghdr {
++        // musl's libc::msghdr includes private padding fields, so initialise
++        // the C header before assigning the public fields.
++        let mut msg_hdr: libc::msghdr = unsafe { std::mem::zeroed() };
++        msg_hdr.msg_iov = iovec;
++        msg_hdr.msg_iovlen = 1;
+         libc::mmsghdr {
+-            msg_hdr: libc::msghdr {
+-                msg_name: ptr::null_mut(),
+-                msg_namelen: 0,
+-                msg_iov: iovec,
+-                msg_iovlen: 1,
+-                msg_control: ptr::null_mut(),
+-                msg_controllen: 0,
+-                msg_flags: 0,
+-            },
++            msg_hdr,
+             msg_len: 0,
+         }
+     }

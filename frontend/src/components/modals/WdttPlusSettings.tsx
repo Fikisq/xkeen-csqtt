@@ -28,7 +28,7 @@ const selectClass = 'bg-input-background border-border mt-1 h-9 w-full rounded-m
 
 export function WdttPlusSettings({ onBack, onRefresh }: { onBack: () => void; onRefresh: () => void }) {
   const { showToast } = useAppContext()
-  const [server, setServer] = useState('31.77.146.181')
+  const [server, setServer] = useState('')
   const [dtlsPort, setDtlsPort] = useState('56000')
   const [wgPort, setWgPort] = useState('56001')
   const [workers, setWorkers] = useState('27')
@@ -108,7 +108,7 @@ export function WdttPlusSettings({ onBack, onRefresh }: { onBack: () => void; on
   return <div className="flex min-h-0 flex-col gap-3"><div className="min-h-0 space-y-3 overflow-y-auto pr-2">
     <p className="text-muted-foreground text-xs">Клиент WDTT Plus {clientVersion} открывает локальный SOCKS5 с UDP для Xray. Панель не создаёт звонки VK: вставьте уже полученные ссылки или хеши.</p>
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-      <label className="text-sm font-medium">Сервер<Input className="mt-1" value={server} onChange={(event) => setServer(event.target.value)} placeholder="31.77.146.181" /></label>
+      <label className="text-sm font-medium">Сервер<Input className="mt-1" value={server} onChange={(event) => setServer(event.target.value)} placeholder="Адрес вашего сервера" /></label>
       <label className="text-sm font-medium">DTLS-порт сервера<Input className="mt-1" inputMode="numeric" value={dtlsPort} onChange={(event) => setDtlsPort(event.target.value)} /></label>
       <label className="text-sm font-medium">Порт WireGuard на сервере<Input className="mt-1" inputMode="numeric" value={wgPort} onChange={(event) => setWgPort(event.target.value)} /></label>
       <label className="text-sm font-medium">Потоки<select className={selectClass} value={workers} onChange={(event) => setWorkers(event.target.value)}>{Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={(i + 1) * 9}>{(i + 1) * 9}</option>)}</select></label>

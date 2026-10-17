@@ -251,7 +251,7 @@ export function updateDeviceRules(rules: RoutingRule[], ip: string, route: Route
   if (route !== 'VPN' && outboundTag === '') return rules.filter((rule) => baseRuleTag(rule) !== tag)
   if (!outboundTag) throw new Error('Выберите подключение')
   const nfqws2 = outboundTag === '@nfqws2'
-  if (nfqws2 && (route !== 'VPN' || ip !== '192.168.0.130')) throw new Error('Пробный nfqws2 доступен только для общего маршрута 192.168.0.130')
+  if (nfqws2 && route !== 'VPN') throw new Error('Пробный nfqws2 доступен только для общего маршрута устройства')
   const bypass = route === 'VPN' && outboundTag === '@bypass'
   const actualOutbound = nfqws2 || bypass ? 'direct' : outboundTag
   const linked = outboundTag === '@selector'

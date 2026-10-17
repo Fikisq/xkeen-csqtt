@@ -1,7 +1,7 @@
 # CSQTT 2.1.9 router call closure
 
 `csqtt-2.1.9-router-call-closure.patch` applies to amurcanov/csqtt commit
-`ace21228f46f056e4a2ba734f2ecb67361d401ad` (client version 2.1.9).
+`446293aa2e873ac5323ef6fd2316d9b81d966c11` (client version 2.1.9).
 It is used only for the router ARM64 client. The panel's service script sets
 `CSQTT_VK_CALLS_FILE=/opt/etc/csqtt/vk_js_calls` in Auto VK mode.
 

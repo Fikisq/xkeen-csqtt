@@ -68,7 +68,7 @@ function updateOwn(rule: XrayRule, row: TableRule, ip: string): XrayRule {
 }
 
 type Props = {
-  deviceIp?: string
+  deviceIp: string
   content: string
   onChange: (change: (rules: XrayRule[]) => XrayRule[], immediate?: boolean) => Promise<boolean>
   onError: (message: string) => void
@@ -77,7 +77,7 @@ type Props = {
   onExportRules?: () => void
 }
 
-export function XrayDeviceRoutingTable({ deviceIp = '192.168.0.130', content, onChange, onError, utilities, onImportFile, onExportRules }: Props) {
+export function XrayDeviceRoutingTable({ deviceIp, content, onChange, onError, utilities, onImportFile, onExportRules }: Props) {
   const DEVICE_IP = deviceIp
   const PREFIX = prefix(deviceIp)
   const FALLBACK = fallback(deviceIp)

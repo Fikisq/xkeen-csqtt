@@ -8,7 +8,7 @@ PID="$ROOT/nfqws2.pid"
 PROFILE="$ROOT/profile"
 CUSTOM="$ROOT/custom-strategy.args"
 QUEUE=330
-CLIENT=192.168.0.130
+CLIENT=''
 LAN=br0
 WAN=${NFQWS_WAN:-$(ip -4 route show default | awk 'NR == 1 { for (i = 1; i <= NF; i++) if ($i == "dev") { print $(i + 1); exit } }')}
 COMMENT=xkeen_nfqws2_canary
@@ -18,6 +18,9 @@ GLOBAL_ENABLED="$ROOT/global-enabled"
 XRAY_CONFIG=/opt/etc/xray/configs/00_config.json
 JQ=/opt/bin/jq
 IPT=/opt/sbin/iptables
+if [ -x "$JQ" ] && [ -r "$XRAY_CONFIG" ]; then
+    CLIENT=$("$JQ" -r '[.routing.rules[]? | select((.ruleTag // "") | endswith(":VPN|nfqws2")) | select(.outboundTag == "direct") | .sourceIP[]? | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$"))][0] // empty' "$XRAY_CONFIG")
+fi
 
 queue_rule() {
     kind=$1
@@ -29,6 +32,7 @@ queue_rule() {
         if [ "$protocol" = tcp ]; then ports=443,2053,2083,2087,2096,8443; else ports=443,1024:65535; fi
     fi
     if [ "$kind" = trial ]; then
+        [ -n "$CLIENT" ] || return 1
         set -- -t mangle "$operation" FORWARD -i "$LAN" -o "$WAN" -s "$CLIENT/32" -p "$protocol"
         comment=$COMMENT
     else
@@ -48,9 +52,7 @@ udp_enabled() {
 
 trial_enabled() {
     [ -x "$JQ" ] && [ -r "$XRAY_CONFIG" ] || return 1
-    "$JQ" -e 'any(.routing.rules[]?;
-      .ruleTag == "device:192.168.0.130:VPN|nfqws2" and
-      .outboundTag == "direct" and .sourceIP == ["192.168.0.130"])' "$XRAY_CONFIG" >/dev/null
+    [ -n "$CLIENT" ]
 }
 
 global_enabled() {

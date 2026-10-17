@@ -57,6 +57,18 @@ prepare_entware() {
 
 prepare_core() {
   if [ -x /opt/sbin/xray ] && [ -x /opt/etc/init.d/S05xkeen ]; then
+    local active_client
+    active_client=$(sed -n 's/^name_client=//p' /opt/etc/init.d/S05xkeen | head -n 1 | tr -d "\"'[:space:]")
+    if [ "$active_client" = mihomo ]; then
+      echo 'Обнаружен XKeen с активным Mihomo. Удалять XKeen и Mihomo не нужно.' >&2
+      echo 'Этой сборке панели нужен активный Xray. Переключите ядро в XKeen на Xray и повторите команду; настройки Mihomo будут сохранены.' >&2
+      exit 1
+    fi
+    if [ ! -f /opt/etc/xray/configs/00_config.json ] || ! grep -q device_capture_xray /opt/etc/init.d/S05xkeen; then
+      echo 'Обнаружена старая установка XKeen с другой структурой конфигурации или скриптом запуска.' >&2
+      echo 'Не удаляйте её: необходим перенос конфигурации с резервной копией. Установка остановлена, действующие маршруты сохранены.' >&2
+      exit 1
+    fi
     printf '\n Существующие Xray и XKeen сохранены.\n'
     return 0
   fi

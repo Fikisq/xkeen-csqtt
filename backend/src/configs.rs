@@ -260,11 +260,8 @@ pub async fn put_xray_setup(State(state): State<AppState>, Json(req): Json<XrayS
         for config in [&mut before, &mut after] {
             if let Some(object) = config.as_object_mut() { object.remove("outbounds"); object.remove("routing"); }
         }
-        let protected = |config: &serde_json::Value| config["routing"]["rules"].as_array().into_iter().flatten()
-            .filter(|rule| rule["ruleTag"].as_str().is_some_and(|tag| tag.starts_with("device:192.168.0.4:")))
-            .cloned().collect::<Vec<_>>();
-        if before != after || protected(&old) != protected(&new) {
-            return Json(serde_json::json!({"success": false, "error": "Обновление подписки не должно менять общие настройки или правила 192.168.0.4"}));
+        if before != after {
+            return Json(serde_json::json!({"success": false, "error": "Обновление подписки не должно менять общие настройки Xray"}));
         }
         match crate::xray_subscription_refresh::live::prepare(&old, &new).await {
             Ok(update) => Some((update, old, new)),

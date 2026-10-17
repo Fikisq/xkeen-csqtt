@@ -10,9 +10,9 @@ JQ=/opt/bin/jq
 selected() {
     [ -r "$CONFIG" ] && [ -x "$CANARY" ] && [ -x "$JQ" ] || return 1
     "$JQ" -e 'any(.routing.rules[]?;
-      .ruleTag == "device:192.168.0.130:VPN|nfqws2" and
+      ((.ruleTag // "") | endswith(":VPN|nfqws2")) and
       .outboundTag == "direct" and
-      .sourceIP == ["192.168.0.130"])' "$CONFIG" >/dev/null
+      (.sourceIP | type == "array" and length == 1))' "$CONFIG" >/dev/null
 }
 
 global_enabled() {

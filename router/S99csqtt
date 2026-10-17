@@ -48,7 +48,7 @@ case "$1" in
         fi
         version=$(tr -d '\r' < "$DIR/client-version" 2>/dev/null | tr -d '[:space:]')
         case "$version" in
-            2.1.9|2.1.9-router250.1|2.1.9-router250.2)
+            2.1.9|2.1.9-router.*|2.1.9-router250.1|2.1.9-router250.2)
                 RUN_SCRIPT="$DIR/csqtt-run-219.sh"
                 ;;
             2.5.0-apk-router)

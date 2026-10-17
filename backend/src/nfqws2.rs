@@ -137,8 +137,11 @@ fn selected_for_canary(config: &Value) -> Result<bool, String> {
     for rule in config.pointer("/routing/rules").and_then(Value::as_array).into_iter().flatten() {
         let Some(tag) = rule.get("ruleTag").and_then(Value::as_str) else { continue };
         if !tag.ends_with("|nfqws2") { continue }
-        if tag != "device:192.168.0.130:VPN|nfqws2" || rule.get("outboundTag").and_then(Value::as_str) != Some("direct") {
-            return Err("Пробный nfqws2 разрешён только как прямой маршрут устройства 192.168.0.130".into());
+        let ip = rule.get("sourceIP").and_then(Value::as_array).filter(|ips| ips.len() == 1)
+            .and_then(|ips| ips[0].as_str()).and_then(|ip| ip.parse::<std::net::Ipv4Addr>().ok());
+        if selected || ip.is_none_or(|ip| tag != format!("device:{ip}:VPN|nfqws2"))
+            || rule.get("outboundTag").and_then(Value::as_str) != Some("direct") {
+            return Err("Пробный nfqws2 требует прямой маршрут одного устройства. Для нескольких устройств выберите выход nfqws2".into());
         }
         selected = true;
     }
@@ -234,9 +237,9 @@ async fn status_json() -> Value {
         "strategyMode": mode,
         "verifiedTransport": verified,
         "lastCheck": check,
-        "device": "192.168.0.130",
+        "device": null,
         "scope": if global { "Трафик выбранных маршрутов идёт напрямую через nfqws2; остальные маршруты не меняются" }
-            else { "Пробный прямой выход только для 192.168.0.130" },
+            else { "Пробный прямой выход для выбранного устройства" },
     })
 }
 

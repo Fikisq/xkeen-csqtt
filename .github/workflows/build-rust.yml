@@ -129,29 +129,21 @@ jobs:
           path: xkeen-nfqws2-arm64-v8a.tar.gz
 
   csqtt:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v7
-      - name: Fetch pinned CSQTT 2.5.0 APK router runtime
+      - name: Build native CSQTT 2.1.9 from source
         run: |
-          # The APK client and Bionic runtime were adapted separately from this repository.
-          curl -fLsS https://github.com/Fikisq/xkeen-csqtt/releases/download/v0.1.0-beta.3/csqtt-client-arm64-v8a.tar.gz -o csqtt-bootstrap.tar.gz
-          echo '94a785e84f8cd7239a2e59798ab2811068901869f19ee0339895facfeefe32ec  csqtt-bootstrap.tar.gz' | sha256sum -c -
-          mkdir csqtt-bundle
-          tar -xzf csqtt-bootstrap.tar.gz -C csqtt-bundle
-          cp router/S99csqtt router/csqtt-run-219.sh router/csqtt-run-250.sh router/csqtt-js-calls.sh router/csqtt-api-calls.sh router/vk-manual-hashes.sh csqtt-bundle/
-      - name: Build current ARM64 event adapter
-        run: |
-          rustup toolchain install stable --profile minimal
-          cargo install cross --locked
-          cross build --release --locked --target aarch64-unknown-linux-musl --manifest-path router/csqtt-native-events/Cargo.toml
-          cp router/csqtt-native-events/target/aarch64-unknown-linux-musl/release/csqtt-native-events csqtt-bundle/
-          chmod 755 csqtt-bundle/client csqtt-bundle/csqtt-* csqtt-bundle/S99csqtt csqtt-bundle/vk-manual-hashes.sh csqtt-bundle/runtime/linker
-          tar -czf csqtt-client-arm64-v8a.tar.gz -C csqtt-bundle .
+          sudo apt-get update
+          sudo apt-get install -y musl-tools cmake clang pkg-config
+          rustup toolchain install stable --profile minimal --target aarch64-unknown-linux-musl
+          sh router/build-csqtt-219.sh "$RUNNER_TEMP/csqtt-219"
       - uses: actions/upload-artifact@v7
         with:
           name: csqtt-client-arm64-v8a
-          path: csqtt-client-arm64-v8a.tar.gz
+          path: |
+            csqtt-client-arm64-v8a.tar.gz
+            csqtt-source-2.1.9-router.1.tar.gz
 
   wdtt_plus:
     runs-on: ubuntu-latest

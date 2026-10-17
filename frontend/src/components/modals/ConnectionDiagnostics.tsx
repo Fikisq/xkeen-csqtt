@@ -38,7 +38,7 @@ export function ConnectionDiagnostics({open, onOpenChange, devices, selectedDevi
     <DialogHeader className="shrink-0"><DialogTitle>Диагностика соединений</DialogTitle></DialogHeader>
     <div className="min-h-0 space-y-4 overflow-y-auto pr-2">
       <div className="grid gap-3 sm:grid-cols-[180px_1fr_auto]">
-        <label className="text-sm">Устройство<Input value={device} onChange={event => setDevice(event.target.value)} list="diagnostic-devices" placeholder="192.168.0.130" /><datalist id="diagnostic-devices">{devices.map(ip => <option key={ip} value={ip} />)}</datalist></label>
+        <label className="text-sm">Устройство<Input value={device} onChange={event => setDevice(event.target.value)} list="diagnostic-devices" placeholder="IP устройства" /><datalist id="diagnostic-devices">{devices.map(ip => <option key={ip} value={ip} />)}</datalist></label>
         <label className="text-sm">Домен, IP или URL<Input value={resource} onChange={event => setResource(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !pending) void inspect() }} placeholder="youtube.com или 93.85.248.110:8080" /></label>
         <Button className="self-end" disabled={pending || !device || !resource.trim()} onClick={() => void inspect()}>{pending ? 'Загрузка…' : 'Показать'}</Button>
       </div>

@@ -231,13 +231,13 @@ mod tests {
     fn fixture() -> Value {
         json!({"outbounds":[{"tag":"direct"},{"tag":"sub-01"},{"tag":"sub-02"}],
             "routing":{"rules":[
-                {"ruleTag":"device:192.168.0.4:VPN|bypass","outboundTag":"direct","sourceIP":["192.168.0.4"]},
+                {"ruleTag":"device:192.0.2.10:VPN|bypass","outboundTag":"direct","sourceIP":["192.0.2.10"]},
                 {"ruleTag":"VPN","outboundTag":"sub-01"}],
                 "balancers":[{"tag":"auto","selector":["sub-"],"fallbackTag":"sub-01"}]}})
     }
 
     #[test]
-    fn redirects_new_connections_and_preserves_office_bypass() {
+    fn redirects_new_connections_and_preserves_device_bypass() {
         let config = fixture();
         let map = HashMap::from([("sub-01".into(), "sub-01-xk-live-new".into())]);
         let route = mapped_routing(&config, &map).unwrap();
