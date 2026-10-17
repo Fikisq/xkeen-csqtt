@@ -14,7 +14,7 @@
 Опубликован [пробный релиз для ARM64](https://github.com/Fikisq/xkeen-csqtt/releases). Подключитесь к роутеру по SSH и выполните:
 
 ```sh
-opkg update && opkg install curl && mkdir -p /opt/tmp && curl -fsSL https://raw.githubusercontent.com/Fikisq/xkeen-csqtt/codex/setup.sh -o /opt/tmp/xkeen-ui-setup.sh && sh /opt/tmp/xkeen-ui-setup.sh beta auto
+opkg update && opkg install curl && mkdir -p /opt/tmp && curl -fsSL https://raw.githubusercontent.com/Fikisq/xkeen-csqtt/main/setup.sh -o /opt/tmp/xkeen-ui-setup.sh && sh /opt/tmp/xkeen-ui-setup.sh beta auto
 ```
 
 Установка или обновление выбираются автоматически. После установки откройте `http://IP-роутера:1000` (например, `http://192.168.0.1:1000`). В новой конфигурации трафик идёт напрямую, пока вы не добавите и не выберете VPN-подключение. Для ручного меню запустите `sh /opt/tmp/xkeen-ui-setup.sh beta`.

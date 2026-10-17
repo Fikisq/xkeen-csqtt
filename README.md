@@ -11,7 +11,7 @@
 Выполните на роутере:
 
 ```sh
-opkg update && opkg install curl && mkdir -p /opt/tmp && curl -fsSL https://raw.githubusercontent.com/Fikisq/xkeen-csqtt/codex/setup.sh -o /opt/tmp/xkeen-ui-setup.sh && sh /opt/tmp/xkeen-ui-setup.sh beta auto
+opkg update && opkg install curl && mkdir -p /opt/tmp && curl -fsSL https://raw.githubusercontent.com/Fikisq/xkeen-csqtt/main/setup.sh -o /opt/tmp/xkeen-ui-setup.sh && sh /opt/tmp/xkeen-ui-setup.sh beta auto
 ```
 
 Команда сама выбирает установку или обновление последнего пробного релиза. Для ручного меню:
