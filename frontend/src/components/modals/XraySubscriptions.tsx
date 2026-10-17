@@ -63,6 +63,13 @@ export function XraySubscriptionsModal({ open, onOpenChange, onApplied }: Props)
         const status = await apiCall<{ success: boolean; running: boolean }>('GET', 'control').catch(() => null)
         dispatch({ type: 'SET_SERVICE_STATUS', status: status?.running ? 'running' : 'stopped' })
       }
+      // A terminal-side config change must not leave this dialog stuck on an
+      // old snapshot. Refresh its baseline while preserving the entered URL.
+      const latest = await apiCall<SetupResponse>('GET', 'xray-config').catch(() => null)
+      if (latest?.success) {
+        setContent(latest.content ?? '')
+        setEntries(latest.subscriptions ?? (latest.subscriptionUrl ? [{ id: 'legacy', url: latest.subscriptionUrl, allowLan: !!latest.subscriptionAllowLan }] : []))
+      }
       throw cause
     }
   }

@@ -6,6 +6,7 @@
   },
   "api": {
     "services": [
+      "HandlerService",
       "RoutingService"
     ],
     "tag": "xkeen-routing-api",

@@ -46,6 +46,10 @@ xkeen_config="$xkeen_cfg/xkeen.json"
 status_file="/opt/lib/opkg/status"
 file_pid_fd="/var/run/xkeen_fd.pid"
 file_cpu="/opt/sbin/.xkeen/01_info/03_info_router.sh"
+# XKeen 2.1 ships this module as 08_info_router.sh; older installations use 03.
+if [ ! -r "$file_cpu" ] && [ -r /opt/sbin/.xkeen/01_info/08_info_router.sh ]; then
+    file_cpu="/opt/sbin/.xkeen/01_info/08_info_router.sh"
+fi
 file_ca="/opt/etc/ssl/certs/ca-certificates.crt"
 ru_exclude_ipv4="$ipset_cfg/ru_exclude_ipv4.lst"
 ru_exclude_ipv6="$ipset_cfg/ru_exclude_ipv6.lst"

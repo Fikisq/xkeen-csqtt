@@ -94,7 +94,13 @@ pub async fn scan(user: bool, requested_mode: &str) -> Result<(Value, String, St
             Err(error) => candidates.push(json!({"name": format!("TCP {}", index + 1), "mode": "tcp", "error": error})),
         }
     }
-    let (tcp_report, _, tcp_args) = best.ok_or("Не удалось проверить ни одного варианта")?;
+    let (tcp_report, _, tcp_args) = best.ok_or_else(|| {
+        let cause = candidates.iter().rev().find_map(|item| item["error"].as_str());
+        match cause {
+            Some(error) => format!("Не удалось проверить ни одного варианта: {error}"),
+            None => "Не удалось проверить ни одного варианта".to_string(),
+        }
+    })?;
     if !healthy_report(&tcp_report, "tcp") { return Err("Не найден вариант с ответом хотя бы от двух сайтов по TCP; активная стратегия сохранена".into()); }
     let mut selected = (tcp_report, "tcp".to_string(), tcp_args.clone());
     if requested_mode == "tcp-quic" {

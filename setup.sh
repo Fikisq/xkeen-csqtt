@@ -123,6 +123,18 @@ prepare_core() {
   done
   cp "$work/panel/00_config.json" /opt/etc/xray/configs/00_config.json || exit 1
   cp "$work/panel/S05xkeen" /opt/etc/init.d/S05xkeen || exit 1
+  # Also repair older bootstrap bundles downloaded by a newer setup.sh.
+  # Subscription nodes must be addable through the local API on first launch.
+  jq '.api.services = (((.api.services // []) + ["HandlerService", "RoutingService"]) | unique)' \
+    /opt/etc/xray/configs/00_config.json > "$work/00_config.api.json" || exit 1
+  cp "$work/00_config.api.json" /opt/etc/xray/configs/00_config.json || exit 1
+  if [ ! -r /opt/sbin/.xkeen/01_info/03_info_router.sh ]; then
+    [ -r /opt/sbin/.xkeen/01_info/08_info_router.sh ] || {
+      echo 'В установленном XKeen отсутствует модуль информации о процессоре.' >&2
+      exit 1
+    }
+    sed -i 's|/01_info/03_info_router.sh|/01_info/08_info_router.sh|g' /opt/etc/init.d/S05xkeen || exit 1
+  fi
   chmod 600 /opt/etc/xray/configs/00_config.json
   chmod 755 /opt/etc/init.d/S05xkeen
   XRAY_LOCATION_ASSET=/opt/etc/xray/dat /opt/sbin/xray -test -confdir /opt/etc/xray/configs || exit 1
@@ -234,6 +246,10 @@ install_nfqws2() {
     printf "${YELLOW}\n nfqws2 включён в установщик пока только для ARM64.${NC}\n"
     return 0
   }
+  # The upstream bootstrap creates this parent as 0700. The nfqws2 engine
+  # drops to nobody before reading Lua assets; allow traversal, not listing.
+  mkdir -p /opt/etc/xkeen || exit 1
+  chmod 711 /opt/etc/xkeen || exit 1
   # A working local installation is user data: do not replace its engine or strategy.
   if [ -x "$NFQWS_ROOT/engine" ] && [ -x "$NFQWS_ROOT/canary.sh" ]; then
     if [ ! -x "$NFQWS_ROOT/activate.sh" ] && [ -n "$NFQWS_STAGED" ]; then
