@@ -14,6 +14,7 @@ import { useOutboundLatency } from './useOutboundLatency'
 import { XrayDeviceRoutingTable } from './XrayDeviceRoutingTable'
 import { ConnectionDiagnostics } from '@/components/modals/ConnectionDiagnostics'
 import { ConnectionPicker } from '@/components/modals/ConnectionPicker'
+import { updateSelectedOutbounds } from '@/lib/xrayBulkRouting'
 import { addCustomIpRoute, addCustomRoute, baseRuleTag, isFullBypass, readDeviceIps, removeCustomRoute, renameCustomRoute, routeTags, updateDeviceRules, updateGlobalRules, validDeviceIp, type RoutingRule as XrayRule } from '@/lib/xrayDeviceRouting'
 
 const DISABLED_SOURCE = '192.0.2.255'
@@ -78,6 +79,9 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
   const [addIpOpen, setAddIpOpen] = useState(false)
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
+  const [selection, setSelection] = useState<{ scope: string; ids: string[] }>({ scope: '', ids: [] })
+  const [bulkApplying, setBulkApplying] = useState(false)
+  const bulkLock = useRef(false)
   const gridRef = useRef<HTMLDivElement>(null)
   const [columns, setColumns] = useState(() => window.innerWidth >= 1536 ? 7 : window.innerWidth >= 1024 ? 6 : window.innerWidth >= 640 ? 3 : 2)
   const [pinned, setPinned] = useState<string[] | null>(() => {
@@ -111,13 +115,18 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
     const ip = newIp.trim()
     if (!validDeviceIp(ip) || deviceTabs.includes(ip)) return
     setPendingIps(current => [...current.filter(item => !devices.includes(item)), ip].slice(-64))
-    setDeviceIp(ip); setAddIpOpen(false); setNewIp('')
+    setSelection({ scope: ip, ids: [] }); setDeviceIp(ip); setAddIpOpen(false); setNewIp('')
   }
   const own = groupRuRows(rules.map((rule, index) => ({ rule, index })).filter(({ rule }) => managed(rule, tags)))
   const vpn = own.find(({ rule }) => baseRuleTag(rule) === 'VPN')
   const fullBypass = isFullBypass(vpn?.rule)
   const deviceVpn = deviceIp ? rules.find(rule => baseRuleTag(rule) === `device:${deviceIp}:VPN`) : undefined
   const selectedVpn = deviceIp ? deviceVpn : vpn?.rule
+  const selectedRuleIds = selection.scope === deviceIp && !isFullBypass(selectedVpn)
+    ? selection.ids.filter(id => rules.some(rule => baseRuleTag(rule).replace(/^disabled:/, '') === id)) : []
+  const selectRules = (ids: string[]) => setSelection({ scope: deviceIp, ids })
+  const selectedDestinations = selectedRuleIds.map(id => rules.find(rule => baseRuleTag(rule).replace(/^disabled:/, '') === id)).map(rule => rule ? destination(rule) : '')
+  const activeProtocol = selectedRuleIds.length ? selectedDestinations.every(tag => tag === selectedDestinations[0]) ? selectedDestinations[0] : undefined : selectedVpn?.outboundTag
   const outbounds: Array<{ tag: string; protocol: string; label: string }> = Array.isArray(parsed?.outbounds)
     ? parsed.outbounds.filter((out: any) => typeof out?.tag === 'string' && (!out.tag.startsWith('proxy-') || rules.some(rule => rule.outboundTag === out.tag))).map((out: any) => ({ tag: out.tag, protocol: out.protocol ?? '', label: out.tag === 'direct' ? 'direct' : out.tag === 'block' ? 'blocked' : outboundTitle(out) })) : []
   const balancers: string[] = Array.isArray(parsed?.routing?.balancers)
@@ -170,7 +179,27 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
     void onChange(change).catch(error => onError(error instanceof Error ? error.message : 'Не удалось изменить правило'))
   }
 
+  const applySelectedOutbound = async (tag: string): Promise<boolean> => {
+    if (bulkLock.current || !selectedRuleIds.length) return false
+    if (!destinations.some(out => out.tag === tag && tag !== '@bypass')) { onError('Выберите существующее исходящее подключение'); return false }
+    bulkLock.current = true
+    setBulkApplying(true)
+    const snapshot = selection
+    try {
+      const change = (current: XrayRule[]) => updateSelectedOutbounds(current, selectedRuleIds, tag, deviceIp)
+      const applied = deviceIp ? await onDeviceChange(deviceIp, change) : await onChange(change)
+      if (applied) setSelection(current => current === snapshot ? { scope: deviceIp, ids: [] } : current)
+      return applied
+    } catch (error) {
+      onError(error instanceof Error ? error.message : 'Не удалось изменить исходящее выбранных правил')
+      return false
+    } finally { bulkLock.current = false; setBulkApplying(false) }
+  }
+
   const chooseVpn = (tag: string) => {
+    if (bulkLock.current) return
+    if (tag !== '@bypass' && selectedRuleIds.length) { void applySelectedOutbound(tag); return }
+    selectRules([])
     if (deviceIp) {
       void onDeviceChange(deviceIp, current => updateDeviceRules(current, deviceIp, 'VPN', tag)).catch(error => onError(error instanceof Error ? error.message : 'Не удалось изменить сервер устройства'))
       return
@@ -284,12 +313,12 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
   return <div className="space-y-5 p-3">
     <div className="border-border flex flex-col gap-2 border-b pb-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" variant={!deviceIp ? 'default' : 'outline'} onClick={() => setDeviceIp('')}>Общая маршрутизация</Button>
-        {deviceTabs.map(ip => <DeviceTab key={ip} ip={ip} selected={deviceIp === ip} disabled={false} onSelect={() => setDeviceIp(ip)} onRemove={() => {
+        <Button size="sm" variant={!deviceIp ? 'default' : 'outline'} onClick={() => { setSelection({ scope: '', ids: [] }); setDeviceIp('') }}>Общая маршрутизация</Button>
+        {deviceTabs.map(ip => <DeviceTab key={ip} ip={ip} selected={deviceIp === ip} disabled={false} onSelect={() => { setSelection({ scope: ip, ids: [] }); setDeviceIp(ip) }} onRemove={() => {
         if (window.confirm(`Удалить отдельные правила ${ip}?`)) {
           if (devices.includes(ip)) void onDeviceChange(ip, current => current.filter(rule => !baseRuleTag(rule).replace(/^disabled:/, '').startsWith(`device:${ip}:`)))
           setPendingIps(current => current.filter(item => item !== ip))
-          if (deviceIp === ip) setDeviceIp('')
+          if (deviceIp === ip) { setSelection({ scope: '', ids: [] }); setDeviceIp('') }
         }
         }} />)}
         {deviceIp && !deviceTabs.includes(deviceIp) && <Button size="sm" variant="outline">{deviceIp}</Button>}
@@ -298,7 +327,7 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
       </div>
     </div>
     <ConnectionDiagnostics open={diagnosticsOpen} onOpenChange={setDiagnosticsOpen} devices={deviceTabs} selectedDevice={deviceIp} titles={Object.fromEntries(outbounds.map(out => [out.tag, out.label]))} />
-    <ConnectionPicker open={pickerOpen} onOpenChange={setPickerOpen} connections={orderedCards.map(out => ({tag: out.tag, label: out.label, details: outboundTransport((parsed.outbounds as any[]).find(raw => raw.tag === out.tag))}))} shown={visibleCards.map(out => out.tag)} limit={cardLimit} activeTag={selectedVpn?.outboundTag} onToggle={toggleCard} latencies={latencies} pingPending={pingPending} ping={ping} />
+    <ConnectionPicker open={pickerOpen} onOpenChange={setPickerOpen} connections={orderedCards.map(out => ({tag: out.tag, label: out.label, details: outboundTransport((parsed.outbounds as any[]).find(raw => raw.tag === out.tag))}))} shown={visibleCards.map(out => out.tag)} limit={cardLimit} activeTag={activeProtocol} onToggle={toggleCard} latencies={latencies} pingPending={pingPending} ping={ping} />
     <Dialog open={addIpOpen} onOpenChange={open => { setAddIpOpen(open); if (!open) setNewIp('') }}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader><DialogTitle>Добавить устройство</DialogTitle></DialogHeader>
@@ -309,10 +338,10 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
       </DialogContent>
     </Dialog>
     <section className="border-border bg-input-background/70 space-y-3 rounded-xl border p-3">
-      <div className="flex items-center justify-between gap-2"><h3 className="text-base font-semibold">Протоколы</h3><div className="ml-auto flex items-center gap-2"><Button size="sm" variant="outline" onClick={() => setPickerOpen(true)}>Все подключения ({orderedCards.length})</Button><Button size="sm" variant="outline" disabled={testingAll || pingPending !== null} onClick={() => void pingAll()}><IconBolt size={16} /> {testingAll ? 'Проверка…' : 'Пинг'}</Button></div></div>
+      <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-base font-semibold">Протоколы</h3>{selectedRuleIds.length > 0 && <span className="text-primary text-sm">Для выбранных правил: {selectedRuleIds.length}</span>}<div className="ml-auto flex items-center gap-2"><Button size="sm" variant="outline" onClick={() => setPickerOpen(true)}>Все подключения ({orderedCards.length})</Button><Button size="sm" variant="outline" disabled={testingAll || pingPending !== null} onClick={() => void pingAll()}><IconBolt size={16} /> {testingAll ? 'Проверка…' : 'Пинг'}</Button></div></div>
       <div ref={gridRef} className="grid grid-cols-2 auto-rows-[100px] gap-2 sm:grid-cols-3 lg:grid-cols-6 2xl:grid-cols-7">
-        {visibleCards.map(out => <div key={out.tag} draggable onDragStart={event => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', out.tag); setDraggedProtocol(out.tag) }} onDragOver={event => { if (draggedProtocol) { event.preventDefault(); event.dataTransfer.dropEffect = 'move' } }} onDrop={event => { event.preventDefault(); if (draggedProtocol) moveProtocol(draggedProtocol, out.tag); setDraggedProtocol(null) }} onDragEnd={() => setDraggedProtocol(null)} title="Перетащите карточку, чтобы изменить порядок в браузере" className={cn('relative cursor-grab rounded-md border text-sm transition-colors active:cursor-grabbing', draggedProtocol === out.tag && 'opacity-60', selectedVpn?.outboundTag === out.tag && !isFullBypass(selectedVpn) ? 'border-blue-400 bg-blue-500/20' : 'border-ring/40 hover:border-blue-400 hover:bg-blue-500/10')}>
-          <button type="button" className="flex h-full min-w-0 w-full flex-col gap-1 px-3 py-1.5 text-left" aria-pressed={selectedVpn?.outboundTag === out.tag && !isFullBypass(selectedVpn)} onClick={() => chooseVpn(out.tag)}>
+        {visibleCards.map(out => <div key={out.tag} draggable onDragStart={event => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', out.tag); setDraggedProtocol(out.tag) }} onDragOver={event => { if (draggedProtocol) { event.preventDefault(); event.dataTransfer.dropEffect = 'move' } }} onDrop={event => { event.preventDefault(); if (draggedProtocol) moveProtocol(draggedProtocol, out.tag); setDraggedProtocol(null) }} onDragEnd={() => setDraggedProtocol(null)} title="Перетащите карточку, чтобы изменить порядок в браузере" className={cn('relative cursor-grab rounded-md border text-sm transition-colors active:cursor-grabbing', draggedProtocol === out.tag && 'opacity-60', activeProtocol === out.tag && !isFullBypass(selectedVpn) ? 'border-blue-400 bg-blue-500/20' : 'border-ring/40 hover:border-blue-400 hover:bg-blue-500/10')}>
+          <button type="button" disabled={bulkApplying} className="flex h-full min-w-0 w-full flex-col gap-1 px-3 py-1.5 text-left disabled:cursor-wait disabled:opacity-60" aria-pressed={activeProtocol === out.tag && !isFullBypass(selectedVpn)} onClick={() => chooseVpn(out.tag)}>
             <span title={out.label} className="line-clamp-2 h-10 shrink-0 w-full min-w-0 break-words pr-16 font-medium leading-5">{out.label}</span>
             <span className="line-clamp-2 shrink-0 w-full break-words leading-5"><ProtocolDetails outbound={(parsed.outbounds as any[]).find(raw => raw.tag === out.tag)} /></span>
           </button>
@@ -320,14 +349,15 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
         </div>)}
       </div>
     </section>
-    {deviceIp ? <XrayDeviceRoutingTable deviceIp={deviceIp} content={content} onChange={change => onDeviceChange(deviceIp, change)} onError={onError} utilities={utilities} onImportFile={importRules} onExportRules={exportRules} /> : <>
+    {deviceIp ? <XrayDeviceRoutingTable key={deviceIp} deviceIp={deviceIp} content={content} onChange={change => onDeviceChange(deviceIp, change)} onError={onError} utilities={utilities} onImportFile={importRules} onExportRules={exportRules} selectedRuleIds={selectedRuleIds} onSelectionChange={selectRules} onApplyOutbound={applySelectedOutbound} bulkApplying={bulkApplying} /> : <>
     {fullBypass && <p className="text-muted-foreground text-xs">Полный обход активен: все общие правила ниже сохранены, но временно недоступны.</p>}
     <RoutingTable
       rules={own.map(({ rule }) => toTable(rule))}
       showTitle={false}
       outbounds={destinations} inbounds={[]}
-      disabled={fullBypass} latencies={latencies} pingPending={pingPending} onPing={tag => void ping(tag)}
-      toolbarAction={<><Button size="sm" variant={fullBypass ? 'default' : 'outline'} aria-pressed={fullBypass} onClick={() => chooseVpn(fullBypass ? 'direct' : '@bypass')}>🔓 Полный обход без VPN: {fullBypass ? 'включён' : 'выключен'}</Button>{utilities}</>}
+      disabled={fullBypass || bulkApplying} latencies={latencies} pingPending={pingPending} onPing={tag => void ping(tag)}
+      selectedRuleIds={selectedRuleIds} onSelectionChange={selectRules} onApplyOutbound={applySelectedOutbound}
+      toolbarAction={<><Button size="sm" disabled={bulkApplying} variant={fullBypass ? 'default' : 'outline'} aria-pressed={fullBypass} onClick={() => chooseVpn(fullBypass ? 'direct' : '@bypass')}>🔓 Полный обход без VPN: {fullBypass ? 'включён' : 'выключен'}</Button>{utilities}</>}
       onImportFile={importRules} onExportRules={exportRules}
       onAddRule={row => edit('', row, true)}
       onEditRule={(id, row) => edit(id, row, false)}

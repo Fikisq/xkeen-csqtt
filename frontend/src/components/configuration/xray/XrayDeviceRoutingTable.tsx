@@ -75,9 +75,13 @@ type Props = {
   utilities?: ReactNode
   onImportFile?: (file: File) => Promise<void>
   onExportRules?: () => void
+  selectedRuleIds?: string[]
+  onSelectionChange?: (ids: string[]) => void
+  onApplyOutbound?: (tag: string) => Promise<boolean>
+  bulkApplying?: boolean
 }
 
-export function XrayDeviceRoutingTable({ deviceIp, content, onChange, onError, utilities, onImportFile, onExportRules }: Props) {
+export function XrayDeviceRoutingTable({ deviceIp, content, onChange, onError, utilities, onImportFile, onExportRules, selectedRuleIds, onSelectionChange, onApplyOutbound, bulkApplying = false }: Props) {
   const DEVICE_IP = deviceIp
   const PREFIX = prefix(deviceIp)
   const FALLBACK = fallback(deviceIp)
@@ -135,7 +139,9 @@ export function XrayDeviceRoutingTable({ deviceIp, content, onChange, onError, u
     if (firstGlobal < 0) throw new Error('Общие маршруты не найдены')
     return [...current.slice(0, firstGlobal), ...copies, ...current.slice(firstGlobal)]
   })
-  const toggleFullBypass = () => run(current => {
+  const toggleFullBypass = () => {
+    onSelectionChange?.([])
+    run(current => {
     const positions = current.map((rule, index) => isOwn(rule, DEVICE_IP) ? index : -1).filter(index => index >= 0)
     const block = positions.map(index => current[index])
     const vpn = block.find(rule => ownName(rule) === FALLBACK)
@@ -144,7 +150,8 @@ export function XrayDeviceRoutingTable({ deviceIp, content, onChange, onError, u
     const nextVpn = { ...vpn, ruleTag: FALLBACK + (fullBypass ? '|split' : '|bypass'), outboundTag: 'direct', balancerTag: undefined }
     const ordered = fullBypass ? [...services, nextVpn] : [nextVpn, ...services]
     return current.map((rule, index) => positions.includes(index) ? ordered[positions.indexOf(index)] : rule)
-  })
+    })
+  }
 
   if (!rules.length) return <div className="text-muted-foreground p-4 text-sm">Маршруты Xray не найдены.</div>
   if (!own.length) return (
@@ -158,9 +165,10 @@ export function XrayDeviceRoutingTable({ deviceIp, content, onChange, onError, u
   return <div className="p-3">
     <RoutingTable
       deviceMode rules={own.map(({ rule }) => toTable(rule, DEVICE_IP))}
-      disabled={fullBypass}
+      disabled={fullBypass || bulkApplying}
+      selectedRuleIds={selectedRuleIds} onSelectionChange={onSelectionChange} onApplyOutbound={onApplyOutbound}
       latencies={latencies} pingPending={pingPending} onPing={tag => void ping(tag)}
-      toolbarAction={<><Button size="sm" variant={fullBypass ? 'default' : 'outline'} aria-pressed={fullBypass} onClick={toggleFullBypass}>🔓 Полный обход без VPN: {fullBypass ? 'включён' : 'выключен'}</Button>{utilities}</>}
+      toolbarAction={<><Button size="sm" disabled={bulkApplying} variant={fullBypass ? 'default' : 'outline'} aria-pressed={fullBypass} onClick={toggleFullBypass}>🔓 Полный обход без VPN: {fullBypass ? 'включён' : 'выключен'}</Button>{utilities}</>}
       onImportFile={onImportFile} onExportRules={onExportRules}
       outbounds={destinations} inbounds={[]}
       onAddRule={row => edit('', row, true)}

@@ -44,6 +44,9 @@ interface RoutingTableProps {
   showTitle?: boolean
   onImportFile?: (file: File) => Promise<void>
   onExportRules?: () => void
+  selectedRuleIds?: string[]
+  onSelectionChange?: (ids: string[]) => void
+  onApplyOutbound?: (tag: string) => Promise<boolean>
 }
 
 export function RoutingTable({
@@ -66,6 +69,9 @@ export function RoutingTable({
   showTitle = true,
   onImportFile,
   onExportRules,
+  selectedRuleIds = [],
+  onSelectionChange,
+  onApplyOutbound,
 }: RoutingTableProps) {
   const [editingRule, setEditingRule] = useState<RoutingRule | null>(null)
   const [isAddingNew, setIsAddingNew] = useState(false)
@@ -73,6 +79,11 @@ export function RoutingTable({
   const [showIpPicker, setShowIpPicker] = useState(false)
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
   const importInput = useRef<HTMLInputElement>(null)
+  const [bulkOutbound, setBulkOutbound] = useState('')
+  const selectable = !!onSelectionChange && !!onApplyOutbound
+  const selected = new Set(selectedRuleIds.filter(id => rules.some(rule => rule.id === id)))
+  const allSelected = rules.length > 0 && selected.size === rules.length
+  const bulkOutbounds = outbounds.filter(out => out.tag !== '@bypass')
 
   const emptyRule: RoutingRule = {
     id: '',
@@ -143,11 +154,23 @@ export function RoutingTable({
         <div className="ml-auto flex flex-wrap items-center gap-2">{toolbarAction}</div>
       </div>
 
+      {selectable && selected.size > 0 && <div className="border-primary/30 bg-primary/5 flex flex-wrap items-center gap-2 rounded-lg border p-3" aria-live="polite">
+        <span className="text-sm font-medium">Выбрано: {selected.size}</span>
+        <select aria-label="Исходящее для выбранных правил" value={bulkOutbound} disabled={disabled} onChange={event => setBulkOutbound(event.target.value)} className="bg-input-background border-input h-9 min-w-0 max-w-full rounded-md border px-2 text-sm sm:max-w-80">
+          <option value="" disabled>Выберите исходящее</option>
+          {bulkOutbounds.map(out => <option key={out.tag} value={out.tag}>{out.label || out.tag}</option>)}
+        </select>
+        <Button size="sm" disabled={disabled || !bulkOutbounds.some(out => out.tag === bulkOutbound)} onClick={() => void onApplyOutbound?.(bulkOutbound)}>Применить к выбранным</Button>
+        <Button size="sm" variant="ghost" disabled={disabled} onClick={() => onSelectionChange?.([])}>Снять выбор</Button>
+        <span className="text-muted-foreground text-xs">Можно также нажать карточку протокола.</span>
+      </div>}
+
       {/* Таблица правил */}
       <div className={cn('border-border bg-card overflow-x-auto rounded-xl border', disabled && 'opacity-45')} aria-disabled={disabled}>
         <table className="w-full min-w-[980px] table-fixed text-base">
           <thead className="bg-input-background border-border border-b">
             <tr>
+              {selectable && <th className="w-10 px-3 py-3"><input type="checkbox" className="accent-primary size-4" aria-label="Выбрать все правила" disabled={disabled || !rules.length} checked={allSelected} ref={input => { if (input) input.indeterminate = selected.size > 0 && !allSelected }} onChange={event => onSelectionChange?.(event.target.checked ? rules.map(rule => rule.id) : [])} /></th>}
               <th className="w-14 px-3 py-3 text-left font-medium">#</th>
               <th className="w-22 px-3 py-3 text-left font-medium">Действия</th>
               <th className="w-24 px-3 py-3 text-left font-medium">Включить</th>
@@ -160,7 +183,7 @@ export function RoutingTable({
           <tbody>
             {rules.length === 0 ? (
               <tr>
-                <td colSpan={7} className="text-muted-foreground px-3 py-8 text-center">
+                <td colSpan={selectable ? 8 : 7} className="text-muted-foreground px-3 py-8 text-center">
                   Правил нет. Нажмите «Добавить правило».
                 </td>
               </tr>
@@ -171,7 +194,8 @@ export function RoutingTable({
                   className={cn(
                     'border-border hover:bg-input-background/70 border-b transition-colors last:border-b-0',
                     !rule.enabled && 'opacity-60',
-                    draggedIndex === index && 'opacity-50'
+                    draggedIndex === index && 'opacity-50',
+                    selected.has(rule.id) && 'bg-primary/10'
                   )}
                   draggable={!disabled && canReorder(rule)}
                   onDragStart={(event) => { if (!disabled && canReorder(rule)) setDraggedIndex(index); else event.preventDefault() }}
@@ -184,6 +208,7 @@ export function RoutingTable({
                     setDraggedIndex(null)
                   }}
                 >
+                  {selectable && <td className="px-3 py-3"><input type="checkbox" className="accent-primary size-4" aria-label={`Выбрать ${rule.description || rule.id}`} disabled={disabled} checked={selected.has(rule.id)} onChange={event => onSelectionChange?.(event.target.checked ? [...selected, rule.id] : [...selected].filter(id => id !== rule.id))} /></td>}
                   <td className="px-3 py-3">
                     <div className="flex items-center gap-1.5">
                       <IconGripVertical className={cn('text-muted-foreground size-4', canReorder(rule) ? 'cursor-grab' : 'opacity-30')} />
