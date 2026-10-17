@@ -13,13 +13,15 @@
 Выполните на роутере:
 
 ```sh
-opkg update && opkg install curl && mkdir -p /opt/tmp && curl -fsSL https://raw.githubusercontent.com/Fikisq/xkeen-csqtt/main/setup.sh -o /opt/tmp/xkeen-ui-setup.sh && sh /opt/tmp/xkeen-ui-setup.sh beta auto
+opkg update && opkg install curl && mkdir -p /opt/tmp && curl -fsSL https://raw.githubusercontent.com/Fikisq/xkeen-csqtt/main/setup.sh -o /opt/tmp/xkeen-ui-setup.sh && sh /opt/tmp/xkeen-ui-setup.sh auto
 ```
 
-Команда сама выбирает установку или обновление последнего пробного релиза. Для ручного меню:
+Одна команда подходит и для установки с нуля, и для обновления поверх: подписки, токен VK, правила и настройки клиентов сохраняются. Скачивается последний обычный релиз. При обновлении скрипты nfqws2 обновляются, выбранная стратегия сохраняется.
+
+Для ручного меню:
 
 ```sh
-sh /opt/tmp/xkeen-ui-setup.sh beta
+sh /opt/tmp/xkeen-ui-setup.sh
 ```
 
 Установщик скачивает готовый [релиз](https://github.com/Fikisq/xkeen-csqtt/releases) и проверяет контрольную сумму. Изменения в Git сами по себе не обновляют панель на роутере.

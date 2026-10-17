@@ -34,6 +34,8 @@ NFQWS_STAGED_OWNED=false
 NFQWS_ROOT="/opt/etc/xkeen/nfqws2-stage"
 BOOTSTRAP_STAGED=
 FRESH_CORE=false
+CORE_API_RESTART=false
+CORE_API_BACKUP=
 cleanup_download() {
   [ -z "$BIN_STAGED" ] || rm -f "$BIN_STAGED"
   [ -z "$SUM_FILE" ] || rm -f "$SUM_FILE"
@@ -189,7 +191,7 @@ download_files() {
       }
     else
       release_tag=$(curl -fsSL "https://api.github.com/repos/$release_repo/releases" | \
-        jq -re '.[0].tag_name') || {
+        jq -re '[.[] | select(.prerelease == false and .draft == false)][0].tag_name') || {
         printf "${RED_BOLD}\n Нет опубликованного релиза форка.${NCN}"
         exit 1
       }
@@ -252,15 +254,22 @@ install_nfqws2() {
   chmod 711 /opt/etc/xkeen || exit 1
   # A working local installation is user data: do not replace its engine or strategy.
   if [ -x "$NFQWS_ROOT/engine" ] && [ -x "$NFQWS_ROOT/canary.sh" ]; then
-    if [ ! -x "$NFQWS_ROOT/activate.sh" ] && [ -n "$NFQWS_STAGED" ]; then
+    if [ -n "$NFQWS_STAGED" ]; then
       local helpers
       helpers=$(mktemp -d /opt/tmp/xkeen-nfqws2-helpers.XXXXXX) || exit 1
-      if tar -xzf "$NFQWS_STAGED" -C "$helpers" ./activate.sh && [ -s "$helpers/activate.sh" ]; then
-        cp "$helpers/activate.sh" "$NFQWS_ROOT/activate.sh" && chmod 755 "$NFQWS_ROOT/activate.sh"
-      fi
+      tar -xzf "$NFQWS_STAGED" -C "$helpers" || exit 1
+      for helper in canary.sh probe-check.sh activate.sh; do
+        [ -s "$helpers/$helper" ] || exit 1
+        cp "$helpers/$helper" "$NFQWS_ROOT/$helper.new" && chmod 755 "$NFQWS_ROOT/$helper.new" &&
+          mv "$NFQWS_ROOT/$helper.new" "$NFQWS_ROOT/$helper" || exit 1
+      done
+      [ -s "$helpers/S98nfqws2-xkeen" ] || exit 1
+      cp "$helpers/S98nfqws2-xkeen" /opt/etc/init.d/S98nfqws2-xkeen.new &&
+        chmod 755 /opt/etc/init.d/S98nfqws2-xkeen.new &&
+        mv /opt/etc/init.d/S98nfqws2-xkeen.new /opt/etc/init.d/S98nfqws2-xkeen || exit 1
       rm -rf "$helpers"
     fi
-    printf "${INFO} Существующая установка nfqws2 сохранена.${NC}\n"
+    printf "${INFO} Скрипты nfqws2 обновлены; движок и стратегии сохранены.${NC}\n"
     return 0
   fi
   [ -n "$NFQWS_STAGED" ] || {
@@ -294,6 +303,56 @@ install_nfqws2() {
 install_prepared() {
   mv "$BIN_STAGED" "$XKEENUI_BIN" && chmod +x "$XKEENUI_BIN" || exit 1
   BIN_STAGED=
+}
+
+repair_existing_core() {
+  # Keep the two user-facing device lists visible on a clean installation.
+  local device_list
+  for device_list in client_bypass_macs.lst device_capture_xray.lst; do
+    if [ ! -e "/opt/etc/xkeen/$device_list" ]; then
+      (umask 077; : > "/opt/etc/xkeen/$device_list") || exit 1
+    fi
+  done
+  # Preserve the installed init settings; repair only the old module path.
+  if [ ! -r /opt/sbin/.xkeen/01_info/03_info_router.sh ] &&
+     [ -r /opt/sbin/.xkeen/01_info/08_info_router.sh ]; then
+    sed -i 's|/01_info/03_info_router.sh|/01_info/08_info_router.sh|g' /opt/etc/init.d/S05xkeen || exit 1
+  fi
+  # Migrate our earlier bootstrap's local API without changing any routes.
+  [ "$FRESH_CORE" != true ] || return 0
+  local config=/opt/etc/xray/configs/00_config.json work fragment
+  jq -e '.api.listen == "127.0.0.1:18085" and (.api.services | type == "array") and (.api.services | index("RoutingService") != null)' "$config" >/dev/null || return 0
+  jq -e '.api.services | index("HandlerService") != null' "$config" >/dev/null && return 0
+  work=$(mktemp -d /opt/tmp/xkeen-api-upgrade.XXXXXX) || exit 1
+  chmod 700 "$work"
+  for fragment in /opt/etc/xray/configs/*.json; do
+    [ ! -f "$fragment" ] || cp -p "$fragment" "$work/" || exit 1
+  done
+  jq '.api.services += ["HandlerService"]' "$config" > "$work/00_config.json" || exit 1
+  chmod 600 "$work/00_config.json"
+  XRAY_LOCATION_ASSET=/opt/etc/xray/dat /opt/sbin/xray -test -confdir "$work" || exit 1
+  mkdir -p /opt/backups
+  CORE_API_BACKUP="/opt/backups/xray-before-api-upgrade-$(date +%Y%m%d%H%M%S).json"
+  cp -p "$config" "$CORE_API_BACKUP" && chmod 600 "$CORE_API_BACKUP" || exit 1
+  cp "$work/00_config.json" "$config.api-new" && chmod 600 "$config.api-new" && mv "$config.api-new" "$config" || exit 1
+  rm -rf "$work"
+  pidof xray >/dev/null && CORE_API_RESTART=true || true
+}
+
+start_required_core() {
+  if [ "$FRESH_CORE" = true ]; then
+    /opt/etc/init.d/S05xkeen start on || exit 1
+    pidof xray >/dev/null || { echo 'Xray не запустился; проверьте /opt/var/log/xray/error.log.' >&2; exit 1; }
+  elif [ "$CORE_API_RESTART" = true ]; then
+    printf '\n Включение API подписок: один перезапуск Xray...\n'
+    if ! /opt/etc/init.d/S05xkeen restart on || ! pidof xray >/dev/null; then
+      cp -p "$CORE_API_BACKUP" /opt/etc/xray/configs/00_config.json
+      /opt/etc/init.d/S05xkeen restart on || true
+      "$XKEENUI_INIT" start || true
+      echo 'Миграция API не завершилась; восстановлена прежняя конфигурация.' >&2
+      exit 1
+    fi
+  fi
 }
 
 ensure_conntrack() {
@@ -330,14 +389,12 @@ install_xkeenui() {
   printf "${INFO} Начинаем установку...${NCN}"
 
   install_prepared; create_xkeenui_init
+  repair_existing_core
   "$XKEENUI_BIN" install-clients || {
     echo 'Панель установлена, но загрузка дополнительных клиентов не завершилась. Повторите команду или установите их кнопкой в панели.' >&2
     exit 1
   }
-  if [ "$FRESH_CORE" = true ]; then
-    /opt/etc/init.d/S05xkeen start on || exit 1
-    pidof xray >/dev/null || { echo 'Xray не запустился; проверьте /opt/var/log/xray/error.log.' >&2; exit 1; }
-  fi
+  start_required_core
 
   sync & spinner $! "Запись данных..."
 
@@ -381,11 +438,9 @@ update_xkeenui() {
   fi
 
   legacy_installation_check; install_prepared
+  repair_existing_core
   "$XKEENUI_BIN" install-clients || exit 1
-  if [ "$FRESH_CORE" = true ]; then
-    /opt/etc/init.d/S05xkeen start on || exit 1
-    pidof xray >/dev/null || { echo 'Xray не запустился; проверьте /opt/var/log/xray/error.log.' >&2; exit 1; }
-  fi
+  start_required_core
 
   sync & spinner $! "Запись данных..."
 

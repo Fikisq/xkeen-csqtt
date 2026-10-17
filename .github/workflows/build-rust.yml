@@ -6,6 +6,11 @@ on:
         description: "Release version (e.g. v1.0.0)"
         required: true
         type: string
+      prerelease:
+        description: "Publish as a prerelease"
+        required: false
+        default: false
+        type: boolean
 jobs:
   frontend:
     runs-on: ubuntu-latest
@@ -186,7 +191,8 @@ jobs:
         with:
           tag_name: ${{ inputs.version }}
           target_commitish: ${{ github.sha }}
-          prerelease: true
+          prerelease: ${{ inputs.prerelease }}
+          body_path: RELEASE_NOTES.md
           files: |
             artifacts/xkeen-ui-*/*
             artifacts/xkeen-nfqws2-*/*
