@@ -1,6 +1,7 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import { IconPencil, IconTrash, IconPlus, IconGripVertical, IconFolder } from '@tabler/icons-react'
@@ -170,7 +171,7 @@ export function RoutingTable({
         <table className="w-full min-w-[980px] table-fixed text-base">
           <thead className="bg-input-background border-border border-b">
             <tr>
-              {selectable && <th className="w-10 px-3 py-3"><input type="checkbox" className="accent-primary size-4" aria-label="Выбрать все правила" disabled={disabled || !rules.length} checked={allSelected} ref={input => { if (input) input.indeterminate = selected.size > 0 && !allSelected }} onChange={event => onSelectionChange?.(event.target.checked ? rules.map(rule => rule.id) : [])} /></th>}
+              {selectable && <th className="w-10 px-3 py-3"><Checkbox className="border-ring/50 bg-input-background transition-colors hover:border-primary data-indeterminate:border-primary data-disabled:cursor-not-allowed data-disabled:opacity-40" aria-label="Выбрать все правила" disabled={disabled || !rules.length} checked={allSelected} indeterminate={selected.size > 0 && !allSelected} onCheckedChange={checked => onSelectionChange?.(checked ? rules.map(rule => rule.id) : [])} /></th>}
               <th className="w-14 px-3 py-3 text-left font-medium">#</th>
               <th className="w-22 px-3 py-3 text-left font-medium">Действия</th>
               <th className="w-24 px-3 py-3 text-left font-medium">Включить</th>
@@ -208,7 +209,7 @@ export function RoutingTable({
                     setDraggedIndex(null)
                   }}
                 >
-                  {selectable && <td className="px-3 py-3"><input type="checkbox" className="accent-primary size-4" aria-label={`Выбрать ${rule.description || rule.id}`} disabled={disabled} checked={selected.has(rule.id)} onChange={event => onSelectionChange?.(event.target.checked ? [...selected, rule.id] : [...selected].filter(id => id !== rule.id))} /></td>}
+                  {selectable && <td className="px-3 py-3"><Checkbox className="border-ring/50 bg-input-background transition-colors hover:border-primary data-disabled:cursor-not-allowed data-disabled:opacity-40" aria-label={`Выбрать ${rule.description || rule.id}`} disabled={disabled} checked={selected.has(rule.id)} onCheckedChange={checked => onSelectionChange?.(checked ? [...selected, rule.id] : [...selected].filter(id => id !== rule.id))} /></td>}
                   <td className="px-3 py-3">
                     <div className="flex items-center gap-1.5">
                       <IconGripVertical className={cn('text-muted-foreground size-4', canReorder(rule) ? 'cursor-grab' : 'opacity-30')} />
@@ -292,12 +293,11 @@ export function RoutingTable({
               {/* Включить */}
               {!deviceMode && <div className="flex items-center gap-2">
                 <label className="flex cursor-pointer items-center gap-2">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={editingRule.enabled}
                     disabled={!isAddingNew && !canToggle(editingRule)}
-                    onChange={(e) => updateEditingRule({ enabled: e.target.checked })}
-                    className="accent-primary size-4"
+                    onCheckedChange={checked => updateEditingRule({ enabled: checked })}
+                    className="border-ring/50 bg-input-background"
                   />
                   <span className="text-base font-medium">Включить</span>
                 </label>
