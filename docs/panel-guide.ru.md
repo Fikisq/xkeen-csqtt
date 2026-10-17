@@ -15,7 +15,7 @@
 
 ```sh
 mkdir -p /opt/tmp
-curl -fsSL https://raw.githubusercontent.com/Fikisq/xkeen-csqtt/main/setup.sh -o /opt/tmp/xkeen-ui-setup.sh
+curl -fsSL https://raw.githubusercontent.com/Fikisq/xkeen-csqtt/codex/setup.sh -o /opt/tmp/xkeen-ui-setup.sh
 sh /opt/tmp/xkeen-ui-setup.sh
 ```
 
