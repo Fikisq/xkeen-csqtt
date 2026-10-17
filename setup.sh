@@ -55,8 +55,8 @@ prepare_entware() {
   fi
 }
 
-prepare_core() {
-  if [ -x /opt/sbin/xray ] && [ -x /opt/etc/init.d/S05xkeen ]; then
+check_existing_core() {
+  if [ -f /opt/etc/init.d/S05xkeen ]; then
     local active_client
     active_client=$(sed -n 's/^name_client=//p' /opt/etc/init.d/S05xkeen | head -n 1 | tr -d "\"'[:space:]")
     if [ "$active_client" = mihomo ]; then
@@ -64,11 +64,20 @@ prepare_core() {
       echo 'Этой сборке панели нужен активный Xray. Переключите ядро в XKeen на Xray и повторите команду; настройки Mihomo будут сохранены.' >&2
       exit 1
     fi
-    if [ ! -f /opt/etc/xray/configs/00_config.json ] || ! grep -q device_capture_xray /opt/etc/init.d/S05xkeen; then
+    if [ ! -x /opt/sbin/xray ] || [ ! -f /opt/etc/xray/configs/00_config.json ] || ! grep -q device_capture_xray /opt/etc/init.d/S05xkeen; then
       echo 'Обнаружена старая установка XKeen с другой структурой конфигурации или скриптом запуска.' >&2
       echo 'Не удаляйте её: необходим перенос конфигурации с резервной копией. Установка остановлена, действующие маршруты сохранены.' >&2
       exit 1
     fi
+  elif [ -e /opt/sbin/xkeen ] || [ -e /opt/sbin/xray ] || [ -e /opt/etc/init.d/S99xkeen ]; then
+    echo 'Обнаружена другая или неполная установка XKeen. Она не будет удалена или перезаписана автоматически; нужен перенос настроек с резервной копией.' >&2
+    exit 1
+  fi
+}
+
+prepare_core() {
+  check_existing_core
+  if [ -x /opt/sbin/xray ] && [ -x /opt/etc/init.d/S05xkeen ]; then
     printf '\n Существующие Xray и XKeen сохранены.\n'
     return 0
   fi
@@ -290,6 +299,7 @@ install_geodata() {
 }
 
 install_xkeenui() {
+  check_existing_core
   ensure_conntrack
   [ -f "/opt/tmp/xkeen-ui-$ARCH" ] && LOCAL=true
   download_files
@@ -325,6 +335,7 @@ install_xkeenui() {
 }
 
 update_xkeenui() {
+  check_existing_core
   ensure_conntrack
   [ -f "$XKEENUI_BIN" ] || { printf "${ERROR} Ошибка: XKeen UI не установлен!${NCN}"; exit 1; }
   [ -f "/opt/tmp/xkeen-ui-$ARCH" ] && LOCAL=true
