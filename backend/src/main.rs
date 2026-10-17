@@ -2,6 +2,7 @@ mod api_relay;
 mod access_journal;
 mod addon_manager;
 mod router_device_id;
+mod panel_releases;
 mod auth;
 mod backuper;
 mod configs;
@@ -544,6 +545,7 @@ async fn main() {
             get(settings::get_settings).patch(settings::patch_settings),
         )
         .route("/api/version", get(version::version_handler))
+        .route("/api/panel/releases", get(panel_releases::list))
         .route("/api/ruleset", get(ruleset_inspector::get_ruleset_content))
         .route("/api/device-list", get(api_relay::get_device_list))
         .route("/api/update", post(updater::post_update))

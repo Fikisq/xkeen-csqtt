@@ -3,11 +3,15 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { IconCpu, IconDownload, IconLogout, IconPlayerPlayFilled, IconPlayerStopFilled, IconRefresh, IconSettings } from '@tabler/icons-react'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { apiCall, capitalize } from '../../lib/api'
 import { syncClashApiPort, useAppContext } from '../../lib/store'
 import { cn } from '../../lib/utils'
 import type { ServiceStatus } from '../../lib/types'
+import { LazyBoundary, lazyLoad } from '../../lib/loader'
+import { isNewStableRelease, type PanelReleasesResponse } from '../../lib/panelReleases'
+
+const PanelReleases = lazyLoad(() => import('../modals/PanelReleases'), 'PanelReleases')
 
 function StatusWaveform({ status }: { status: ServiceStatus }) {
   const isStopped = status === 'stopped'
@@ -51,6 +55,22 @@ export function StatusBar({
   const { state, dispatch, showToast } = useAppContext({ includeSettings: true })
   const { serviceStatus, pendingText, currentCore, coreVersions, isConfigsLoading, version, isOutdatedCore, settings } = state
   const authEnabled = settings.authEnabled
+  const [panelReleasesOpen, setPanelReleasesOpen] = useState(false)
+  const [hasNewPanelRelease, setHasNewPanelRelease] = useState(false)
+
+  useEffect(() => {
+    if (!version) return
+    let active = true
+    const check = async () => {
+      try {
+        const result = await apiCall<PanelReleasesResponse>('GET', 'panel/releases')
+        if (active && result.success) setHasNewPanelRelease(result.releases.some(release => isNewStableRelease(release, result.currentVersion || version)))
+      } catch { /* Unavailable GitHub must not interrupt the panel. */ }
+    }
+    void check()
+    const interval = setInterval(() => void check(), 60 * 60 * 1000)
+    return () => { active = false; clearInterval(interval) }
+  }, [version])
 
   const isRunning = serviceStatus === 'running'
   const isPending = serviceStatus === 'pending' || serviceStatus === 'loading'
@@ -216,6 +236,14 @@ export function StatusBar({
               <TooltipContent>Установить или обновить {capitalize(currentCore)}</TooltipContent>
             </Tooltip>
           )}
+          {!isConfigsLoading && version && <Tooltip>
+            <TooltipTrigger render={<Button variant="outline" className="relative" onClick={() => setPanelReleasesOpen(true)} aria-label={`Версии панели, установлена ${version}${hasNewPanelRelease ? ', доступен новый стабильный релиз' : ''}`}>
+              <span className="text-xs"><span className="hidden sm:inline">Панель </span>v{version.replace(/^v/, '')}</span>
+              {hasNewPanelRelease && <span className="pointer-events-none absolute -right-1.5 -top-2 rounded border border-amber-400/40 bg-amber-100 px-1 text-[9px] font-bold leading-3.5 text-amber-800 dark:bg-amber-950 dark:text-amber-300">NEW</span>}
+            </Button>} />
+            <TooltipContent>{hasNewPanelRelease ? 'Доступен новый стабильный релиз панели' : 'Релизы и предварительные версии панели'}</TooltipContent>
+          </Tooltip>}
+          {panelReleasesOpen && <LazyBoundary><PanelReleases open={panelReleasesOpen} onClose={() => setPanelReleasesOpen(false)} version={version} /></LazyBoundary>}
           {isConfigsLoading || !version ? (
             <Skeleton className="size-9" />
           ) : (
