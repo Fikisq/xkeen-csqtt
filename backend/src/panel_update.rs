@@ -118,7 +118,7 @@ async fn prepare_locked(state: &AppState, tag: &str, asset: &str, id: &str, work
     fs::set_permissions(work, std::fs::Permissions::from_mode(0o700)).await.map_err(|e| e.to_string())?;
     write_state(id, tag, "downloading", "Загрузка и проверка выбранной версии").await?;
     let metadata = small_download(&state.http_client,
-        &format!("https://api.github.com/repos/Fikisq/xkeen-csqtt/releases/tags/{tag}"), 2 * 1024 * 1024).await?;
+        &format!("https://api.github.com/repos/Fikisq/xkeen-csqtt/releases/tags/{tag}?xkeen_update={id}"), 2 * 1024 * 1024).await?;
     let release: Value = serde_json::from_slice(&metadata).map_err(|_| "Некорректный ответ GitHub")?;
     if release["draft"] != false || release["tag_name"].as_str() != Some(tag) { return Err("Релиз не опубликован".into()); }
     let assets = release["assets"].as_array().ok_or("В релизе нет файлов")?;
@@ -126,7 +126,7 @@ async fn prepare_locked(state: &AppState, tag: &str, asset: &str, id: &str, work
         return Err("В релизе нет файла панели или контрольных сумм для этой архитектуры".into());
     }
     let base = format!("https://github.com/Fikisq/xkeen-csqtt/releases/download/{tag}");
-    let checksums = small_download(&state.http_client, &format!("{base}/SHA256SUMS"), 1024 * 1024).await?;
+    let checksums = small_download(&state.http_client, &format!("{base}/SHA256SUMS?xkeen_update={id}"), 1024 * 1024).await?;
     let text = std::str::from_utf8(&checksums).map_err(|_| "Некорректный файл контрольных сумм")?;
     let matching: Vec<_> = text.lines().filter_map(|line| {
         let mut parts = line.split_whitespace();
@@ -136,7 +136,13 @@ async fn prepare_locked(state: &AppState, tag: &str, asset: &str, id: &str, work
     }).collect();
     if matching.len() != 1 { return Err("Нет однозначной SHA-256 суммы файла панели".into()); }
     let expected = &matching[0];
-    let response = state.http_client.get(format!("{base}/{asset}")).timeout(Duration::from_secs(180))
+    if let Some(published) = assets.iter().find(|a| a["name"].as_str() == Some(asset))
+        .and_then(|a| a["digest"].as_str()).and_then(|value| value.strip_prefix("sha256:")) {
+        if !published.eq_ignore_ascii_case(expected) {
+            return Err("Контрольные суммы релиза обновились; повторите загрузку позже".into());
+        }
+    }
+    let response = state.http_client.get(format!("{base}/{asset}?xkeen_update={id}")).timeout(Duration::from_secs(180))
         .send().await.map_err(|_| "Не удалось загрузить панель")?
         .error_for_status().map_err(|_| "Файл панели недоступен")?;
     let candidate = work.join("candidate");
