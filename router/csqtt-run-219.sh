@@ -6,6 +6,7 @@ umask 077
 export CSQTT_PROFILE_FILE="$DIR/browser-profile.json"
 export CSQTT_VK_DEVICE_ID_FILE="$DIR/vk_device_id"
 export CSQTT_VK_GUARD_FILE="$DIR/vk-account-pause.json"
+export CSQTT_DIAGNOSTICS="${CSQTT_DIAGNOSTICS:-1}"
 
 SESSION_EPOCH=$(date +%s)
 SESSION_SALT=$(hexdump -v -n 16 -e '1/1 "%02x"' /dev/urandom)

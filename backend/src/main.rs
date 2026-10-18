@@ -9,6 +9,7 @@ mod configs;
 mod controller;
 mod connection_diagnostics;
 mod csqtt;
+mod csqtt_health;
 mod manual_hashes;
 mod wdtt_plus;
 mod frontend_embedder;
@@ -475,6 +476,7 @@ async fn main() {
     xray_subscription_refresh::start(state.clone());
     geodata_update::start(state.clone());
     nfqws2::start_reconciler();
+    csqtt_health::start();
     xray_routes::warm_after_start(state.clone());
 
     if let Some(ref _token) = state.rci_token {

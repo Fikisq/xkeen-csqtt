@@ -65,7 +65,7 @@ pub async fn turn_ping() -> Json<Value> {
     }
     Json(json!({"success": true, "results": results}))
 }
-static CSQTT_GATE: OnceLock<Semaphore> = OnceLock::new();
+pub(super) static CSQTT_GATE: OnceLock<Semaphore> = OnceLock::new();
 
 fn vk_api_notice(running: bool) -> Option<&'static str> {
     if Path::new("/opt/etc/csqtt/vk_api_calls.uncertain").exists() {
@@ -377,6 +377,7 @@ pub async fn control(Json(request): Json<ControlRequest>) -> Json<Value> {
             }
         }
     }
+    crate::csqtt_health::user_action(&request.action);
     let result = tokio::time::timeout(Duration::from_secs(420),
         tokio::process::Command::new("/opt/etc/init.d/S99csqtt")
             .arg(&request.action).kill_on_drop(true).output()).await;
@@ -418,14 +419,32 @@ pub(crate) fn starter_running() -> bool {
 }
 
 fn client_running() -> bool {
+    client_identity().is_some()
+}
+
+pub(super) fn client_identity() -> Option<String> {
     std::fs::read_dir("/proc")
         .ok()
         .into_iter()
         .flatten()
         .filter_map(Result::ok)
         .filter(|entry| entry.file_name().to_string_lossy().parse::<u32>().is_ok())
-        .any(|entry| std::fs::read_to_string(entry.path().join("comm"))
-            .is_ok_and(|name| name.trim() == "csqtt-client"))
+        .find_map(|entry| {
+            if !std::fs::read_to_string(entry.path().join("comm")).is_ok_and(|name| name.trim() == "csqtt-client") { return None; }
+            let stat = std::fs::read_to_string(entry.path().join("stat")).ok()?;
+            let start = stat.rsplit_once(") ")?.1.split_whitespace().nth(19)?;
+            Some(format!("{}:{start}", entry.file_name().to_string_lossy()))
+        })
+}
+
+pub(super) fn recovery_blocker() -> Option<&'static str> {
+    if last_diagnostic().is_some_and(|(_, rejected)| rejected) {
+        Some("Сервер отклонил доступ CSQTT. Проверьте пароль, привязку устройства и совместимость; автоматический перезапуск отключён")
+    } else if vk_account_notice().is_some() || vk_api_notice(client_running()).is_some() {
+        Some("Ограничение VK или незавершённая операция VK: автоматический перезапуск приостановлен")
+    } else if captcha_state().is_some() {
+        Some("Требуется прохождение капчи VK; автоматический перезапуск приостановлен")
+    } else { None }
 }
 
 fn last_diagnostic() -> Option<(&'static str, bool)> {
@@ -476,11 +495,12 @@ pub async fn status() -> Json<Value> {
     let installed = Path::new("/opt/etc/csqtt/csqtt-client").is_file();
     let running = client_running();
     let interface = Path::new("/sys/class/net/csqtt0").exists();
-    let ready = if running && interface {
+    let interface_ready = if running && interface {
         tokio::process::Command::new("/opt/sbin/ip")
             .args(["-f", "inet", "addr", "show", "dev", "csqtt0"])
             .output().await.ok().is_some_and(|output| output.status.success() && String::from_utf8_lossy(&output.stdout).contains("inet "))
     } else { false };
+    let ready = interface_ready && crate::csqtt_health::healthy();
     let log_recent = std::fs::metadata("/opt/etc/csqtt/csqtt.log")
         .and_then(|meta| meta.modified())
         .ok()
@@ -490,7 +510,7 @@ pub async fn status() -> Json<Value> {
         .filter(|(_, rejected)| *rejected || (!ready && log_recent))
         .map(|(message, _)| message);
     let client_version = std::fs::read_to_string("/opt/etc/csqtt/client-version").ok().map(|v| v.trim().to_string()).unwrap_or_else(|| "2.0".into());
-    Json(json!({ "installed": installed, "running": running, "interface": interface, "ready": ready, "diagnostic": diagnostic, "clientVersion": client_version, "vkApiNotice": vk_api_notice(running), "vkAccountNotice": vk_account_notice(), "captcha": if running { captcha_state() } else { None } }))
+    Json(json!({ "installed": installed, "running": running, "interface": interface, "interfaceReady": interface_ready, "ready": ready, "health": crate::csqtt_health::snapshot(), "diagnostic": diagnostic, "clientVersion": client_version, "vkApiNotice": vk_api_notice(running), "vkAccountNotice": vk_account_notice(), "captcha": if running { captcha_state() } else { None } }))
 }
 
 fn captcha_state() -> Option<Value> {

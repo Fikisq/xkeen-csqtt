@@ -32,6 +32,7 @@ interface CsqttStatus {
   interface: boolean
   ready?: boolean
   diagnostic?: string
+  health?: { state: string; message: string; failures: number; restartsInWindow: number; retryAt?: number | null }
   clientVersion?: string
 }
 
@@ -515,15 +516,16 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
               <div className="flex items-center gap-3">
                 <span className="text-sm font-medium">CSQTT</span>
                 {csqttStatus && (
-                  <Badge variant="outline" className={csqttStatus.running ? 'rounded-sm border-none bg-green-500/10 px-2 text-xs text-green-400' : 'rounded-sm border-none bg-amber-500/10 px-2 text-xs text-amber-400'}>
-                    {csqttStatus.ready ? 'Адрес получен' : csqttStatus.running ? 'Нет туннеля' : csqttStatus.installed ? 'Остановлен' : 'Не установлен'}
+                  <Badge variant="outline" className={csqttStatus.ready ? 'rounded-sm border-none bg-green-500/10 px-2 text-xs text-green-400' : 'rounded-sm border-none bg-amber-500/10 px-2 text-xs text-amber-400'}>
+                    {csqttStatus.ready ? 'Туннель работает' : csqttStatus.health?.state === 'restarting' ? 'Восстановление' : csqttStatus.running ? 'Проверка туннеля' : csqttStatus.installed ? 'Остановлен' : 'Не установлен'}
                   </Badge>
                 )}
               </div>
               <p className="text-muted-foreground mt-0.5 text-xs">Отдельный сервис{csqttStatus?.clientVersion ? ` · v${csqttStatus.clientVersion}` : ''}{csqttStatus?.interface ? ' · интерфейс csqtt0 доступен' : ''}</p>
+              {csqttStatus?.health && <p className="text-muted-foreground mt-1 max-w-100 text-xs">{csqttStatus.health.message}{csqttStatus.health.failures > 0 ? ` · неудачных проверок: ${csqttStatus.health.failures}` : ''}{csqttStatus.health.retryAt ? ` · следующая попытка после ${new Date(csqttStatus.health.retryAt * 1000).toLocaleTimeString()}` : ''}</p>}
               {csqttStatus?.vkApiNotice && <p className="mt-1 max-w-100 text-xs text-amber-400">{csqttStatus.vkApiNotice}</p>}
               {csqttStatus?.vkAccountNotice && <p className="mt-1 max-w-100 text-xs text-amber-400">{csqttStatus.vkAccountNotice}</p>}
-              {csqttStatus && (csqttStatus.diagnostic || (csqttStatus.running && !csqttStatus.ready)) && <p role="alert" className="mt-1 max-w-100 text-xs text-amber-400">{csqttStatus.diagnostic || 'Клиент запущен, но адрес туннеля ещё не получен'}</p>}
+              {csqttStatus?.diagnostic && <p role="alert" className="mt-1 max-w-100 text-xs text-amber-400">{csqttStatus.diagnostic}</p>}
             </div>
             <div className="ml-auto flex max-w-full flex-wrap justify-end gap-2">
               <Button variant="outline" size="sm" disabled={!csqttStatus?.installed} onClick={() => void openCsqttSettings()}>Настроить</Button>
