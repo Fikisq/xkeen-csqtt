@@ -392,7 +392,7 @@ pub async fn control(Json(request): Json<ControlRequest>) -> Json<Value> {
                     return Json(json!({ "success": true, "starting": true }));
                 }
                 if !client_running() {
-                    return Json(json!({ "success": false, "error": last_diagnostic().unwrap_or_else(|| "CSQTT завершился сразу после запуска. Проверьте журнал клиента.".into()) }));
+                    return Json(json!({ "success": false, "error": last_diagnostic().map(|(message, _)| message).unwrap_or("CSQTT завершился сразу после запуска. Проверьте журнал клиента.") }));
                 }
             }
             Json(json!({ "success": true }))
@@ -428,26 +428,48 @@ fn client_running() -> bool {
             .is_ok_and(|name| name.trim() == "csqtt-client"))
 }
 
-fn last_diagnostic() -> Option<String> {
+fn last_diagnostic() -> Option<(&'static str, bool)> {
     let mut file = std::fs::File::open("/opt/etc/csqtt/csqtt.log").ok()?;
     let len = file.metadata().ok()?.len();
     file.seek(SeekFrom::Start(len.saturating_sub(16384))).ok()?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).ok()?;
-    let log = String::from_utf8_lossy(&bytes);
-    if log.contains("API 5: User authorization failed") {
-        Some("VK отклонил авторизацию дополнительной сессии (код 5). Токен может быть действительным; уменьшите число хешей или потоков и проверьте снова.".into())
-    } else if log.contains("API 18: User was deleted or banned") {
-        Some("VK сообщил о заблокированном или удалённом аккаунте (код 18).".into())
-    } else if log.contains("Нужны -peer и хеши VK") {
-        Some("Клиент не получил адрес сервера или хеши VK.".into())
-    } else if log.contains("Call not found (error_code=951)") {
-        Some("VK не нашёл звонок (код 951).".into())
-    } else if log.contains("Flood control") {
-        Some("VK ограничил частые запросы (код 9).".into())
-    } else {
-        None
+    diagnostic_from_log(&String::from_utf8_lossy(&bytes))
+}
+
+fn diagnostic_from_log(log: &str) -> Option<(&'static str, bool)> {
+    for line in log.lines().rev() {
+        // Do not carry a previous launch's rejection into a new connection.
+        if line.contains("[CSQTT_START]") || line.contains("[READY] Поток готов") {
+            break;
+        }
+        let rejection = if line.contains("FATAL_AUTH") && line.contains("другому устройству")
+            || line.contains("DENIED:device_mismatch") {
+            Some("Пароль привязан к другому устройству. Сбросьте привязку на сервере или получите новый пароль.")
+        } else if line.contains("FATAL_AUTH") && line.contains("неверный пароль")
+            || line.contains("DENIED:wrong_password") {
+            Some("Неверный пароль сервера CSQTT. Проверьте пароль подключения.")
+        } else if line.contains("FATAL_AUTH") && line.contains("истёк")
+            || line.contains("DENIED:expired") {
+            Some("Срок действия пароля CSQTT истёк. Обновите доступ на сервере.")
+        } else if line.contains("FATAL_PROTOCOL") || line.contains("DENIED:protocol_mismatch") {
+            Some("Версии протокола CSQTT клиента и сервера несовместимы.")
+        } else { None };
+        if let Some(message) = rejection { return Some((message, true)); }
+        let message = if line.contains("API 5: User authorization failed") {
+            Some("VK отклонил авторизацию дополнительной сессии (код 5). Токен может быть действительным; уменьшите число хешей или потоков и проверьте снова.")
+        } else if line.contains("API 18: User was deleted or banned") {
+            Some("VK сообщил о заблокированном или удалённом аккаунте (код 18).")
+        } else if line.contains("Нужны -peer и хеши VK") {
+            Some("Клиент не получил адрес сервера или хеши VK.")
+        } else if line.contains("Call not found (error_code=951)") {
+            Some("VK не нашёл звонок (код 951).")
+        } else if line.contains("Flood control") {
+            Some("VK ограничил частые запросы (код 9).")
+        } else { None };
+        if let Some(message) = message { return Some((message, false)); }
     }
+    None
 }
 
 pub async fn status() -> Json<Value> {
@@ -464,7 +486,9 @@ pub async fn status() -> Json<Value> {
         .ok()
         .and_then(|time| time.elapsed().ok())
         .is_some_and(|age| age < std::time::Duration::from_secs(900));
-    let diagnostic = if !ready && log_recent { last_diagnostic() } else { None };
+    let diagnostic = last_diagnostic()
+        .filter(|(_, rejected)| *rejected || (!ready && log_recent))
+        .map(|(message, _)| message);
     let client_version = std::fs::read_to_string("/opt/etc/csqtt/client-version").ok().map(|v| v.trim().to_string()).unwrap_or_else(|| "2.0".into());
     Json(json!({ "installed": installed, "running": running, "interface": interface, "ready": ready, "diagnostic": diagnostic, "clientVersion": client_version, "vkApiNotice": vk_api_notice(running), "vkAccountNotice": vk_account_notice(), "captcha": if running { captcha_state() } else { None } }))
 }
@@ -497,4 +521,38 @@ pub async fn captcha_reply(Json(request): Json<CaptchaReply>) -> Json<Value> {
         file.write_all(format!("CAPTCHA_RESULT|{}\n", request.result).as_bytes())
     });
     Json(match outcome { Ok(()) => json!({"success":true}), Err(_) => json!({"success":false,"error":"Клиент не принял результат капчи"}) })
+}
+
+#[cfg(test)]
+mod connection_diagnostic_tests {
+    use super::diagnostic_from_log;
+
+    #[test]
+    fn device_binding_rejection_is_explicit_and_secret_free() {
+        let log = "[CSQTT_START]\n[ВОРКЕР #2] FATAL_AUTH: пароль привязан к другому устройству; sensitive-placeholder";
+        let (message, rejection) = diagnostic_from_log(log).unwrap();
+        assert!(rejection);
+        assert!(message.starts_with("Пароль привязан к другому устройству"));
+        assert!(!message.contains("sensitive-placeholder"));
+    }
+
+    #[test]
+    fn successful_connection_and_new_launch_clear_previous_error() {
+        let error = "FATAL_AUTH: пароль привязан к другому устройству";
+        assert!(diagnostic_from_log(&format!("{error}\n[READY] Поток готов ✓")).is_none());
+        assert!(diagnostic_from_log(&format!("{error}\n[CSQTT_START]")).is_none());
+    }
+
+    #[test]
+    fn timeout_is_not_password_rejection() {
+        assert!(diagnostic_from_log("HANDSHAKE_TIMEOUT: нет ответа").is_none());
+        assert!(diagnostic_from_log("FATAL_HANDSHAKE: нет ответа").is_none());
+    }
+
+    #[test]
+    fn newest_explicit_rejection_wins() {
+        let (message, rejected) = diagnostic_from_log("FATAL_AUTH: неверный пароль\nFATAL_AUTH: срок действия пароля истёк").unwrap();
+        assert!(rejected);
+        assert!(message.contains("истёк"));
+    }
 }

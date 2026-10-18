@@ -368,6 +368,7 @@ export function LogPanel({ inDialog = false }: { inDialog?: boolean } = {}) {
             </div>
           </div>
 
+          {currentFile === 'nfqws2.log' && <p className="text-muted-foreground px-4 pt-2 text-xs">Запуск, остановка и ошибки запуска nfqws2. Трафик сайтов не записывается; просмотр видео не добавляет записей.</p>}
           <div className="relative min-h-0 flex-1">
             <div className="bg-input-background absolute inset-4 overflow-hidden rounded-md border">
               {isEmpty && (

@@ -67,6 +67,7 @@ case "$1" in
         fi
         "$DIR/csqtt-js-calls.sh" || { echo "прежний звонок Auto VK не закрыт" >&2; exit 1; }
         rm -f "$DIR/stopped"
+        printf '\n[CSQTT_START]\n' >> "$DIR/csqtt.log"
         nohup "$RUN_SCRIPT" >>"$DIR/csqtt.log" 2>&1 &
         echo $! > "/var/run/csqtt.pid"
         echo "OK (PID $(cat "/var/run/csqtt.pid"))"

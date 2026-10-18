@@ -403,6 +403,8 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
           {csqttDeviceId && <p className="text-muted-foreground break-all text-xs">Device ID: <span className="select-all">{csqttDeviceId}</span></p>}
           <p className="text-muted-foreground text-xs">Ссылка разбирается на адрес и пароль; исходная ссылка не хранится. Сохранённые секреты скрыты. Пустые поля пароля и токена оставляют прежние значения. Изменения вступят в силу после «Применить».</p>
           <p className="text-muted-foreground text-xs">Ручной использует сохранённые ссылки или хеши VK. Авто API создаёт звонки через calls.start и завершает их при остановке. Для токена откройте вход VK: пароль вводится только на сайте VK.</p>
+          <p className="text-muted-foreground text-xs">Пароль сервера привязывается к Device ID устройства. Привязку проверяет сервер при подключении; для другого устройства нужен новый пароль или сброс привязки на сервере.</p>
+          {csqttStatus?.diagnostic && <p role="alert" className="text-sm text-amber-400">{csqttStatus.diagnostic}</p>}
           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
             <label className="min-w-0 text-sm font-medium">Ссылка CSQTT<Input type="password" autoComplete="off" value={csqttLink} onChange={(event) => setCsqttLink(event.target.value)} placeholder="csqtt://connect?..." /></label>
             <Button size="sm" variant="outline" disabled={!csqttLink.trim()} onClick={parseCsqttLink}>Разобрать</Button>
@@ -521,7 +523,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
               <p className="text-muted-foreground mt-0.5 text-xs">Отдельный сервис{csqttStatus?.clientVersion ? ` · v${csqttStatus.clientVersion}` : ''}{csqttStatus?.interface ? ' · интерфейс csqtt0 доступен' : ''}</p>
               {csqttStatus?.vkApiNotice && <p className="mt-1 max-w-100 text-xs text-amber-400">{csqttStatus.vkApiNotice}</p>}
               {csqttStatus?.vkAccountNotice && <p className="mt-1 max-w-100 text-xs text-amber-400">{csqttStatus.vkAccountNotice}</p>}
-              {csqttStatus && !csqttStatus.ready && (csqttStatus.running || csqttStatus.diagnostic) && <p className="mt-1 max-w-100 text-xs text-amber-400">{csqttStatus.diagnostic || 'Клиент запущен, но адрес туннеля ещё не получен'}</p>}
+              {csqttStatus && (csqttStatus.diagnostic || (csqttStatus.running && !csqttStatus.ready)) && <p role="alert" className="mt-1 max-w-100 text-xs text-amber-400">{csqttStatus.diagnostic || 'Клиент запущен, но адрес туннеля ещё не получен'}</p>}
             </div>
             <div className="ml-auto flex max-w-full flex-wrap justify-end gap-2">
               <Button variant="outline" size="sm" disabled={!csqttStatus?.installed} onClick={() => void openCsqttSettings()}>Настроить</Button>
