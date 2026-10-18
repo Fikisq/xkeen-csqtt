@@ -1,4 +1,5 @@
 export interface PanelRelease {
+  installable?: boolean
   tag: string
   name: string
   prerelease: boolean

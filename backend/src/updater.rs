@@ -10,7 +10,6 @@ use std::fs::File;
 use std::io::{Cursor, Read, Seek, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::time::Duration;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -325,9 +324,9 @@ async fn ensure_xray_starter() -> Result<(), String> {
     Ok(())
 }
 
-pub async fn post_update(State(state): State<AppState>, Json(req): Json<UpdateReq>) -> impl IntoResponse {
+pub async fn post_update(State(state): State<AppState>, headers: HeaderMap, Json(req): Json<UpdateReq>) -> impl IntoResponse {
     if req.core == "self" {
-        return response(false, Some("Автообновление этой версии панели отключено: релиз исходного XKeen UI заменит интеграцию CSQTT".into()));
+        return (HeaderMap::new(), Json(crate::panel_update::start(&state, &headers, &req.version).await));
     }
     let Some(repo) = get_repo(&req.core) else {
         return response(false, Some("Неизвестное ядро".into()));
@@ -356,81 +355,6 @@ pub async fn post_update(State(state): State<AppState>, Json(req): Json<UpdateRe
     let proxies = vec!["https://gh-proxy.com".to_string(), "https://ghfast.top".to_string()];
     let arch = std::env::consts::ARCH;
 
-    if req.core == "self" {
-        let arch_suffix = match arch {
-            "aarch64" => "arm64-v8a",
-            "mips" if cfg!(target_endian = "little") => "mips32le",
-            "mips" => "mips32",
-            _ => return response(false, Some("Архитектура не поддерживается".into())),
-        };
-
-        log("INFO", "Загрузка исполняемого файла...".into());
-        let bin_url = format!("{GITHUB_RELEASE}/{repo}/releases/download/{ver}/xkeen-ui-{arch_suffix}");
-        let bin_d = match download(&state.http_client, &bin_url, &proxies, &tmp_dir.join("bin.tmp")).await {
-            Ok(d) => d,
-            Err(e) => return response(false, Some(e)),
-        };
-
-        log("INFO", "Установка обновления...".into());
-
-        let source = tmp_dir.join(format!("xkeen-ui_{}", ver));
-        if let Err(e) = save(bin_d, source.clone()).await {
-            return response(false, Some(format!("Ошибка сохранения: {}", e)));
-        }
-
-        let integrity_check = tokio::task::spawn_blocking({
-            let source = source.clone();
-            move || -> Result<(), String> {
-                let meta = std::fs::metadata(&source)
-                    .map_err(|e| format!("Ошибка проверки файла: {}", e))?;
-                if meta.len() < 1024 * 1024 {
-                    return Err("Файл меньше 1МБ — повреждённый артефакт".into());
-                }
-                let mut f = std::fs::File::open(&source)
-                    .map_err(|e| format!("Ошибка открытия файла: {}", e))?;
-                let mut magic = [0u8; 4];
-                f.read_exact(&mut magic)
-                    .map_err(|e| format!("Ошибка чтения файла: {}", e))?;
-                if magic != [0x7F, b'E', b'L', b'F'] {
-                    return Err("Файл не является ELF-бинарём — отменено".into());
-                }
-                Ok(())
-            }
-        })
-        .await
-        .map_err(|e| format!("Ошибка проверки: {}", e))
-        .and_then(|r| r);
-
-        if let Err(e) = integrity_check {
-            _ = std::fs::remove_file(&source);
-            return response(false, Some(e));
-        }
-
-        let target = "/opt/sbin/xkeen-ui";
-        if let Err(e) = fs::rename(&source, target).await {
-            return response(false, Some(format!("Ошибка установки: {}", e)));
-        }
-
-        _ = fs::set_permissions(target, std::fs::Permissions::from_mode(0o755)).await;
-        _ = tokio::task::spawn_blocking(rustix::fs::sync).await;
-
-        log("INFO", format!("Обновление XKeen UI до {} завершено", ver));
-
-        if Path::new(S99XKEEN_UI).exists() {
-            log("INFO", "Перезапуск...".into());
-            _ = Command::new(S99XKEEN_UI)
-                .arg("restart")
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn();
-        } else {
-            log(
-                "WARN",
-                "Init скрипт панели не найден, требуется ручной перезапуск".into(),
-            );
-        }
-        return response(true, None);
-    }
     let (asset, url) = match req.core.as_str() {
         "xray" => {
             let x = match arch {

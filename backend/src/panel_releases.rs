@@ -30,7 +30,13 @@ async fn download(state: &AppState) -> Result<Vec<Value>, String> {
             let tag = release["tag_name"].as_str()?;
             let url = release["html_url"].as_str()?;
             if !url.starts_with("https://github.com/Fikisq/xkeen-csqtt/releases/tag/") { return None; }
+            let installable = crate::panel_update::asset_name().is_some_and(|name| {
+                release["assets"].as_array().is_some_and(|assets| {
+                    [name, "SHA256SUMS"].iter().all(|required| assets.iter().any(|a| a["name"].as_str() == Some(*required)))
+                })
+            });
             Some(json!({
+                "installable": installable,
                 "tag": tag, "name": release["name"].as_str().unwrap_or(tag),
                 "prerelease": release["prerelease"].as_bool().unwrap_or(true),
                 "publishedAt": release["published_at"].as_str().unwrap_or(""),

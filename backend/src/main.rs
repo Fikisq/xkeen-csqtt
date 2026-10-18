@@ -3,6 +3,7 @@ mod access_journal;
 mod addon_manager;
 mod router_device_id;
 mod panel_releases;
+mod panel_update;
 mod auth;
 mod backuper;
 mod configs;
@@ -549,6 +550,8 @@ async fn main() {
         )
         .route("/api/version", get(version::version_handler))
         .route("/api/panel/releases", get(panel_releases::list))
+        .route("/api/panel/update", post(panel_update::post))
+        .route("/api/panel/update/status", get(panel_update::status))
         .route("/api/ruleset", get(ruleset_inspector::get_ruleset_content))
         .route("/api/device-list", get(api_relay::get_device_list))
         .route("/api/update", post(updater::post_update))
@@ -598,6 +601,7 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .unwrap_or_else(|e| report_process_error(&format!("Error listening on {}: {}", addr, e)));
+    panel_update::set_port(addr.port());
     println!("{} [INFO] Listening on {}", ts(), addr);
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
         .await
