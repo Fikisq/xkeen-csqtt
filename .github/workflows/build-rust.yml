@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version: 1.2.3 or 1.2.3-beta.1 (without v)"
+        description: "Release tag: v1.2.3 or v1.2.3-beta.1"
         required: true
         type: string
 jobs:
@@ -14,8 +14,8 @@ jobs:
         env:
           RELEASE_VERSION: ${{ inputs.version }}
         run: |
-          [[ "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-beta\.[1-9][0-9]*)?$ ]] || {
-            echo 'Use x.x.x or x.x.x-beta.x without v'; exit 1;
+          [[ "$RELEASE_VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-beta\.[1-9][0-9]*)?$ ]] || {
+            echo 'Use vX.Y.Z or vX.Y.Z-beta.N'; exit 1;
           }
   frontend:
     needs: validate_version

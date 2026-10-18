@@ -238,7 +238,8 @@ export function StatusBar({
           )}
           {!isConfigsLoading && version && <Tooltip>
             <TooltipTrigger render={<Button variant="outline" className="relative" onClick={() => setPanelReleasesOpen(true)} aria-label={`Версии панели, установлена ${version}${hasNewPanelRelease ? ', доступен новый стабильный релиз' : ''}`}>
-              <span className="text-xs"><span className="hidden sm:inline">Панель </span>v{version.replace(/^v/, '')}</span>
+              <span className="hidden text-[13px] sm:inline">Панель</span>
+              <span className="text-muted-foreground/60 mt-0.5 text-xs">v{version.replace(/^v/, '')}</span>
               {hasNewPanelRelease && <span className="pointer-events-none absolute -right-1.5 -top-2 rounded border border-amber-400/40 bg-amber-100 px-1 text-[9px] font-bold leading-3.5 text-amber-800 dark:bg-amber-950 dark:text-amber-300">NEW</span>}
             </Button>} />
             <TooltipContent>{hasNewPanelRelease ? 'Доступен новый стабильный релиз панели' : 'Релизы и предварительные версии панели'}</TooltipContent>
