@@ -1,4 +1,4 @@
-use crate::{logger::log, types::access_log_path};
+use crate::{logger::log, log_sources};
 use std::{fs::OpenOptions, time::Duration};
 
 const LOG_LIMIT: u64 = 5 * 1024 * 1024;
@@ -20,7 +20,7 @@ pub fn start() {
         loop {
             timer.tick().await;
             let result = tokio::task::spawn_blocking(|| {
-                for (path, label) in [(access_log_path(), "access.log"), ("/opt/etc/csqtt/csqtt.log".into(), "csqtt.log")] {
+                for (label, path) in log_sources::sources() {
                     match limit_log(&path, label) {
                         Err(error) if error.kind() != std::io::ErrorKind::NotFound =>
                             log("WARN", format!("Не удалось ограничить {label}: {error}")),

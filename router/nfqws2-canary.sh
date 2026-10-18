@@ -3,6 +3,19 @@
 set -eu
 
 ROOT=/opt/etc/xkeen/nfqws2-stage
+LOG="$ROOT/nfqws2.log"
+umask 077
+log_event() {
+    printf '%s [INFO] %s\n' "$(date -u '+%Y/%m/%d %H:%M:%S')" "$*" >> "$LOG"
+}
+log_error() {
+    printf '%s [ERROR] %s\n' "$(date -u '+%Y/%m/%d %H:%M:%S')" "$*" >> "$LOG"
+    echo "$*" >&2
+}
+if [ ! -e "$LOG" ]; then
+    log_event 'Service journal enabled; packet debug is disabled'
+fi
+trap 'result=$?; if [ "$result" -ne 0 ]; then log_event "Command ${1:-unknown} failed (exit $result)"; fi' 0
 BIN="$ROOT/engine"
 PID="$ROOT/nfqws2.pid"
 PROFILE="$ROOT/profile"
@@ -99,7 +112,7 @@ profile() {
 
 run_engine() {
     action=$1
-    selected=$(profile) || { echo 'invalid nfqws2 profile' >&2; return 1; }
+    selected=$(profile) || { log_error 'invalid nfqws2 profile'; return 1; }
     set -- \
         --qnum="$QUEUE" --pidfile="$PID" --user=nobody --fastpath-workaround=auto \
         --lua-init="@$ROOT/nfqws2/lua/zapret-lib.lua.gz" \
@@ -111,7 +124,7 @@ run_engine() {
             case "$arg" in
                 --new|--filter-tcp=443|--filter-udp=443|--payload=tls_client_hello|--payload=quic_initial|--payload=empty,tls_client_hello|--filter-tcp=2053,2083,2087,2096,8443|--filter-udp=19294-19344,50000-50100|--filter-udp=1024-65535|--filter-l7=discord,stun|--filter-l7=unknown|--payload=discord_ip_discovery,stun|--payload=unknown|--out-range=-n2|--lua-desync=*)
                     set -- "$@" "$arg" ;;
-                *) echo 'invalid custom strategy argument' >&2; return 1 ;;
+                *) log_error 'invalid custom strategy argument'; return 1 ;;
             esac
         done < "$CUSTOM"
     else
@@ -124,7 +137,13 @@ run_engine() {
                 --lua-desync='fake:blob=quic_initial:repeats=11'
         fi
     fi
-    "$BIN" "$action" "$@"
+    if "$BIN" "$action" "$@" >> "$LOG" 2>&1; then
+        return 0
+    else
+        result=$?
+        tail -n 8 "$LOG" >&2
+        return "$result"
+    fi
 }
 
 case "${1:-}" in
@@ -133,17 +152,18 @@ case "${1:-}" in
         echo 'nfqws2 parameters valid; no traffic rules changed'
         ;;
     start|start-trial)
-        [ -x "$BIN" ] || { echo 'nfqws2 engine is missing' >&2; exit 1; }
+        [ -x "$BIN" ] || { log_error 'nfqws2 engine is missing'; exit 1; }
         # Never silently fall back to intercepting all devices or interfaces.
-        [ -n "$WAN" ] && ip -4 route show default | awk -v wan="$WAN" '{for (i = 1; i <= NF; i++) if ($i == "dev" && $(i + 1) == wan) found = 1} END {exit !found}' || { echo 'WAN interface not found' >&2; exit 1; }
-        "$IPT" -j NFQUEUE -h 2>&1 | grep -q -- --queue-bypass || { echo 'NFQUEUE fail-open is unavailable' >&2; exit 1; }
-        selected=$(profile) || { echo 'invalid nfqws2 profile' >&2; exit 1; }
+        [ -n "$WAN" ] && ip -4 route show default | awk -v wan="$WAN" '{for (i = 1; i <= NF; i++) if ($i == "dev" && $(i + 1) == wan) found = 1} END {exit !found}' || { log_error 'WAN interface not found'; exit 1; }
+        "$IPT" -j NFQUEUE -h 2>&1 | grep -q -- --queue-bypass || { log_error 'NFQUEUE fail-open is unavailable'; exit 1; }
+        selected=$(profile) || { log_error 'invalid nfqws2 profile'; exit 1; }
         trial=0
         global=0
         if [ "$1" = start-trial ] || trial_enabled; then trial=1; fi
         if global_enabled; then global=1; fi
-        [ "$trial" -eq 1 ] || [ "$global" -eq 1 ] || { echo 'nfqws2 is not selected in routing' >&2; exit 1; }
+        [ "$trial" -eq 1 ] || [ "$global" -eq 1 ] || { log_error 'nfqws2 is not selected in routing'; exit 1; }
         if ! alive; then
+          log_event "Starting engine (profile=$selected)"
           run_engine --dry-run >/dev/null
           run_engine --daemon
           n=0
@@ -151,7 +171,8 @@ case "${1:-}" in
             if command -v usleep >/dev/null 2>&1; then usleep 100000; else sleep 1; fi
             n=$((n+1))
           done
-          alive || { echo 'nfqws2 did not start' >&2; exit 1; }
+          alive || { log_error 'nfqws2 did not start'; exit 1; }
+          log_event 'Engine started'
         fi
         for protocol in tcp udp; do
             [ "$protocol" = tcp ] || udp_enabled || continue
@@ -169,11 +190,13 @@ case "${1:-}" in
         echo "nfqws2 active (trial=$trial global=$global; fail-open)"
         ;;
     stop-trial)
+        log_event 'Stopping trial interception'
         remove_rules trial
         if ! global_enabled && alive; then kill "$(cat "$PID")"; fi
         echo 'nfqws2 trial stopped'
         ;;
     stop)
+        log_event 'Stopping engine and interception'
         remove_rules trial
         remove_rules global
         if alive; then

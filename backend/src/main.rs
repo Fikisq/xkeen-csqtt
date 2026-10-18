@@ -16,6 +16,7 @@ mod geo;
 mod geodata_update;
 mod logger;
 mod log_retention;
+mod log_sources;
 mod latency;
 mod mihomo_latency;
 mod mihomo_subscription_refresh;

@@ -11,13 +11,14 @@ import type { WsMessage } from '../../lib/websocket'
 import { useWebSocket } from '../../lib/websocket'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group'
 
-const LOG_FILES = ['access.log', 'error.log']
+const LOG_FILES = ['access.log', 'error.log', 'csqtt.log', 'wdtt-plus.log', 'nfqws2.log']
 const MAX_LINES = 1000
 
 export function LogPanel({ inDialog = false }: { inDialog?: boolean } = {}) {
   const timezone = useSettings((s) => s.timezone)
   const [filter, setFilter] = useState('')
   const [currentFile, setCurrentFile] = useState('access.log')
+  const [availableFiles, setAvailableFiles] = useState(['access.log', 'error.log'])
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
   const [isAnimating, setIsAnimating] = useState(false)
@@ -92,6 +93,8 @@ export function LogPanel({ inDialog = false }: { inDialog?: boolean } = {}) {
 
   const handleMessage = useCallback(
     (data: WsMessage) => {
+      if (data.files) setAvailableFiles(LOG_FILES.filter(file => data.files!.includes(file)))
+      if (data.type === 'files') return
       if (data.error) {
         renderAll([`<div style="color:#ef4444">ERROR: ${data.error}</div>`])
         return
@@ -334,13 +337,13 @@ export function LogPanel({ inDialog = false }: { inDialog?: boolean } = {}) {
                 </InputGroup>
               </div>
               <Select value={currentFile} onValueChange={switchFile}>
-                <SelectTrigger popper className="md:w-33">
+                <SelectTrigger popper className="md:w-40">
                   <SelectValue />
                 </SelectTrigger>
 
                 <SelectContent position="popper">
                   <SelectGroup>
-                    {LOG_FILES.map((f) => (
+                    {availableFiles.map((f) => (
                       <SelectItem key={f} value={f} className="text-sm">
                         {f}
                       </SelectItem>

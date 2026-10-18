@@ -19,6 +19,7 @@ export interface WsMessage {
   lines?: string[]
   content?: string
   error?: string
+  files?: string[]
 }
 
 export function useWebSocket(onMessage: WsMessageHandler, initialFile = 'access.log') {

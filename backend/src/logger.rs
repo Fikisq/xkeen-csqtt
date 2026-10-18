@@ -70,6 +70,10 @@ pub fn process_log_line(line: String, tz: i32) -> String {
         }
     }
 
+    // Log text is inserted as HTML by the journal. Escape payloads before
+    // adding our own trusted badge and ANSI formatting markup.
+    out = out.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+        .replace('"', "&quot;").replace('\'', "&#39;");
     out = ANSI_RE
         .replace_all(&out, |caps: &regex_lite::Captures<'_>| match &caps[0] {
             "\x1b[32m" | "\x1b[92m" => r#"<span style="color: #00cc00;">"#,

@@ -1,4 +1,5 @@
 use crate::logger::{process_log_line, ts};
+use crate::log_sources;
 use crate::types::*;
 use axum::extract::{Query, State};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -19,7 +20,7 @@ pub struct LogQuery {
 }
 
 pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>, Query(query): Query<LogQuery>) -> impl IntoResponse {
-    let initial_path = if query.file.as_deref() == Some("error.log") { error_log_path() } else { access_log_path() };
+    let initial_path = log_sources::resolve(query.file.as_deref().unwrap_or("access.log")).unwrap_or_else(access_log_path);
     ws.on_upgrade(move |socket| handle_socket(socket, state, initial_path))
 }
 
@@ -29,6 +30,7 @@ fn read_log_file(p: String, offset: u64, query: String, full: bool, tz: i32) -> 
         _ => return ("clear".into(), vec![], 0),
     };
     let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    if !full && len == offset { return ("append".into(), vec![], offset); }
     let mut current_pos = offset;
 
     if full && query.is_empty() && len > 128000 {
@@ -115,7 +117,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, initial_path: String)
                 let (mpsc_tx, mut mpsc_rx) = tokio::sync::mpsc::channel::<String>(32);
                 let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, _>| {
                     if let Ok(e) = res {
-                        if e.kind.is_modify() {
+                        if e.kind.is_modify() || e.kind.is_create() || e.kind.is_remove() {
                             for path in e.paths {
                                 let _ = mpsc_tx.try_send(path.to_string_lossy().to_string());
                             }
@@ -124,10 +126,14 @@ async fn handle_socket(socket: WebSocket, state: AppState, initial_path: String)
                 })
                 .unwrap();
 
-                let error_log = error_log_path();
-                let access_log = access_log_path();
-                let _ = watcher.watch(Path::new(&error_log), RecursiveMode::NonRecursive);
-                let _ = watcher.watch(Path::new(&access_log), RecursiveMode::NonRecursive);
+                let mut directories = std::collections::HashSet::new();
+                for (_, path) in log_sources::sources() {
+                    if let Some(parent) = Path::new(&path).parent() {
+                        if directories.insert(parent.to_path_buf()) {
+                            let _ = watcher.watch(parent, RecursiveMode::NonRecursive);
+                        }
+                    }
+                }
 
                 while let Some(path) = mpsc_rx.recv().await {
                     let _ = tx.send(path);
@@ -150,11 +156,14 @@ async fn handle_socket(socket: WebSocket, state: AppState, initial_path: String)
         .await
         .unwrap();
 
-    let init_msg = if l.is_empty() {
+    let mut files = log_sources::available();
+    let mut poll = tokio::time::interval(std::time::Duration::from_secs(2));
+    let mut init_msg = if l.is_empty() {
         serde_json::json!({"type": "clear"})
     } else {
         serde_json::json!({"type": t, "lines": l})
     };
+    init_msg["files"] = serde_json::json!(files);
     if tx.send(Message::Text(init_msg.to_string().into())).await.is_err() {
         return;
     }
@@ -168,7 +177,11 @@ async fn handle_socket(socket: WebSocket, state: AppState, initial_path: String)
                         let tz = state.settings.read().unwrap().log.timezone;
                         match v["type"].as_str() {
                             Some("switchFile") => {
-                                path = if v["file"] == "access.log" { access_log_path() } else { error_log_path() };
+                                let Some(next_path) = v["file"].as_str().and_then(log_sources::resolve) else {
+                                    if tx.send(Message::Text(serde_json::json!({"type":"error", "error":"Неизвестный журнал"}).to_string().into())).await.is_err() { break; }
+                                    continue;
+                                };
+                                path = next_path;
 
                                 let p = path.clone();
                                 let q = query.clone();
@@ -190,8 +203,15 @@ async fn handle_socket(socket: WebSocket, state: AppState, initial_path: String)
                             },
                             Some("clear") => {
                                 let p = path.clone();
+                                let cleared = tokio::task::spawn_blocking(move || {
+                                    // Clear the existing file; never create an arbitrary path.
+                                    std::fs::OpenOptions::new().write(true).open(p).and_then(|file| file.set_len(0))
+                                }).await;
+                                if !matches!(cleared, Ok(Ok(()))) {
+                                    if tx.send(Message::Text(serde_json::json!({"type":"error", "error":"Не удалось очистить журнал"}).to_string().into())).await.is_err() { break; }
+                                    continue;
+                                }
                                 offset = 0;
-                                tokio::task::spawn_blocking(move || { File::create(p).ok(); });
                                 if tx.send(Message::Text(serde_json::json!({"type": "clear"}).to_string().into())).await.is_err() { break; }
                             },
                             _ => {}
@@ -201,7 +221,17 @@ async fn handle_socket(socket: WebSocket, state: AppState, initial_path: String)
                     _ => {}
                 }
             }
-            result = log_rx.recv() => {
+            result = async {
+                tokio::select! {
+                    result = log_rx.recv() => result,
+                    _ = poll.tick() => Ok(path.clone()),
+                }
+            } => {
+                let available = log_sources::available();
+                if files != available {
+                    files = available;
+                    if tx.send(Message::Text(serde_json::json!({"type":"files", "files":files}).to_string().into())).await.is_err() { break; }
+                }
                 let changed_path = match result {
                     Ok(p) => p,
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => path.clone(),
