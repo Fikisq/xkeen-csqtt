@@ -1,0 +1,416 @@
+--- a/rust-client/main.rs
++++ b/rust-client/main.rs
+@@ -7,6 +7,7 @@
+ mod captcha;
+ mod captcha_slider;
+ mod client_perf;
++mod connection_diagnostics;
+ mod cpu_task;
+ mod dispatcher;
+ mod dns;
+@@ -361,13 +362,20 @@
+     let groups_future = run_groups(groups, context);
+     tokio::pin!(groups_future);
+     let groups_completed = tokio::select! {
+-        _ = &mut groups_future => true,
++        _ = &mut groups_future => {
++            connection_diagnostics::lifecycle("groups_finished");
++            true
++        },
+         _ = tokio::signal::ctrl_c() => {
++            connection_diagnostics::lifecycle("signal");
+             crate::log_error!("[КЛИЕНТ] Получен сигнал завершения");
+             cancel.cancel();
+             false
+         }
+-        _ = cancel.cancelled() => false,
++        _ = cancel.cancelled() => {
++            connection_diagnostics::lifecycle("cancelled");
++            false
++        },
+     };
+     cancel.cancel();
+     if !groups_completed {
+@@ -591,6 +599,7 @@
+                     Ok(Some(line)) => line,
+                     Ok(None) => {
+                         if control_required {
++                            connection_diagnostics::lifecycle("stdin_eof");
+                             crate::log_error!("[КЛИЕНТ] Канал управления закрыт");
+                             cancel.cancel();
+                         }
+@@ -599,6 +608,7 @@
+                     Err(error) => {
+                         crate::log_error!("[КЛИЕНТ] Ошибка канала управления: {error}");
+                         if control_required {
++                            connection_diagnostics::lifecycle("stdin_error");
+                             cancel.cancel();
+                         }
+                         return;
+@@ -615,6 +625,7 @@
+                 "RESUME" => paused.set_paused(false),
+                 "FINISH_VK_CALLS" => finish_js_calls.store(true, Ordering::Release),
+                 "STOP" => {
++                    connection_diagnostics::lifecycle("stop_command");
+                     crate::log_error!("[КЛИЕНТ] Получена команда STOP");
+                     cancel.cancel();
+                     return;
+@@ -646,6 +657,7 @@
+                     _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+                 }
+                 if unsafe { libc::getppid() } != parent {
++                    connection_diagnostics::lifecycle("parent_exited");
+                     cancel.cancel();
+                     return;
+                 }
+--- a/rust-client/events.rs
++++ b/rust-client/events.rs
+@@ -85,6 +85,13 @@
+                 "bytes_down": bytes_down
+             }),
+         );
++    }
++
++    pub fn worker_error(&self, worker: usize, code: &str, phase: &str, message: &str) {
++        self.emit("ERROR", &serde_json::json!({
++            "worker": worker, "code": code, "phase": phase,
++            "message": message, "fatal": false,
++        }));
+     }
+
+     pub fn active_zero(&self) {
+--- a/rust-client/session.rs
++++ b/rust-client/session.rs
+@@ -639,6 +639,10 @@
+     credentials: TurnCredentials,
+     mut runtime: SessionRuntime,
+ ) -> Result<bool> {
++    let mut trace = crate::connection_diagnostics::ConnectionTrace::new(
++        config.id, runtime.stats.clone(), runtime.cancel.clone(),
++    );
++    trace.phase("allocate");
+     if credentials.server_addresses.is_empty() {
+         bail!("нет TURN URL в учётных данных");
+     }
+@@ -675,6 +679,7 @@
+         },
+     };
+     drop(connect);
++    trace.phase("channel_bind");
+     if let Some(ready) = runtime.allocation_ready.take() {
+         let _ = ready.send(());
+     }
+@@ -696,6 +701,7 @@
+         runtime,
+         allocation.clone(),
+         turn_path,
++        trace,
+     ));
+     let result = await_session_task(&cancel, session).await;
+     let _ = tokio::time::timeout(DEALLOCATE_TIMEOUT, allocation.deallocate()).await;
+@@ -737,6 +743,7 @@
+     mut runtime: SessionRuntime,
+     allocation: Arc<TurnAllocation>,
+     turn_path: Arc<str>,
++    mut trace: crate::connection_diagnostics::ConnectionTrace,
+ ) -> Result<bool> {
+     let session_cancel = CancellationToken::new();
+     let turn_receiver = allocation.take_receiver()?;
+@@ -755,6 +762,7 @@
+     let mut reader_transport = TransportReader::new(shared, turn_receiver);
+     let incarnation_id = NEXT_INCARNATION_ID.fetch_add(1, Ordering::Relaxed).max(1);
+     let config_tx = config.get_config.then(|| runtime.config_tx.clone());
++    trace.phase("getconf");
+     let config_delivered = match request_configuration(
+         &mut writer_transport,
+         &mut reader_transport,
+@@ -804,6 +812,7 @@
+     runtime.events.ready(config.id);
+     config.repair.mark_ready(config.id);
+     let _active = ActiveConnection::new(runtime.stats.clone(), runtime.events.clone());
++    trace.phase("ready");
+     let mut writer = tokio::spawn(writer_loop(
+         writer_transport,
+         WriterRuntime {
+@@ -907,11 +916,11 @@
+                 Err(_) if attempt + 1 < CONFIG_RESPONSE_TIMEOUT_MS.len() => continue 'attempts,
+                 Err(_) => {
+                     let message = format!(
+-                        "FATAL_HANDSHAKE: сервер не подтвердил конфигурацию после {} попыток; проверьте пароль подключения и совместимость клиента с сервером",
++                        "HANDSHAKE_TIMEOUT: сервер не подтвердил конфигурацию после {} попыток; повторяем подключение потока",
+                         CONFIG_RESPONSE_TIMEOUT_MS.len()
+                     );
+                     if config.get_config {
+-                        events.error("handshake_timeout", &message, true);
++                        events.worker_error(config.id, "handshake_timeout", "getconf", &message);
+                     }
+                     bail!(message)
+                 }
+@@ -937,9 +946,9 @@
+             }
+         }
+     }
+-    let message = "FATAL_HANDSHAKE: сервер не подтвердил конфигурацию";
++    let message = "HANDSHAKE_TIMEOUT: сервер не подтвердил конфигурацию; повторяем подключение потока";
+     if config.get_config {
+-        events.error("handshake_timeout", message, true);
++        events.worker_error(config.id, "handshake_timeout", "getconf", message);
+     }
+     bail!(message)
+ }
+--- a/rust-client/worker.rs
++++ b/rust-client/worker.rs
+@@ -855,6 +855,7 @@
+                 if message.contains("FATAL_AUTH")
+                     || message.contains("FATAL_PROTOCOL")
+                     || message.contains("FATAL_HANDSHAKE")
++                    || message.contains("HANDSHAKE_TIMEOUT")
+                     || message.contains("хеш мёртв")
+                 {
+                     delay = Duration::from_secs(5 + rand::random::<u64>() % 6);
+@@ -899,6 +900,8 @@
+                 }
+             }
+         }
++        crate::connection_diagnostics::retry(id, attempt, delay.as_millis(),
++            context.stats.active_connections.load(Ordering::Acquire));
+         tokio::select! {
+             _ = context.cancel.cancelled() => return,
+             _ = tokio::time::sleep(delay) => {}
+--- a/rust-client/turn_integration_tests.rs
++++ b/rust-client/turn_integration_tests.rs
+@@ -749,7 +749,7 @@
+             !message.to_ascii_lowercase().contains("attribute not found"),
+             "{message}"
+         );
+-        assert!(!message.to_lowercase().contains("атрибут"), "{message}");
++        assert!(!message.to_lowercase().contains("Р°С‚СЂРёР±СѓС‚"), "{message}");
+         tokio::time::timeout(Duration::from_secs(2), server_task)
+             .await
+             .unwrap()
+@@ -2128,3 +2128,6 @@
+         tun_result.received_packets,
+     );
+ }
++
++#[path = "handshake_isolation_tests.rs"]
++mod handshake_isolation_tests;
+--- /dev/null
++++ b/rust-client/connection_diagnostics.rs
+@@ -0,0 +1,56 @@
++// Opt-in, secret-free connection stages. Independent of CSQTT_EVENTS:
++// enabling Android events on a headless client also changes stdin/EOF handling.
++use crate::stats::Stats;
++use std::{sync::{Arc, LazyLock, atomic::Ordering}, time::Instant};
++use tokio_util::sync::CancellationToken;
++
++static ENABLED: LazyLock<bool> = LazyLock::new(||
++    std::env::var("CSQTT_DIAGNOSTICS").as_deref() == Ok("1"));
++
++pub(crate) struct ConnectionTrace {
++    worker: usize,
++    phase: &'static str,
++    started: Option<Instant>,
++    stats: Arc<Stats>,
++    cancel: CancellationToken,
++}
++
++impl ConnectionTrace {
++    pub(crate) fn new(worker: usize, stats: Arc<Stats>, cancel: CancellationToken) -> Self {
++        Self { worker, phase: "start", started: (*ENABLED).then(Instant::now), stats, cancel }
++    }
++
++    pub(crate) fn phase(&mut self, phase: &'static str) {
++        self.phase = phase;
++        self.emit("stage");
++    }
++
++    fn emit(&self, event: &str) {
++        if let Some(started) = self.started {
++            crate::log_error!(
++                "[CSQTT_DIAG] event={} worker={} phase={} elapsed_ms={} active={} cancelled={}",
++                event, self.worker, self.phase, started.elapsed().as_millis(),
++                self.stats.active_connections.load(Ordering::Acquire), self.cancel.is_cancelled(),
++            );
++        }
++    }
++}
++
++impl Drop for ConnectionTrace {
++    fn drop(&mut self) { self.emit("session_end"); }
++}
++
++pub(crate) fn retry(worker: usize, attempt: usize, delay_ms: u128, active: i32) {
++    if *ENABLED {
++        crate::log_error!(
++            "[CSQTT_DIAG] event=retry worker={} attempt={} delay_ms={} active={}",
++            worker, attempt, delay_ms, active,
++        );
++    }
++}
++
++pub(crate) fn lifecycle(reason: &'static str) {
++    if *ENABLED {
++        crate::log_error!("[CSQTT_DIAG] event=client_stop reason={}", reason);
++    }
++}
+--- /dev/null
++++ b/rust-client/handshake_isolation_tests.rs
+@@ -0,0 +1,157 @@
++// Local fault injection: no VK account, router, or external server is used.
++use super::*;
++use crate::obfs::{ObfsCipher, ObfsConfig, ObfsState};
++
++async fn configuration_peer(socket: Arc<UdpSocket>, response: &'static [u8], stop: CancellationToken) {
++    let pool = PacketPool::new(8);
++    let cipher = ObfsCipher::new(derive_wrap_key("local-fixture-password").unwrap()).unwrap();
++    let config = ObfsConfig::new(ObfsMode::Audio);
++    let mut state = ObfsState::new();
++    let mut buffer = [0u8; 4096];
++    loop {
++        let (len, source) = tokio::select! {
++            _ = stop.cancelled() => return,
++            result = socket.recv_from(&mut buffer) => result.unwrap(),
++        };
++        let mut packet = pool.acquire();
++        packet.read_area()[..len].copy_from_slice(&buffer[..len]);
++        packet.set_read_len(len).unwrap();
++        cipher.unwrap(&mut packet, ObfsMode::Audio).unwrap();
++        let answer = if packet.as_slice().starts_with(b"GETCONF:") {
++            response
++        } else if packet.as_slice().starts_with(b"DISCONNECT:") {
++            b"OK:disconnected".as_slice()
++        } else {
++            continue;
++        };
++        drop(packet);
++        let mut reply = pool.acquire();
++        reply.read_area()[..answer.len()].copy_from_slice(answer);
++        reply.set_read_len(answer.len()).unwrap();
++        cipher.wrap(&mut reply, &config, &mut state).unwrap();
++        socket.send_to(reply.as_slice(), source).await.unwrap();
++    }
++}
++
++fn fixture_session(
++    id: usize, endpoint: SocketAddr, peer: SocketAddr, get_config: bool,
++    dispatcher: Arc<Dispatcher>, stats: Arc<Stats>, cancel: CancellationToken,
++    ready: oneshot::Sender<()>,
++) -> tokio::task::JoinHandle<anyhow::Result<bool>> {
++    let (config_tx, _config_rx) = tokio::sync::mpsc::channel(8);
++    tokio::spawn(run_session(
++        SessionConfig {
++            id, peer, turn_host: None, turn_port: None,
++            turn_transport: TurnTransportMode::Udp,
++            local_port: Arc::from("39002"), device_id: Arc::from("local-fixture"),
++            password: Arc::from("local-fixture-password"), generation: 1,
++            salt: Arc::from("local-fixture"), mode: ObfsMode::Audio,
++            wrap_key: derive_wrap_key("local-fixture-password").unwrap(),
++            get_config, desired_count: 9, turn_endpoint_cursor: 0,
++            server_stream_repair: Arc::new(AtomicBool::new(false)), repair: RepairState::new(9),
++        },
++        TurnCredentials {
++            username: Arc::from(USERNAME), password: Arc::from(PASSWORD),
++            server_addresses: vec![Arc::from(format!("turn:{endpoint}?transport=udp"))].into(),
++        },
++        SessionRuntime {
++            dispatcher, pool: PacketPool::new(96), stats, events: Events::new(true), config_tx,
++            config_delivery: None, cancel, shutdown: Arc::new(ShutdownCoordinator::new()),
++            ready_tx: Some(ready), allocation_started: None, allocation_ready: None,
++        },
++    ))
++}
++
++// A real TURN Allocate/ChannelBind exchange precedes each injected fault.
++async fn isolated_failure(kind: &str) -> String {
++    let cancel = CancellationToken::new();
++    let stats = Arc::new(Stats::default());
++    let (dispatcher, _) = Dispatcher::start(
++        "127.0.0.1:0", None, PacketPool::new(128), stats.clone(), cancel.clone(),
++    ).await.unwrap();
++    let stop = CancellationToken::new();
++    let peer = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
++    let relay = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
++    let good_relay = tokio::spawn(relay_bound_turn_channel_to_peer(relay.clone(), peer.local_addr().unwrap(), stop.clone()));
++    let good_peer = tokio::spawn(configuration_peer(peer.clone(), b"NOCONF", stop.clone()));
++    let (ready_tx, ready_rx) = oneshot::channel();
++    let good = fixture_session(1, relay.local_addr().unwrap(), peer.local_addr().unwrap(), false,
++        dispatcher.clone(), stats.clone(), cancel.clone(), ready_tx);
++    tokio::time::timeout(Duration::from_secs(3), ready_rx).await.unwrap().unwrap();
++    // The ready notification precedes the active counter update in the
++    // original session. Wait for both before injecting a fast Allocate error.
++    tokio::time::timeout(Duration::from_secs(3), async {
++        while stats.active_connections.load(Ordering::Acquire) != 1 || dispatcher.active_count() != 1 {
++            tokio::time::sleep(Duration::from_millis(1)).await;
++        }
++    }).await.unwrap();
++
++    let bad_peer = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
++    let bad_relay = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
++    let relay_task = if kind == "allocate" {
++        let socket = bad_relay.clone();
++        tokio::spawn(async move {
++            let (wire, client) = recv_datagram(&socket).await;
++            let first = StunMessage::decode(&wire).unwrap();
++            socket.send_to(&challenge_response(first.transaction()), client).await.unwrap();
++            let (wire, client) = recv_datagram(&socket).await;
++            let auth = assert_authenticated_request(&wire, ALLOCATE_REQUEST);
++            socket.send_to(&authenticated_error(ALLOCATE_ERROR, auth.transaction(), 486), client).await.unwrap();
++        })
++    } else {
++        tokio::spawn(relay_bound_turn_channel_to_peer(bad_relay.clone(), bad_peer.local_addr().unwrap(), stop.clone()))
++    };
++    let denial = if kind == "denied" || kind == "device_mismatch" {
++        let response = if kind == "device_mismatch" { b"DENIED:device_mismatch".as_slice() }
++            else { b"DENIED:wrong_password".as_slice() };
++        Some(tokio::spawn(configuration_peer(bad_peer.clone(), response, stop.clone())))
++    } else { None };
++    let (ready_tx, mut ready_rx) = oneshot::channel();
++    let bad = fixture_session(2, bad_relay.local_addr().unwrap(), bad_peer.local_addr().unwrap(), true,
++        dispatcher.clone(), stats.clone(), cancel.clone(), ready_tx);
++    let started = std::time::Instant::now();
++    let result = tokio::time::timeout(Duration::from_secs(10), bad).await.unwrap().unwrap();
++    let error = result.expect_err("The injected fault must fail its own session");
++    assert!(!cancel.is_cancelled(), "One failed session cancelled the entire client");
++    assert!(!good.is_finished(), "The healthy session was terminated");
++    assert_eq!(dispatcher.active_count(), 1);
++    assert_eq!(stats.active_connections.load(Ordering::Acquire), 1);
++    assert!(ready_rx.try_recv().is_err(), "Failed session was marked READY");
++    if kind == "handshake" { assert!(started.elapsed() >= Duration::from_millis(5_000)); }
++    println!("ISOLATION: fault={kind} healthy=1 failed_ready=0 global_cancel=false elapsed_ms={}", started.elapsed().as_millis());
++    cancel.cancel();
++    tokio::time::timeout(Duration::from_secs(4), good).await.unwrap().unwrap().unwrap();
++    dispatcher.shutdown().await;
++    stop.cancel();
++    for task in [good_relay, good_peer, relay_task] {
++        tokio::time::timeout(Duration::from_secs(2), task).await.unwrap().unwrap();
++    }
++    if let Some(task) = denial { task.await.unwrap(); }
++    format!("{error:#}")
++}
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
++async fn handshake_timeout_is_local_and_not_fatal() {
++    let error = isolated_failure("handshake").await;
++    assert!(error.contains("HANDSHAKE_TIMEOUT"), "{error}");
++    assert!(!error.contains("FATAL_"), "Network silence must not stop the Android tunnel: {error}");
++}
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
++async fn allocation_failure_preserves_other_ready_session() {
++    let error = isolated_failure("allocate").await;
++    assert!(error.contains("486"), "{error}");
++}
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
++async fn explicit_password_rejection_stays_fatal() {
++    let error = isolated_failure("denied").await;
++    assert!(error.contains("FATAL_AUTH"), "{error}");
++}
++
++#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
++async fn password_bound_to_another_device_keeps_explicit_reason() {
++    let error = isolated_failure("device_mismatch").await;
++    assert!(error.contains("FATAL_AUTH"), "{error}");
++    assert!(error.contains("другому устройству"), "{error}");
++}

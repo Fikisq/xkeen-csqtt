@@ -10,6 +10,7 @@ tar -xzf "$work/source.tar.gz" --strip-components=1 -C "$work/source"
 cd "$work/source"
 patch --batch --forward -p1 < "$repo/router/patches/csqtt-2.1.9-router-call-closure.patch"
 patch --batch --forward -p1 < "$repo/router/patches/csqtt-2.1.9-router-stability.patch"
+patch --batch --forward -p1 < "$repo/router/patches/csqtt-2.1.9-handshake-isolation.patch"
 cp "$repo/router/csqtt-vk-guard.rs" rust-client/vk_account_guard.rs
 export CC_aarch64_unknown_linux_musl=musl-gcc
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc
@@ -25,9 +26,9 @@ ln -s /usr/include/aarch64-linux-gnu/asm "$work/kernel-headers/asm"
 musl-gcc -I "$work/kernel-headers" -Os -static -s "$repo/router/csqtt-tun-fd.c" -o "$work/package/csqtt-tun-fd"
 cp "$repo/router/S99csqtt" "$repo/router/csqtt-run-219.sh" "$repo/router/csqtt-js-calls.sh" "$repo/router/csqtt-api-calls.sh" "$repo/router/vk-manual-hashes.sh" "$work/package/"
 cp LICENSE "$work/package/LICENSE.CSQTT"
-printf '%s\n' 2.1.9-router.2 > "$work/package/client-version"
+printf '%s\n' 2.1.9-router.3 > "$work/package/client-version"
 printf '%s\n' 'upstream=amurcanov/csqtt' 'commit=446293aa2e873ac5323ef6fd2316d9b81d966c11' 'version=2.1.9' > "$work/package/SOURCE"
 chmod 755 "$work/package/client" "$work/package/csqtt-tun-fd" "$work/package/"*.sh "$work/package/S99csqtt"
 # Corresponding patched source accompanies the executable; no APK/Bionic files.
-tar -czf "$repo/csqtt-source-2.1.9-router.2.tar.gz" --exclude='./target' -C "$work/source" rust-client shared LICENSE
+tar -czf "$repo/csqtt-source-2.1.9-router.3.tar.gz" --exclude='./target' -C "$work/source" rust-client shared LICENSE
 tar -czf "$repo/csqtt-client-arm64-v8a.tar.gz" -C "$work/package" .
