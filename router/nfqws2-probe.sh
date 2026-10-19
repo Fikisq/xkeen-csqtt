@@ -15,13 +15,15 @@ RESULTS="$ROOT/probe-results-$$"
 
 rule() {
     "$IPT" -t mangle "$1" OUTPUT -o "$WAN" -m mark --mark "$MARK/0xffffffff" \
-        -p "$2" --dport 443 -m comment --comment "$COMMENT" \
+        -p "$2" --dport "${3:-443}" -m comment --comment "$COMMENT" \
         -j NFQUEUE --queue-num "$QUEUE" --queue-bypass
 }
 
 cleanup() {
     for protocol in tcp udp; do
-        while rule -C "$protocol" >/dev/null 2>&1; do rule -D "$protocol"; done
+        for port in 80 443; do
+            while rule -C "$protocol" "$port" >/dev/null 2>&1; do rule -D "$protocol" "$port"; done
+        done
     done
     if [ -f "$PID" ]; then
         pid=$(cat "$PID")
@@ -36,12 +38,14 @@ probe_sites() {
     probe_timeout=$2
     mkdir -m 700 -p "$RESULTS"
     index=0
-    for site in https://www.youtube.com/generate_204 https://discord.com/ https://www.instagram.com/; do
+    sites='https://www.youtube.com/generate_204 https://discord.com/'
+    [ "${HTTP_ONLY:-0}" = 0 ] || sites='http://www.youtube.com/ http://discord.com/'
+    for site in $sites; do
         index=$((index + 1))
-        "$PROBE" -protocol "$protocol" -timeout "$probe_timeout" -mark "$MARK" -url "$site" > "$RESULTS/$protocol-$index" &
+        "$PROBE" -interface "$WAN" -protocol "$protocol" -timeout "$probe_timeout" -mark "$MARK" -url "$site" > "$RESULTS/$protocol-$index" &
     done
     wait
-    for index in 1 2 3; do cat "$RESULTS/$protocol-$index"; done
+    for index in 1 2; do cat "$RESULTS/$protocol-$index"; done
 }
 
 build_args() {
@@ -53,11 +57,14 @@ build_args() {
         --lua-init="@$ROOT/nfqws2/lua/zapret-antidpi.lua.gz" \
         --blob="quic_initial:@$ROOT/nfqws2/blobs/quic_initial.bin" \
         --blob="tls_clienthello:@$ROOT/nfqws2/blobs/tls_clienthello.bin"
+    if [ -r "$ROOT/nfqws2/blobs/fs_quic_google.bin" ] && [ -r "$ROOT/nfqws2/blobs/fs_tls_max.bin" ]; then
+        set -- "$@" --blob="fs_quic_google:@$ROOT/nfqws2/blobs/fs_quic_google.bin" --blob="fs_tls_max:@$ROOT/nfqws2/blobs/fs_tls_max.bin"
+    fi
     if [ "$source" = custom ]; then
         [ -r "$candidate" ] || return 1
         while IFS= read -r arg || [ -n "$arg" ]; do
             case "$arg" in
-                --new|--filter-tcp=443|--filter-udp=443|--payload=tls_client_hello|--payload=quic_initial|--payload=empty,tls_client_hello|--filter-tcp=2053,2083,2087,2096,8443|--filter-udp=19294-19344,50000-50100|--filter-udp=1024-65535|--filter-l7=discord,stun|--filter-l7=unknown|--payload=discord_ip_discovery,stun|--payload=unknown|--out-range=-n2|--lua-desync=*)
+                --new|--filter-tcp=80|--filter-l7=tls|--filter-l7=http|--filter-l7=quic|--payload=http_req|--payload=empty|'--out-range=<s1'|'--out-range=s1<d1'|--filter-tcp=443|--filter-udp=443|--payload=tls_client_hello|--payload=quic_initial|--payload=empty,tls_client_hello|--filter-tcp=2053,2083,2087,2096,8443|--filter-udp=19294-19344,50000-50100|--filter-udp=1024-65535|--filter-l7=discord,stun|--filter-l7=unknown|--payload=discord_ip_discovery,stun|--payload=unknown|--out-range=-n2|--lua-desync=*)
                     set -- "$@" "$arg" ;;
                 *) echo 'invalid candidate argument' >&2; return 1 ;;
             esac
@@ -76,7 +83,9 @@ build_args() {
 }
 
 if [ "${1:-}" = cleanup ]; then cleanup; exit 0; fi
-[ "${1:-}" = check ] || { echo 'usage: nfqws2-probe.sh check preset|custom tcp|tcp-quic candidate-file' >&2; exit 2; }
+HTTP_ONLY=0
+[ "${1:-}" != check-http ] || HTTP_ONLY=1
+[ "${1:-}" = check ] || [ "${1:-}" = check-http ] || { echo 'usage: nfqws2-probe.sh check preset|custom tcp|tcp-quic candidate-file' >&2; exit 2; }
 case "${2:-}" in preset|custom) ;; *) exit 2 ;; esac
 case "${3:-}" in tcp|tcp-quic) ;; *) exit 2 ;; esac
 [ -x "$ENGINE" ] && [ -x "$PROBE" ] || { echo 'probe tools missing' >&2; exit 1; }
@@ -93,9 +102,13 @@ else
     sleep 1
 fi
 [ -f "$PID" ] || { echo 'probe engine did not start' >&2; exit 1; }
+probe_pid=$(cat "$PID")
+case "$probe_pid" in ''|*[!0-9]*) echo 'invalid diagnostic PID' >&2; exit 1;; esac
+[ -r "/proc/$probe_pid/exe" ] && [ "$(readlink "/proc/$probe_pid/exe")" = "$ENGINE" ] || { echo 'diagnostic engine exited before probe' >&2; exit 1; }
 rule -A tcp
+if [ "$HTTP_ONLY" = 1 ] || grep -qx -- '--filter-tcp=80' "${4:-/dev/null}"; then rule -A tcp 80; fi
 [ "$3" = tcp-quic ] && rule -A udp
 timeout_seconds=${5:-5}
 case "$timeout_seconds" in 2|3|4|5|6|7|8|9|10|11|12|13|14|15) ;; *) exit 2 ;; esac
-if [ "$3" = tcp-quic ]; then protocol=both; else protocol=tcp; fi
+if [ "$3" = tcp-quic ] && [ "$HTTP_ONLY" = 0 ]; then protocol=both; else protocol=tcp; fi
 probe_sites "$protocol" "$timeout_seconds"

@@ -263,6 +263,12 @@ install_nfqws2() {
         cp "$helpers/$helper" "$NFQWS_ROOT/$helper.new" && chmod 755 "$NFQWS_ROOT/$helper.new" &&
           mv "$NFQWS_ROOT/$helper.new" "$NFQWS_ROOT/$helper" || exit 1
       done
+      # Diagnostic runtime only; the active nfqws2 engine and strategy remain user data.
+      [ -s "$helpers/probe" ] && cp "$helpers/probe" "$NFQWS_ROOT/probe.new" && chmod 755 "$NFQWS_ROOT/probe.new" &&
+        "$NFQWS_ROOT/probe.new" -version | grep -q '^xkeen-nfqws-probe 4$' && mv "$NFQWS_ROOT/probe.new" "$NFQWS_ROOT/probe" || exit 1
+      for blob in fs_quic_google fs_tls_max; do
+        [ ! -s "$helpers/nfqws2/blobs/$blob.bin" ] || cp "$helpers/nfqws2/blobs/$blob.bin" "$NFQWS_ROOT/nfqws2/blobs/$blob.bin" || exit 1
+      done
       [ -s "$helpers/S98nfqws2-xkeen" ] || exit 1
       cp "$helpers/S98nfqws2-xkeen" /opt/etc/init.d/S98nfqws2-xkeen.new &&
         chmod 755 /opt/etc/init.d/S98nfqws2-xkeen.new &&

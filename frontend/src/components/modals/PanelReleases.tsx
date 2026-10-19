@@ -142,6 +142,7 @@ export function PanelReleases({ open, onClose, version }: { open: boolean; onClo
           <span>Установлена: v{normalized(current)}</span>
           <Button variant="ghost" size="sm" disabled={loading || installing} onClick={() => void load(true)}><IconRefresh size={14} />Проверить</Button>
         </div>
+        <p className="text-muted-foreground text-xs">Автоматическая проверка — каждые 12 часов. Установка выбранной версии — вручную.</p>
         {error && <p role="alert" className="shrink-0 text-sm text-red-400">{error}</p>}
         {data?.stale && <p className="shrink-0 text-xs text-amber-500">GitHub недоступен. Показан сохранённый список.</p>}
         <ScrollArea className="min-h-0 shrink-0" hideScrollbar style={{ maxHeight: 'min(calc(70px * 7 + 8px), calc(90dvh - 240px))' }}>

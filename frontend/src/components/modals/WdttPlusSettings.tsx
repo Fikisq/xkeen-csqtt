@@ -1,3 +1,4 @@
+import { SettingInfo } from '@/components/ui/setting-info'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Field, FieldContent, FieldDescription, FieldLabel } from '@/components/ui/field'
@@ -109,36 +110,36 @@ export function WdttPlusSettings({ onBack, onRefresh }: { onBack: () => void; on
   }
 
   return <div className="flex min-h-0 flex-col gap-3"><div className="min-h-0 space-y-3 overflow-y-auto pr-2">
-    <p className="text-muted-foreground text-xs">Клиент WDTT Plus {clientVersion} открывает локальный SOCKS5 с UDP для Xray. Панель не создаёт звонки VK: вставьте уже полученные ссылки или хеши.</p>
-    {deviceId && <p className="text-muted-foreground break-all text-xs">Device ID: <span className="select-all">{deviceId}</span></p>}
+    <p className="text-xs text-green-400">Клиент WDTT Plus {clientVersion}<SettingInfo label="WDTT Plus">Локальный SOCKS5 с UDP для Xray. Использует готовые ссылки звонков VK; панель их для WDTT Plus не создаёт. Сохранение и применение — отдельные действия.</SettingInfo></p>
+    {deviceId && <p className="text-muted-foreground break-all text-xs">Device ID:<SettingInfo label="Device ID">Сохранённый идентификатор этого роутера, отправляемый клиентом серверу.</SettingInfo> <span className="select-all">{deviceId}</span></p>}
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-      <label className="text-sm font-medium">Сервер<Input className="mt-1" value={server} onChange={(event) => setServer(event.target.value)} placeholder="Адрес вашего сервера" /></label>
-      <label className="text-sm font-medium">DTLS-порт сервера<Input className="mt-1" inputMode="numeric" value={dtlsPort} onChange={(event) => setDtlsPort(event.target.value)} /></label>
-      <label className="text-sm font-medium">Порт WireGuard на сервере<Input className="mt-1" inputMode="numeric" value={wgPort} onChange={(event) => setWgPort(event.target.value)} /></label>
-      <label className="text-sm font-medium">Потоки<select className={selectClass} value={workers} onChange={(event) => setWorkers(event.target.value)}>{Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={(i + 1) * 9}>{(i + 1) * 9}</option>)}</select></label>
-      <label className="text-sm font-medium">Пароль туннеля · {hasPassword ? 'сохранён' : 'не сохранён'}<Input className="mt-1" type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={hasPassword ? 'Пусто = оставить прежний' : 'Введите пароль'} /></label>
+      <label className="text-sm font-medium">Сервер<SettingInfo label="Сервер">Адрес вашего сервера WDTT Plus без номера порта.</SettingInfo><Input className="mt-1" value={server} onChange={(event) => setServer(event.target.value)} placeholder="Адрес вашего сервера" /></label>
+      <label className="text-sm font-medium">DTLS-порт сервера<SettingInfo label="DTLS-порт">Порт туннеля на сервере. Должен совпадать с настройками серверной части.</SettingInfo><Input className="mt-1" inputMode="numeric" value={dtlsPort} onChange={(event) => setDtlsPort(event.target.value)} /></label>
+      <label className="text-sm font-medium">Порт WireGuard на сервере<SettingInfo label="Порт WireGuard">Справочное значение: рабочую конфигурацию клиент получает от сервера через GETCONF.</SettingInfo><Input className="mt-1" inputMode="numeric" value={wgPort} onChange={(event) => setWgPort(event.target.value)} /></label>
+      <label className="text-sm font-medium">Потоки<SettingInfo label="Потоки">Количество параллельных соединений: 9–108, шаг 9. Большее число может повышать скорость и нагрузку на роутер.</SettingInfo><select className={selectClass} value={workers} onChange={(event) => setWorkers(event.target.value)}>{Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={(i + 1) * 9}>{(i + 1) * 9}</option>)}</select></label>
+      <label className="text-sm font-medium">Пароль туннеля <SettingInfo label="Пароль туннеля">Пароль от вашего сервера. Пустое поле оставляет сохранённый пароль; секрет не возвращается в браузер.</SettingInfo><span className={hasPassword ? 'text-green-400' : 'text-amber-400'}>{hasPassword ? '· сохранён' : '· не сохранён'}</span><Input className="mt-1" type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={hasPassword ? 'Пусто = оставить прежний' : 'Введите пароль'} /></label>
+      <label className="block text-sm font-medium">Количество хешей<SettingInfo label="Количество хешей">Число используемых ручных хешей: от 1 до 4. Это не количество потоков.</SettingInfo><select className={selectClass} value={hashesCount} onChange={(event) => setHashesCount(event.target.value)}>{[1, 2, 3, 4].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
     </div>
     <Separator />
     <div className="space-y-3">
-      <label className="block text-sm font-medium">Количество хешей<select className={selectClass} value={hashesCount} onChange={(event) => setHashesCount(event.target.value)}>{[1, 2, 3, 4].map((count) => <option key={count} value={count}>{count}</option>)}</select></label>
-      <label className="block text-sm font-medium">Ссылки или хеши VK · {hasManualHashes ? 'сохранены' : 'не сохранены'}<Input className="mt-1" type="password" autoComplete="off" value={manualHashes} onChange={(event) => setManualHashes(event.target.value)} placeholder="Через запятую" /></label>
-      <p className="text-muted-foreground text-xs">Эти ссылки всё равно относятся к звонкам VK. Получайте их вне панели только от аккаунта, которым готовы пользоваться.</p>
+      <label className="block text-sm font-medium">Ссылки или хеши VK <SettingInfo label="Ссылки и хеши VK">Готовые ссылки звонков VK или хеши через запятую. Получите их вне панели. Пустое поле сохраняет прежние значения.</SettingInfo><span className={hasManualHashes ? 'text-green-400' : 'text-amber-400'}>{hasManualHashes ? '· сохранены' : '· не сохранены'}</span><Input className="mt-1" type="password" autoComplete="off" value={manualHashes} onChange={(event) => setManualHashes(event.target.value)} placeholder="Через запятую" /></label>
+
     </div>
     <Separator />
-    <div className="border-border space-y-3 rounded-md border p-3 text-sm">
-      <Field orientation="horizontal">
+    <div className="border-border space-y-3 rounded-xl border bg-background/40 p-3 text-sm">
+      <Field orientation="horizontal" className="items-center! gap-4">
         <FieldContent>
-          <FieldLabel htmlFor="wdtt-rt-network">TCP/TLS: без внешнего UDP и HTTP/3</FieldLabel>
-          <FieldDescription className="text-xs">Настройки TURN ниже применяются только при включённом режиме.</FieldDescription>
+          <FieldLabel htmlFor="wdtt-rt-network">TCP/TLS: без внешнего UDP и HTTP/3<SettingInfo label="Режим TCP/TLS">Отдельный режим без внешнего UDP и HTTP/3. Включает настройки TURN/TLS ниже. Изменения действуют после сохранения и «Применить».</SettingInfo></FieldLabel>
+
         </FieldContent>
-        <Switch id="wdtt-rt-network" size="sm" checked={rtNetwork} onCheckedChange={setRtNetwork} aria-label="TCP/TLS" />
+        <Switch id="wdtt-rt-network" size="lg" checked={rtNetwork} onCheckedChange={setRtNetwork} aria-label="TCP/TLS" />
       </Field>
       {rtNetwork && <>
-        <label className="block font-medium">SNI белого списка для TURN/TLS<Input className="mt-1" value={turnSni} onChange={(event) => setTurnSni(event.target.value)} placeholder="Необязательно · example.com" /></label>
+        <label className="block font-medium">SNI белого списка для TURN/TLS<SettingInfo label="SNI TURN/TLS">Необязательное имя сервера для подключения TURN по TLS. Должно подходить используемому серверу и сети.</SettingInfo><Input className="mt-1" value={turnSni} onChange={(event) => setTurnSni(event.target.value)} placeholder="Необязательно · example.com" /></label>
         <Field orientation="horizontal">
           <FieldContent>
-            <FieldLabel htmlFor="wdtt-rt-masque">Резерв MASQUE через Cloudflare WARP</FieldLabel>
-            <FieldDescription className="text-xs">Необязательный запасной канал, если TURN недоступен.</FieldDescription>
+            <FieldLabel htmlFor="wdtt-rt-masque">Резерв MASQUE через Cloudflare WARP<SettingInfo label="Резерв MASQUE">Необязательный запасной канал при недоступности TURN. Требует отдельного согласия с условиями Cloudflare WARP ниже.</SettingInfo></FieldLabel>
+
           </FieldContent>
           <Switch id="wdtt-rt-masque" size="sm" checked={rtMasque} onCheckedChange={setRtMasque} aria-label="Резерв MASQUE через Cloudflare WARP" />
         </Field>
@@ -149,9 +150,9 @@ export function WdttPlusSettings({ onBack, onRefresh }: { onBack: () => void; on
           <Switch id="wdtt-rt-masque-tos" size="sm" checked={rtMasqueAcceptTos} onCheckedChange={setRtMasqueAcceptTos} aria-label="Согласие с условиями Cloudflare WARP" />
         </Field>}
       </>}
-      <p className="text-muted-foreground text-xs">Новые параметры вступят в силу после «Применить». Режим выключен, пока вы его не включите.</p>
+
     </div>
-    <p className="text-muted-foreground text-xs">Порт WireGuard здесь справочный: рабочую конфигурацию клиент получает от сервера через GETCONF. Пароль и хеши сохраняются с доступом только для root и не возвращаются в панель.</p>
+
     {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
     </div><div className="bg-card relative z-10 -mx-5 flex shrink-0 justify-end gap-2 border-t px-5 py-4">
       <Button variant="outline" onClick={onBack}>Назад</Button>

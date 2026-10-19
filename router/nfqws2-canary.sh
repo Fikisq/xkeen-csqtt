@@ -41,9 +41,10 @@ queue_rule() {
     protocol=$3
     capture=${4:-configured}
     ports=443
-    if [ "$capture" = full ] || { [ "$capture" = configured ] && [ -s "$CUSTOM" ] && grep -qx -- '--filter-udp=1024-65535' "$CUSTOM"; }; then
+    if { [ "$capture" = full ] || [ "$capture" = full-http ]; } || { [ "$capture" = configured ] && [ -s "$CUSTOM" ] && grep -qx -- '--filter-udp=1024-65535' "$CUSTOM"; }; then
         if [ "$protocol" = tcp ]; then ports=443,2053,2083,2087,2096,8443; else ports=443,1024:65535; fi
     fi
+    if [ "$protocol" = tcp ] && { [ "$capture" = http ] || [ "$capture" = full-http ] || { [ "$capture" = configured ] && [ -s "$CUSTOM" ] && grep -qx -- '--filter-tcp=80' "$CUSTOM"; }; }; then ports="80,$ports"; fi
     if [ "$kind" = trial ]; then
         [ -n "$CLIENT" ] || return 1
         set -- -t mangle "$operation" FORWARD -i "$LAN" -o "$WAN" -s "$CLIENT/32" -p "$protocol"
@@ -78,7 +79,7 @@ global_enabled() {
 remove_rules() {
     kind=$1
     for protocol in tcp udp; do
-      for capture in legacy full; do
+      for capture in legacy full http full-http; do
         while "${kind}_rule" -C "$protocol" "$capture" >/dev/null 2>&1; do
             "${kind}_rule" -D "$protocol" "$capture"
         done
@@ -119,10 +120,13 @@ run_engine() {
         --lua-init="@$ROOT/nfqws2/lua/zapret-antidpi.lua.gz" \
         --blob="quic_initial:@$ROOT/nfqws2/blobs/quic_initial.bin" \
         --blob="tls_clienthello:@$ROOT/nfqws2/blobs/tls_clienthello.bin"
+    if [ -r "$ROOT/nfqws2/blobs/fs_quic_google.bin" ] && [ -r "$ROOT/nfqws2/blobs/fs_tls_max.bin" ]; then
+        set -- "$@" --blob="fs_quic_google:@$ROOT/nfqws2/blobs/fs_quic_google.bin" --blob="fs_tls_max:@$ROOT/nfqws2/blobs/fs_tls_max.bin"
+    fi
     if [ -s "$CUSTOM" ]; then
         while IFS= read -r arg || [ -n "$arg" ]; do
             case "$arg" in
-                --new|--filter-tcp=443|--filter-udp=443|--payload=tls_client_hello|--payload=quic_initial|--payload=empty,tls_client_hello|--filter-tcp=2053,2083,2087,2096,8443|--filter-udp=19294-19344,50000-50100|--filter-udp=1024-65535|--filter-l7=discord,stun|--filter-l7=unknown|--payload=discord_ip_discovery,stun|--payload=unknown|--out-range=-n2|--lua-desync=*)
+                --new|--filter-tcp=80|--filter-l7=tls|--filter-l7=http|--filter-l7=quic|--payload=http_req|--payload=empty|'--out-range=<s1'|'--out-range=s1<d1'|--filter-tcp=443|--filter-udp=443|--payload=tls_client_hello|--payload=quic_initial|--payload=empty,tls_client_hello|--filter-tcp=2053,2083,2087,2096,8443|--filter-udp=19294-19344,50000-50100|--filter-udp=1024-65535|--filter-l7=discord,stun|--filter-l7=unknown|--payload=discord_ip_discovery,stun|--payload=unknown|--out-range=-n2|--lua-desync=*)
                     set -- "$@" "$arg" ;;
                 *) log_error 'invalid custom strategy argument'; return 1 ;;
             esac

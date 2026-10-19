@@ -1,0 +1,118 @@
+#!/bin/sh
+# Terminal management for the panel and its Entware services.
+PATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+heading() {
+    if [ -t 1 ]; then printf '\033[1;36m%s\033[0m\n' "$1"; else printf '%s\n' "$1"; fi
+}
+
+service_action() {
+    target=$1 action=$2
+    case "$target" in
+        panel) init=/opt/etc/init.d/S99xkeen-ui ;;
+        xray) init=/opt/etc/init.d/S05xkeen ;;
+        csqtt) init=/opt/etc/init.d/S99csqtt ;;
+        wdtt-plus) init=/opt/etc/init.d/S99wdtt-plus ;;
+        nfqws2) init=/opt/etc/init.d/S98nfqws2-xkeen ;;
+        *) echo 'Неизвестный компонент' >&2; return 2 ;;
+    esac
+    [ -x "$init" ] || { echo "$target: не установлен"; return 1; }
+    case "$action" in start|stop|restart|status) ;; *) return 2 ;; esac
+    if [ "$target" = panel ] && [ "$action" != status ]; then
+        # The web terminal closes when its panel stops; finish this action detached.
+        nohup "$init" "$action" </dev/null >>/opt/var/log/xkeen-manager.log 2>&1 &
+        echo "Панель: $action запущен. Журнал: /opt/var/log/xkeen-manager.log"
+        return 0
+    fi
+    if [ "$target" = xray ] && [ "$action" != status ]; then
+        "$init" "$action" on
+    elif [ "$target" = nfqws2 ] && [ "$action" != status ]; then
+        marker=/opt/etc/xkeen/nfqws2-stage/manual-stopped
+        if [ "$action" = stop ]; then
+            : > "$marker" || return 1
+        else
+            rm -f "$marker" || return 1
+        fi
+        "$init" "$action"
+    else
+        "$init" "$action"
+    fi
+}
+
+show_status() {
+    for component in panel xray csqtt wdtt-plus nfqws2; do
+        printf '\n'
+        heading "--- $component ---"
+        service_action "$component" status
+    done
+    return 0
+}
+
+show_log() {
+    case "$1" in
+        panel) file=/opt/var/log/xkeen-ui.log ;;
+        xray) file=/opt/var/log/xray/error.log ;;
+        csqtt) file=/opt/etc/csqtt/csqtt.log ;;
+        wdtt-plus) file=/opt/etc/wdtt-plus/wdtt-plus.log ;;
+        nfqws2) file=/opt/etc/xkeen/nfqws2-stage/nfqws2.log ;;
+        *) return 2 ;;
+    esac
+    [ -f "$file" ] || { echo "Журнал пока отсутствует: $file"; return 1; }
+    if [ "${2:-}" = once ]; then tail -c 32000 "$file" | tail -n 80; else tail -n 80 -f "$file"; fi
+}
+
+update_panel() {
+    work=$(mktemp -d /opt/tmp/xkeen-manager.XXXXXX) || return 1
+    if curl -fsSL --connect-timeout 10 --max-time 120 \
+        https://raw.githubusercontent.com/Fikisq/xkeen-csqtt/main/setup.sh -o "$work/setup.sh"; then
+        sh "$work/setup.sh" auto
+        result=$?
+    else
+        result=1
+    fi
+    rm -f "$work/setup.sh"
+    rmdir "$work"
+    return "$result"
+}
+
+usage() {
+    echo 'xkeen-manager [status | {start|stop|restart} {panel|xray|csqtt|wdtt-plus|nfqws2} | update | log COMPONENT]'
+}
+
+if [ "$#" -gt 0 ]; then
+    case "$1" in
+        status) show_status ;;
+        start|stop|restart) [ "$#" -eq 2 ] || { usage; exit 2; }; service_action "$2" "$1" ;;
+        update)
+            nohup /opt/bin/sh /opt/sbin/xkeen-manager update-run </dev/null >/opt/var/log/xkeen-manager-update.log 2>&1 &
+            echo 'Обновление запущено. Журнал: /opt/var/log/xkeen-manager-update.log'
+            ;;
+        update-run) update_panel ;;
+        log) [ "$#" -eq 2 ] || { usage; exit 2; }; show_log "$2" ;;
+        log-once) [ "$#" -eq 2 ] || { usage; exit 2; }; show_log "$2" once ;;
+        help|-h|--help) usage ;;
+        *) usage; exit 2 ;;
+    esac
+    exit $?
+fi
+
+[ -t 0 ] || { usage; exit 2; }
+while :; do
+    printf '\n'
+    heading 'XKeen · управление'
+    printf '1. Статус\n2. Запустить\n3. Остановить\n4. Перезапустить\n5. Обновить панель\n6. Журнал (Ctrl+C — выход)\n0. Выход\n> '
+    IFS= read -r choice || exit 0
+    case "$choice" in
+        0) exit 0 ;;
+        1) show_status ;;
+        5) /opt/bin/sh /opt/sbin/xkeen-manager update ;;
+        2|3|4|6)
+            printf 'Компонент: 1. Панель  2. Xray  3. CSQTT  4. WDTT Plus  5. nfqws2\n> '
+            IFS= read -r component || exit 0
+            case "$component" in 1) component=panel ;; 2) component=xray ;; 3) component=csqtt ;; 4) component=wdtt-plus ;; 5) component=nfqws2 ;; *) continue ;; esac
+            case "$choice" in 2) service_action "$component" start ;; 3) service_action "$component" stop ;; 4) service_action "$component" restart ;; 6) show_log "$component" ;; esac
+            ;;
+        *) echo 'Выберите пункт меню' ;;
+    esac
+done

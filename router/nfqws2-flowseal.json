@@ -1,312 +1,185 @@
 {
+  "name": "Flowseal · 20 вариантов",
   "entries": [
     {
-      "name": "Flowseal 1.10.3 · general (ALT) · Google TLS",
+      "name": "Fake TS + fakedsplit",
       "release": "1.10.3",
       "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT).bat",
       "scope": "Google TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tcp_ts=-600000:ip_id=zero:repeats=6\n--lua-desync=fakedsplit:pos=2:pattern=0x00:tcp_ts=-600000:repeats=6:ip_id=zero\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tcp_ts=-600000:ip_id=zero:repeats=6\n--lua-desync=fakedsplit:pos=2:pattern=0x00:tcp_ts=-600000:repeats=6:ip_id=zero\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n",
+      "id": "flowseal-0",
+      "originalName": "Flowseal 1.10.3 · general (ALT) · Google TLS"
     },
     {
-      "name": "Flowseal 1.10.3 · general (ALT) · Общий TLS",
+      "name": "Fake hex + fakedsplit",
       "release": "1.10.3",
       "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT).bat",
       "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=0x000100502112a4425a4b4b7568477865706e64300006000951427a503a746e576b000000c0570004000003e7802a0008b6bcef7bb3f7289800250000002400046e001eff00080014aa4f94f91ff5cebedfec9e66add3dd9bb795ed6e802800042b1fb635:tcp_ts=-600000:repeats=6\n--lua-desync=fake:blob=tls_clienthello:tcp_ts=-600000:repeats=6\n--lua-desync=fakedsplit:pos=2:pattern=0x00:tcp_ts=-600000:repeats=6\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=0x000100502112a4425a4b4b7568477865706e64300006000951427a503a746e576b000000c0570004000003e7802a0008b6bcef7bb3f7289800250000002400046e001eff00080014aa4f94f91ff5cebedfec9e66add3dd9bb795ed6e802800042b1fb635:tcp_ts=-600000:repeats=6\n--lua-desync=fake:blob=tls_clienthello:tcp_ts=-600000:repeats=6\n--lua-desync=fakedsplit:pos=2:pattern=0x00:tcp_ts=-600000:repeats=6\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n",
+      "id": "flowseal-1",
+      "originalName": "Flowseal 1.10.3 · general (ALT) · Общий TLS"
     },
     {
-      "name": "Flowseal 1.10.3 · general (ALT10) · Google TLS",
+      "name": "ALT10 · Google TLS",
       "release": "1.10.3",
       "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT10).bat",
       "scope": "Google TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tcp_ts=-600000:ip_id=zero:repeats=6\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tcp_ts=-600000:ip_id=zero:repeats=6\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n",
+      "id": "flowseal-2",
+      "originalName": "Flowseal 1.10.3 · general (ALT10) · Google TLS"
     },
     {
-      "name": "Flowseal 1.10.3 · general (ALT10) · Общий TLS",
-      "release": "1.10.3",
-      "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT10).bat",
-      "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=0x000100502112a4425a4b4b7568477865706e64300006000951427a503a746e576b000000c0570004000003e7802a0008b6bcef7bb3f7289800250000002400046e001eff00080014aa4f94f91ff5cebedfec9e66add3dd9bb795ed6e802800042b1fb635:tcp_ts=-600000:repeats=6\n--lua-desync=fake:blob=0x1603010117010001130303d5ad552b42c4c6a2d54622f31b3c41f6e5d9f48f866d36c46e7da92d4010dc7020f9aedd547996a5b68d8ddeba00abc0735dd66440c1b26aba66dba0fecc7f1c33002813021301c02cc02bc030c02fc024c023c028c027c00ac009c014c013009d009c003d003c0035002f010000a20000000c000a000007347064612e746f000500050100000000002b00050403040303000d001a001808040805080604010501020104030503020302020601060300230000000a00080006001d00170018000b000201000010000b000908687474702f312e31003300260024001d0020da0fc18ad8f155a28f26d1be4f3261dd3d593da905e9afdbd9146df55879d65e0031000000170000ff01000100002d00020101:tcp_ts=-600000:repeats=6\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general (ALT11) · Google TLS",
+      "name": "ALT11 · Google TLS",
       "release": "1.10.3",
       "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT11).bat",
       "scope": "Google TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tcp_ts=-600000:ip_id=zero:repeats=8\n--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_clienthello:tcp_ts_up:ip_id=zero\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n"
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tcp_ts=-600000:ip_id=zero:repeats=8\n--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_clienthello:tcp_ts_up:ip_id=zero\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n",
+      "id": "flowseal-4",
+      "originalName": "Flowseal 1.10.3 · general (ALT11) · Google TLS"
     },
     {
-      "name": "Flowseal 1.10.3 · general (ALT11) · Общий TLS",
+      "name": "ALT11 · общий TLS",
       "release": "1.10.3",
       "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT11).bat",
       "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=0x000100642112a442d38a71c52e94b60f43e91da80006000c724d39586151326b5037566380220010437573746f6d5354554e2f312e303031002400046abc91e3802a000817c49b62d835aef1000800144e9327dab1650cf87942de16ac578339e60b74cd002500008055000431f78c4a80280004962de173:tcp_ts=-600000:repeats=8\n--lua-desync=fake:blob=0x16030102930100028f03038871b0b89409dc15ecd9fcad60d193e5c5760fc72b6db571056b6358bf11219520b6c7bd26642b4acf81fd0360013eedc0a4e22b2eb2e6965278ad4975b513b11e0022130113031302c02bc02fcca9cca8c02cc030c00ac009c013c014009c009d002f0035010002240000001500130000107777772e6f6e6574727573742e636f6d00170000ff01000100000a000e000c001d00170018001901000101000b00020100002300000010000e000c02683208687474702f312e310005000501000000000022000a000804030503060302030033006b0069001d0020cd2b99334466319ca6cfc5fb4b60274a866d0afd7962990c39d12028ebc527330017004104989834f5a94f51dbe0606a0406780c4112674954293563ab4536d730c4289ac095f2cd8463eb79163b6acc776d8a4062a56eab00f2668264e8a18db9bf461bea002b00050403040303000d0018001604030503060308040805080604010501060102030201002d00020101001c00024001fe0d01190000010001370020cfd99ab793198ad0060e91d9b0e107e8a18987e0ae2137bba48d6a5d8f103c3b00ef416fe1ce6767a281c7a160c68b43051a28cbbcc652057bf25e8922f0d11eb448be1bbeec0d8589406df1fd86d6610120dd8319a922d86824aff82e8adbc56c1194bae80a7eb8750c542d1570b200cd2f22d4eaa19dbeb3e3488a5c157f2e772715de711317c2ec84bf3ff8a1fb53f305e6eadd5f1ff45f7a3e6a012b33b9063150747e0bf139a5262ad29d8b1c6b8251acffa9b67840de1b91e73570e0922ea84d77b92d13832a171c1df32c45c14f898cfc452d1bd18507bc28b9476686b5d7e0303fbd9a45b70ec14f0bc547e1ae586532a6f92fa62a87482960bd688216096eacc85aadc4b50bf9cc068609819b:tcp_ts=-600000:repeats=8\n--lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=0x16030102930100028f03038871b0b89409dc15ecd9fcad60d193e5c5760fc72b6db571056b6358bf11219520b6c7bd26642b4acf81fd0360013eedc0a4e22b2eb2e6965278ad4975b513b11e0022130113031302c02bc02fcca9cca8c02cc030c00ac009c013c014009c009d002f0035010002240000001500130000107777772e6f6e6574727573742e636f6d00170000ff01000100000a000e000c001d00170018001901000101000b00020100002300000010000e000c02683208687474702f312e310005000501000000000022000a000804030503060302030033006b0069001d0020cd2b99334466319ca6cfc5fb4b60274a866d0afd7962990c39d12028ebc527330017004104989834f5a94f51dbe0606a0406780c4112674954293563ab4536d730c4289ac095f2cd8463eb79163b6acc776d8a4062a56eab00f2668264e8a18db9bf461bea002b00050403040303000d0018001604030503060308040805080604010501060102030201002d00020101001c00024001fe0d01190000010001370020cfd99ab793198ad0060e91d9b0e107e8a18987e0ae2137bba48d6a5d8f103c3b00ef416fe1ce6767a281c7a160c68b43051a28cbbcc652057bf25e8922f0d11eb448be1bbeec0d8589406df1fd86d6610120dd8319a922d86824aff82e8adbc56c1194bae80a7eb8750c542d1570b200cd2f22d4eaa19dbeb3e3488a5c157f2e772715de711317c2ec84bf3ff8a1fb53f305e6eadd5f1ff45f7a3e6a012b33b9063150747e0bf139a5262ad29d8b1c6b8251acffa9b67840de1b91e73570e0922ea84d77b92d13832a171c1df32c45c14f898cfc452d1bd18507bc28b9476686b5d7e0303fbd9a45b70ec14f0bc547e1ae586532a6f92fa62a87482960bd688216096eacc85aadc4b50bf9cc068609819b:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n"
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=0x000100642112a442d38a71c52e94b60f43e91da80006000c724d39586151326b5037566380220010437573746f6d5354554e2f312e303031002400046abc91e3802a000817c49b62d835aef1000800144e9327dab1650cf87942de16ac578339e60b74cd002500008055000431f78c4a80280004962de173:tcp_ts=-600000:repeats=8\n--lua-desync=fake:blob=0x16030102930100028f03038871b0b89409dc15ecd9fcad60d193e5c5760fc72b6db571056b6358bf11219520b6c7bd26642b4acf81fd0360013eedc0a4e22b2eb2e6965278ad4975b513b11e0022130113031302c02bc02fcca9cca8c02cc030c00ac009c013c014009c009d002f0035010002240000001500130000107777772e6f6e6574727573742e636f6d00170000ff01000100000a000e000c001d00170018001901000101000b00020100002300000010000e000c02683208687474702f312e310005000501000000000022000a000804030503060302030033006b0069001d0020cd2b99334466319ca6cfc5fb4b60274a866d0afd7962990c39d12028ebc527330017004104989834f5a94f51dbe0606a0406780c4112674954293563ab4536d730c4289ac095f2cd8463eb79163b6acc776d8a4062a56eab00f2668264e8a18db9bf461bea002b00050403040303000d0018001604030503060308040805080604010501060102030201002d00020101001c00024001fe0d01190000010001370020cfd99ab793198ad0060e91d9b0e107e8a18987e0ae2137bba48d6a5d8f103c3b00ef416fe1ce6767a281c7a160c68b43051a28cbbcc652057bf25e8922f0d11eb448be1bbeec0d8589406df1fd86d6610120dd8319a922d86824aff82e8adbc56c1194bae80a7eb8750c542d1570b200cd2f22d4eaa19dbeb3e3488a5c157f2e772715de711317c2ec84bf3ff8a1fb53f305e6eadd5f1ff45f7a3e6a012b33b9063150747e0bf139a5262ad29d8b1c6b8251acffa9b67840de1b91e73570e0922ea84d77b92d13832a171c1df32c45c14f898cfc452d1bd18507bc28b9476686b5d7e0303fbd9a45b70ec14f0bc547e1ae586532a6f92fa62a87482960bd688216096eacc85aadc4b50bf9cc068609819b:tcp_ts=-600000:repeats=8\n--lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=0x16030102930100028f03038871b0b89409dc15ecd9fcad60d193e5c5760fc72b6db571056b6358bf11219520b6c7bd26642b4acf81fd0360013eedc0a4e22b2eb2e6965278ad4975b513b11e0022130113031302c02bc02fcca9cca8c02cc030c00ac009c013c014009c009d002f0035010002240000001500130000107777772e6f6e6574727573742e636f6d00170000ff01000100000a000e000c001d00170018001901000101000b00020100002300000010000e000c02683208687474702f312e310005000501000000000022000a000804030503060302030033006b0069001d0020cd2b99334466319ca6cfc5fb4b60274a866d0afd7962990c39d12028ebc527330017004104989834f5a94f51dbe0606a0406780c4112674954293563ab4536d730c4289ac095f2cd8463eb79163b6acc776d8a4062a56eab00f2668264e8a18db9bf461bea002b00050403040303000d0018001604030503060308040805080604010501060102030201002d00020101001c00024001fe0d01190000010001370020cfd99ab793198ad0060e91d9b0e107e8a18987e0ae2137bba48d6a5d8f103c3b00ef416fe1ce6767a281c7a160c68b43051a28cbbcc652057bf25e8922f0d11eb448be1bbeec0d8589406df1fd86d6610120dd8319a922d86824aff82e8adbc56c1194bae80a7eb8750c542d1570b200cd2f22d4eaa19dbeb3e3488a5c157f2e772715de711317c2ec84bf3ff8a1fb53f305e6eadd5f1ff45f7a3e6a012b33b9063150747e0bf139a5262ad29d8b1c6b8251acffa9b67840de1b91e73570e0922ea84d77b92d13832a171c1df32c45c14f898cfc452d1bd18507bc28b9476686b5d7e0303fbd9a45b70ec14f0bc547e1ae586532a6f92fa62a87482960bd688216096eacc85aadc4b50bf9cc068609819b:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n",
+      "id": "flowseal-5",
+      "originalName": "Flowseal 1.10.3 · general (ALT11) · Общий TLS"
     },
     {
-      "name": "Flowseal 1.10.3 · general (ALT12) · Google TLS",
+      "name": "Host fake · Google + IP ID",
       "release": "1.10.3",
       "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT12).bat",
       "scope": "Google TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:ip_id=zero:repeats=1\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n"
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:ip_id=zero:repeats=1\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n",
+      "id": "flowseal-6",
+      "originalName": "Flowseal 1.10.3 · general (ALT12) · Google TLS"
     },
     {
-      "name": "Flowseal 1.10.3 · general (ALT12) · Общий TLS",
-      "release": "1.10.3",
-      "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT12).bat",
-      "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=0x000100502112a4425a4b4b7568477865706e64300006000951427a503a746e576b000000c0570004000003e7802a0008b6bcef7bb3f7289800250000002400046e001eff00080014aa4f94f91ff5cebedfec9e66add3dd9bb795ed6e802800042b1fb635:tcp_ts=-600000:repeats=8\n--lua-desync=fake:blob=0x16030102930100028f03038871b0b89409dc15ecd9fcad60d193e5c5760fc72b6db571056b6358bf11219520b6c7bd26642b4acf81fd0360013eedc0a4e22b2eb2e6965278ad4975b513b11e0022130113031302c02bc02fcca9cca8c02cc030c00ac009c013c014009c009d002f0035010002240000001500130000107777772e6f6e6574727573742e636f6d00170000ff01000100000a000e000c001d00170018001901000101000b00020100002300000010000e000c02683208687474702f312e310005000501000000000022000a000804030503060302030033006b0069001d0020cd2b99334466319ca6cfc5fb4b60274a866d0afd7962990c39d12028ebc527330017004104989834f5a94f51dbe0606a0406780c4112674954293563ab4536d730c4289ac095f2cd8463eb79163b6acc776d8a4062a56eab00f2668264e8a18db9bf461bea002b00050403040303000d0018001604030503060308040805080604010501060102030201002d00020101001c00024001fe0d01190000010001370020cfd99ab793198ad0060e91d9b0e107e8a18987e0ae2137bba48d6a5d8f103c3b00ef416fe1ce6767a281c7a160c68b43051a28cbbcc652057bf25e8922f0d11eb448be1bbeec0d8589406df1fd86d6610120dd8319a922d86824aff82e8adbc56c1194bae80a7eb8750c542d1570b200cd2f22d4eaa19dbeb3e3488a5c157f2e772715de711317c2ec84bf3ff8a1fb53f305e6eadd5f1ff45f7a3e6a012b33b9063150747e0bf139a5262ad29d8b1c6b8251acffa9b67840de1b91e73570e0922ea84d77b92d13832a171c1df32c45c14f898cfc452d1bd18507bc28b9476686b5d7e0303fbd9a45b70ec14f0bc547e1ae586532a6f92fa62a87482960bd688216096eacc85aadc4b50bf9cc068609819b:tcp_ts=-600000:repeats=8\n--lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=0x16030102930100028f03038871b0b89409dc15ecd9fcad60d193e5c5760fc72b6db571056b6358bf11219520b6c7bd26642b4acf81fd0360013eedc0a4e22b2eb2e6965278ad4975b513b11e0022130113031302c02bc02fcca9cca8c02cc030c00ac009c013c014009c009d002f0035010002240000001500130000107777772e6f6e6574727573742e636f6d00170000ff01000100000a000e000c001d00170018001901000101000b00020100002300000010000e000c02683208687474702f312e310005000501000000000022000a000804030503060302030033006b0069001d0020cd2b99334466319ca6cfc5fb4b60274a866d0afd7962990c39d12028ebc527330017004104989834f5a94f51dbe0606a0406780c4112674954293563ab4536d730c4289ac095f2cd8463eb79163b6acc776d8a4062a56eab00f2668264e8a18db9bf461bea002b00050403040303000d0018001604030503060308040805080604010501060102030201002d00020101001c00024001fe0d01190000010001370020cfd99ab793198ad0060e91d9b0e107e8a18987e0ae2137bba48d6a5d8f103c3b00ef416fe1ce6767a281c7a160c68b43051a28cbbcc652057bf25e8922f0d11eb448be1bbeec0d8589406df1fd86d6610120dd8319a922d86824aff82e8adbc56c1194bae80a7eb8750c542d1570b200cd2f22d4eaa19dbeb3e3488a5c157f2e772715de711317c2ec84bf3ff8a1fb53f305e6eadd5f1ff45f7a3e6a012b33b9063150747e0bf139a5262ad29d8b1c6b8251acffa9b67840de1b91e73570e0922ea84d77b92d13832a171c1df32c45c14f898cfc452d1bd18507bc28b9476686b5d7e0303fbd9a45b70ec14f0bc547e1ae586532a6f92fa62a87482960bd688216096eacc85aadc4b50bf9cc068609819b:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general (ALT13) · Google TLS",
+      "name": "Host fake · Google",
       "release": "1.10.3",
       "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT13).bat",
       "scope": "Google TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:repeats=1\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n"
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:repeats=1\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n",
+      "id": "flowseal-8",
+      "originalName": "Flowseal 1.10.3 · general (ALT13) · Google TLS"
     },
     {
-      "name": "Flowseal 1.10.3 · general (ALT2) · Google TLS",
-      "release": "1.10.3",
-      "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT2).bat",
-      "scope": "Google TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=tls_clienthello:tcp_ts_up:ip_id=zero\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general (ALT2) · Общий TLS",
+      "name": "Multisplit · позиция 2",
       "release": "1.10.3",
       "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT2).bat",
       "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=tls_clienthello:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=multisplit:pos=2:seqovl=652:seqovl_pattern=tls_clienthello:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n",
+      "id": "flowseal-10",
+      "originalName": "Flowseal 1.10.3 · general (ALT2) · Общий TLS"
     },
     {
-      "name": "Flowseal 1.10.3 · general (ALT4) · Google TLS",
+      "name": "Fake · sequence 1000",
       "release": "1.10.3",
       "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT4).bat",
       "scope": "Google TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tcp_seq=1000:tcp_ack=-66000:ip_id=zero:repeats=6\n--lua-desync=multisplit:pos=2:tcp_ts_up:ip_id=zero\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tcp_seq=1000:tcp_ack=-66000:ip_id=zero:repeats=6\n--lua-desync=multisplit:pos=2:tcp_ts_up:ip_id=zero\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n",
+      "id": "flowseal-11",
+      "originalName": "Flowseal 1.10.3 · general (ALT4) · Google TLS"
     },
     {
-      "name": "Flowseal 1.10.3 · general (ALT4) · Общий TLS",
-      "release": "1.10.3",
-      "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT4).bat",
-      "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=0x000100502112a4425a4b4b7568477865706e64300006000951427a503a746e576b000000c0570004000003e7802a0008b6bcef7bb3f7289800250000002400046e001eff00080014aa4f94f91ff5cebedfec9e66add3dd9bb795ed6e802800042b1fb635:tcp_seq=1000:tcp_ack=-66000:repeats=6\n--lua-desync=fake:blob=tls_clienthello:tcp_seq=1000:tcp_ack=-66000:repeats=6\n--lua-desync=multisplit:pos=2:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general (ALT5) · Общий TLS",
+      "name": "SYN data",
       "release": "1.10.3",
       "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT5).bat",
       "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=empty,tls_client_hello\n--lua-desync=syndata:blob=0x00000000000000000000000000000000\n--lua-desync=multidisorder:pos=2:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
+      "args": "--filter-tcp=443\n--payload=empty,tls_client_hello\n--lua-desync=syndata:blob=0x00000000000000000000000000000000\n--lua-desync=multidisorder:pos=2:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n",
+      "id": "flowseal-13",
+      "originalName": "Flowseal 1.10.3 · general (ALT5) · Общий TLS"
     },
     {
-      "name": "Flowseal 1.10.3 · general (ALT6) · Google TLS",
-      "release": "1.10.3",
-      "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT6).bat",
-      "scope": "Google TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_clienthello:tcp_ts_up:ip_id=zero\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general (ALT6) · Общий TLS",
+      "name": "Multisplit · позиция 1",
       "release": "1.10.3",
       "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT6).bat",
       "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_clienthello:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_clienthello:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n",
+      "id": "flowseal-15",
+      "originalName": "Flowseal 1.10.3 · general (ALT6) · Общий TLS"
     },
     {
-      "name": "Flowseal 1.10.3 · general (ALT7) · Google TLS",
-      "release": "1.10.3",
-      "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT7).bat",
-      "scope": "Google TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=multisplit:pos=2,sniext+1:seqovl=679:seqovl_pattern=tls_clienthello:tcp_ts_up:ip_id=zero\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general (ALT7) · Общий TLS",
+      "name": "Multisplit · SNI",
       "release": "1.10.3",
       "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT7).bat",
       "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=multisplit:pos=2,sniext+1:seqovl=679:seqovl_pattern=tls_clienthello:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=multisplit:pos=2,sniext+1:seqovl=679:seqovl_pattern=tls_clienthello:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n",
+      "id": "flowseal-17",
+      "originalName": "Flowseal 1.10.3 · general (ALT7) · Общий TLS · multisplit"
     },
     {
-      "name": "Flowseal 1.10.3 · general (ALT7) · Общий TLS",
-      "release": "1.10.3",
-      "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT7).bat",
-      "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=empty,tls_client_hello\n--lua-desync=syndata:blob=0x00000000000000000000000000000000\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general (ALT8) · Google TLS",
+      "name": "Fake · sequence 2",
       "release": "1.10.3",
       "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT8).bat",
       "scope": "Google TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tcp_seq=2:tcp_ack=-66000:ip_id=zero:repeats=6\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tcp_seq=2:tcp_ack=-66000:ip_id=zero:repeats=6\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n",
+      "id": "flowseal-19",
+      "originalName": "Flowseal 1.10.3 · general (ALT8) · Google TLS"
     },
     {
-      "name": "Flowseal 1.10.3 · general (ALT8) · Общий TLS",
-      "release": "1.10.3",
-      "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT8).bat",
-      "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tcp_seq=2:tcp_ack=-66000:repeats=6\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general (ALT9) · Google TLS",
-      "release": "1.10.3",
-      "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT9).bat",
-      "scope": "Google TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:ip_id=zero:repeats=4\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general (ALT9) · Общий TLS",
+      "name": "Host fake · Ozon + MD5",
       "release": "1.10.3",
       "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT9).bat",
       "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-600000:tcp_md5:repeats=4\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-600000:tcp_md5:repeats=4\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n",
+      "id": "flowseal-22",
+      "originalName": "Flowseal 1.10.3 · general (ALT9) · Общий TLS · с TCP MD5"
     },
     {
-      "name": "Flowseal 1.10.3 · general (ALT9) · Общий TLS",
+      "name": "Host fake · Ozon",
       "release": "1.10.3",
       "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (ALT9).bat",
       "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-600000:repeats=4\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-600000:repeats=4\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n",
+      "id": "flowseal-23",
+      "originalName": "Flowseal 1.10.3 · general (ALT9) · Общий TLS · без TCP MD5"
     },
     {
-      "name": "Flowseal 1.10.3 · general (EXP) · Общий TLS",
+      "name": "Experimental · TLS blob",
       "release": "1.10.3",
       "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (EXP).bat",
       "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=0x16030102930100028f03038871b0b89409dc15ecd9fcad60d193e5c5760fc72b6db571056b6358bf11219520b6c7bd26642b4acf81fd0360013eedc0a4e22b2eb2e6965278ad4975b513b11e0022130113031302c02bc02fcca9cca8c02cc030c00ac009c013c014009c009d002f0035010002240000001500130000107777772e6f6e6574727573742e636f6d00170000ff01000100000a000e000c001d00170018001901000101000b00020100002300000010000e000c02683208687474702f312e310005000501000000000022000a000804030503060302030033006b0069001d0020cd2b99334466319ca6cfc5fb4b60274a866d0afd7962990c39d12028ebc527330017004104989834f5a94f51dbe0606a0406780c4112674954293563ab4536d730c4289ac095f2cd8463eb79163b6acc776d8a4062a56eab00f2668264e8a18db9bf461bea002b00050403040303000d0018001604030503060308040805080604010501060102030201002d00020101001c00024001fe0d01190000010001370020cfd99ab793198ad0060e91d9b0e107e8a18987e0ae2137bba48d6a5d8f103c3b00ef416fe1ce6767a281c7a160c68b43051a28cbbcc652057bf25e8922f0d11eb448be1bbeec0d8589406df1fd86d6610120dd8319a922d86824aff82e8adbc56c1194bae80a7eb8750c542d1570b200cd2f22d4eaa19dbeb3e3488a5c157f2e772715de711317c2ec84bf3ff8a1fb53f305e6eadd5f1ff45f7a3e6a012b33b9063150747e0bf139a5262ad29d8b1c6b8251acffa9b67840de1b91e73570e0922ea84d77b92d13832a171c1df32c45c14f898cfc452d1bd18507bc28b9476686b5d7e0303fbd9a45b70ec14f0bc547e1ae586532a6f92fa62a87482960bd688216096eacc85aadc4b50bf9cc068609819b:tcp_ts=-600000:repeats=4\n--lua-desync=multisplit:pos=1:seqovl=480:seqovl_pattern=0x000100642112a442d38a71c52e94b60f43e91da80006000c724d39586151326b5037566380220010437573746f6d5354554e2f312e303031002400046abc91e3802a000817c49b62d835aef1000800144e9327dab1650cf87942de16ac578339e60b74cd002500008055000431f78c4a80280004962de173:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n"
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=0x16030102930100028f03038871b0b89409dc15ecd9fcad60d193e5c5760fc72b6db571056b6358bf11219520b6c7bd26642b4acf81fd0360013eedc0a4e22b2eb2e6965278ad4975b513b11e0022130113031302c02bc02fcca9cca8c02cc030c00ac009c013c014009c009d002f0035010002240000001500130000107777772e6f6e6574727573742e636f6d00170000ff01000100000a000e000c001d00170018001901000101000b00020100002300000010000e000c02683208687474702f312e310005000501000000000022000a000804030503060302030033006b0069001d0020cd2b99334466319ca6cfc5fb4b60274a866d0afd7962990c39d12028ebc527330017004104989834f5a94f51dbe0606a0406780c4112674954293563ab4536d730c4289ac095f2cd8463eb79163b6acc776d8a4062a56eab00f2668264e8a18db9bf461bea002b00050403040303000d0018001604030503060308040805080604010501060102030201002d00020101001c00024001fe0d01190000010001370020cfd99ab793198ad0060e91d9b0e107e8a18987e0ae2137bba48d6a5d8f103c3b00ef416fe1ce6767a281c7a160c68b43051a28cbbcc652057bf25e8922f0d11eb448be1bbeec0d8589406df1fd86d6610120dd8319a922d86824aff82e8adbc56c1194bae80a7eb8750c542d1570b200cd2f22d4eaa19dbeb3e3488a5c157f2e772715de711317c2ec84bf3ff8a1fb53f305e6eadd5f1ff45f7a3e6a012b33b9063150747e0bf139a5262ad29d8b1c6b8251acffa9b67840de1b91e73570e0922ea84d77b92d13832a171c1df32c45c14f898cfc452d1bd18507bc28b9476686b5d7e0303fbd9a45b70ec14f0bc547e1ae586532a6f92fa62a87482960bd688216096eacc85aadc4b50bf9cc068609819b:tcp_ts=-600000:repeats=4\n--lua-desync=multisplit:pos=1:seqovl=480:seqovl_pattern=0x000100642112a442d38a71c52e94b60f43e91da80006000c724d39586151326b5037566380220010437573746f6d5354554e2f312e303031002400046abc91e3802a000817c49b62d835aef1000800144e9327dab1650cf87942de16ac578339e60b74cd002500008055000431f78c4a80280004962de173:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n",
+      "id": "flowseal-24",
+      "originalName": "Flowseal 1.10.3 · general (EXP) · Общий TLS"
     },
     {
-      "name": "Flowseal 1.10.3 · general (FAKE TLS AUTO ALT) · Google TLS",
-      "release": "1.10.3",
-      "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (FAKE TLS AUTO ALT).bat",
-      "scope": "Google TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tls_mod=rnd,dupsid,sni=www.google.com:tcp_seq=2:tcp_ack=-66000:ip_id=zero:repeats=8\n--lua-desync=fakedsplit:pos=1:pattern=0x00:tcp_seq=2:tcp_ack=-66000:repeats=8:ip_id=zero\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general (FAKE TLS AUTO ALT) · Общий TLS",
+      "name": "TLS auto · sequence 2",
       "release": "1.10.3",
       "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (FAKE TLS AUTO ALT).bat",
       "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tls_mod=rnd,dupsid,sni=www.google.com:tcp_seq=2:tcp_ack=-66000:repeats=8\n--lua-desync=fakedsplit:pos=1:pattern=0x00:tcp_seq=2:tcp_ack=-66000:repeats=8\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n"
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tls_mod=rnd,dupsid,sni=www.google.com:tcp_seq=2:tcp_ack=-66000:repeats=8\n--lua-desync=fakedsplit:pos=1:pattern=0x00:tcp_seq=2:tcp_ack=-66000:repeats=8\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n",
+      "id": "flowseal-26",
+      "originalName": "Flowseal 1.10.3 · general (FAKE TLS AUTO ALT) · Общий TLS"
     },
     {
-      "name": "Flowseal 1.10.3 · general (FAKE TLS AUTO ALT2) · Google TLS",
-      "release": "1.10.3",
-      "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (FAKE TLS AUTO ALT2).bat",
-      "scope": "Google TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tls_mod=rnd,dupsid,sni=www.google.com:tcp_seq=10000000:tcp_ack=-66000:ip_id=zero:repeats=8\n--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_clienthello:tcp_ts_up:ip_id=zero\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general (FAKE TLS AUTO ALT2) · Общий TLS",
+      "name": "TLS auto · sequence 10000000",
       "release": "1.10.3",
       "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (FAKE TLS AUTO ALT2).bat",
       "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tls_mod=rnd,dupsid,sni=www.google.com:tcp_seq=10000000:tcp_ack=-66000:repeats=8\n--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_clienthello:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n"
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tls_mod=rnd,dupsid,sni=www.google.com:tcp_seq=10000000:tcp_ack=-66000:repeats=8\n--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_clienthello:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n",
+      "id": "flowseal-28",
+      "originalName": "Flowseal 1.10.3 · general (FAKE TLS AUTO ALT2) · Общий TLS"
     },
     {
-      "name": "Flowseal 1.10.3 · general (FAKE TLS AUTO ALT3) · Google TLS",
-      "release": "1.10.3",
-      "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (FAKE TLS AUTO ALT3).bat",
-      "scope": "Google TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tls_mod=rnd,dupsid,sni=www.google.com:tcp_ts=-600000:ip_id=zero:repeats=8\n--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_clienthello:tcp_ts_up:ip_id=zero\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general (FAKE TLS AUTO ALT3) · Общий TLS",
+      "name": "TLS auto · timestamp",
       "release": "1.10.3",
       "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (FAKE TLS AUTO ALT3).bat",
       "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tls_mod=rnd,dupsid,sni=www.google.com:tcp_ts=-600000:repeats=8\n--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_clienthello:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n"
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tls_mod=rnd,dupsid,sni=www.google.com:tcp_ts=-600000:repeats=8\n--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=tls_clienthello:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n",
+      "id": "flowseal-30",
+      "originalName": "Flowseal 1.10.3 · general (FAKE TLS AUTO ALT3) · Общий TLS"
     },
     {
-      "name": "Flowseal 1.10.3 · general (FAKE TLS AUTO) · Google TLS",
-      "release": "1.10.3",
-      "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (FAKE TLS AUTO).bat",
-      "scope": "Google TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=0x00000000:tls_mod=rnd,dupsid,sni=www.google.com:tcp_seq=-10000:tcp_ack=-66000:ip_id=zero:repeats=11\n--lua-desync=fake:blob=reasm_data:tls_mod=rnd,dupsid,sni=www.google.com:tcp_seq=-10000:tcp_ack=-66000:ip_id=zero:repeats=11\n--lua-desync=multidisorder:pos=1,midsld:tcp_ts_up:ip_id=zero\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general (FAKE TLS AUTO) · Общий TLS",
-      "release": "1.10.3",
-      "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (FAKE TLS AUTO).bat",
-      "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=0x00000000:tls_mod=rnd,dupsid,sni=www.google.com:tcp_seq=-10000:tcp_ack=-66000:repeats=11\n--lua-desync=fake:blob=reasm_data:tls_mod=rnd,dupsid,sni=www.google.com:tcp_seq=-10000:tcp_ack=-66000:repeats=11\n--lua-desync=multidisorder:pos=1,midsld:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general (SIMPLE FAKE ALT) · Общий TLS",
-      "release": "1.10.3",
-      "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (SIMPLE FAKE ALT).bat",
-      "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=0x000100642112a442d38a71c52e94b60f43e91da80006000c724d39586151326b5037566380220010437573746f6d5354554e2f312e303031002400046abc91e3802a000817c49b62d835aef1000800144e9327dab1650cf87942de16ac578339e60b74cd002500008055000431f78c4a80280004962de173:tcp_seq=2:tcp_ack=-66000:repeats=6\n--lua-desync=fake:blob=tls_clienthello:tcp_seq=2:tcp_ack=-66000:repeats=6\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general (SIMPLE FAKE ALT2) · Общий TLS",
-      "release": "1.10.3",
-      "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (SIMPLE FAKE ALT2).bat",
-      "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=0x000100642112a442d38a71c52e94b60f43e91da80006000c724d39586151326b5037566380220010437573746f6d5354554e2f312e303031002400046abc91e3802a000817c49b62d835aef1000800144e9327dab1650cf87942de16ac578339e60b74cd002500008055000431f78c4a80280004962de173:tcp_ts=-600000:repeats=6\n--lua-desync=fake:blob=0x16030102930100028f03038871b0b89409dc15ecd9fcad60d193e5c5760fc72b6db571056b6358bf11219520b6c7bd26642b4acf81fd0360013eedc0a4e22b2eb2e6965278ad4975b513b11e0022130113031302c02bc02fcca9cca8c02cc030c00ac009c013c014009c009d002f0035010002240000001500130000107777772e6f6e6574727573742e636f6d00170000ff01000100000a000e000c001d00170018001901000101000b00020100002300000010000e000c02683208687474702f312e310005000501000000000022000a000804030503060302030033006b0069001d0020cd2b99334466319ca6cfc5fb4b60274a866d0afd7962990c39d12028ebc527330017004104989834f5a94f51dbe0606a0406780c4112674954293563ab4536d730c4289ac095f2cd8463eb79163b6acc776d8a4062a56eab00f2668264e8a18db9bf461bea002b00050403040303000d0018001604030503060308040805080604010501060102030201002d00020101001c00024001fe0d01190000010001370020cfd99ab793198ad0060e91d9b0e107e8a18987e0ae2137bba48d6a5d8f103c3b00ef416fe1ce6767a281c7a160c68b43051a28cbbcc652057bf25e8922f0d11eb448be1bbeec0d8589406df1fd86d6610120dd8319a922d86824aff82e8adbc56c1194bae80a7eb8750c542d1570b200cd2f22d4eaa19dbeb3e3488a5c157f2e772715de711317c2ec84bf3ff8a1fb53f305e6eadd5f1ff45f7a3e6a012b33b9063150747e0bf139a5262ad29d8b1c6b8251acffa9b67840de1b91e73570e0922ea84d77b92d13832a171c1df32c45c14f898cfc452d1bd18507bc28b9476686b5d7e0303fbd9a45b70ec14f0bc547e1ae586532a6f92fa62a87482960bd688216096eacc85aadc4b50bf9cc068609819b:tcp_ts=-600000:repeats=6\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general (SIMPLE FAKE) · Google TLS",
-      "release": "1.10.3",
-      "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (SIMPLE FAKE).bat",
-      "scope": "Google TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:ip_id=zero:repeats=1\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general (SIMPLE FAKE) · Общий TLS",
-      "release": "1.10.3",
-      "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general (SIMPLE FAKE).bat",
-      "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tcp_ts=-600000:repeats=6\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general · Общий TLS",
+      "name": "Multisplit · свой шаблон",
       "release": "1.10.3",
       "source": "https://github.com/Flowseal/zapret-discord-youtube/blob/1.10.3/general.bat",
       "scope": "Общий TLS",
-      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=multisplit:pos=1:seqovl=568:seqovl_pattern=0x1603010117010001130303d5ad552b42c4c6a2d54622f31b3c41f6e5d9f48f866d36c46e7da92d4010dc7020f9aedd547996a5b68d8ddeba00abc0735dd66440c1b26aba66dba0fecc7f1c33002813021301c02cc02bc030c02fc024c023c028c027c00ac009c014c013009d009c003d003c0035002f010000a20000000c000a000007347064612e746f000500050100000000002b00050403040303000d001a001808040805080604010501020104030503020302020601060300230000000a00080006001d00170018000b000201000010000b000908687474702f312e31003300260024001d0020da0fc18ad8f155a28f26d1be4f3261dd3d593da905e9afdbd9146df55879d65e0031000000170000ff01000100002d00020101:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
-    }
-  ],
-  "skipped": [
-    {
-      "name": "Flowseal 1.10.3 · general (ALT13) · Общий TLS",
-      "reason": "Installed Lua has no hostfakesplit altorder=1"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general (ALT13) · Общий TLS",
-      "reason": "Installed Lua has no hostfakesplit altorder=1"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general (ALT3) · Google TLS",
-      "reason": "Installed Lua has no hostfakesplit altorder=1"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general (ALT3) · Общий TLS",
-      "reason": "Installed Lua has no hostfakesplit altorder=1"
-    },
-    {
-      "name": "Flowseal 1.10.3 · general (ALT3) · Общий TLS",
-      "reason": "Installed Lua has no hostfakesplit altorder=1"
-    },
-    {
-      "name": "Flowseal 1.10.2 · general (ALT13) · Общий TLS",
-      "reason": "Installed Lua has no hostfakesplit altorder=1"
-    },
-    {
-      "name": "Flowseal 1.10.2 · general (ALT13) · Общий TLS",
-      "reason": "Installed Lua has no hostfakesplit altorder=1"
-    },
-    {
-      "name": "Flowseal 1.10.2 · general (ALT3) · Google TLS",
-      "reason": "Installed Lua has no hostfakesplit altorder=1"
-    },
-    {
-      "name": "Flowseal 1.10.2 · general (ALT3) · Общий TLS",
-      "reason": "Installed Lua has no hostfakesplit altorder=1"
-    },
-    {
-      "name": "Flowseal 1.10.2 · general (ALT3) · Общий TLS",
-      "reason": "Installed Lua has no hostfakesplit altorder=1"
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=multisplit:pos=1:seqovl=568:seqovl_pattern=0x1603010117010001130303d5ad552b42c4c6a2d54622f31b3c41f6e5d9f48f866d36c46e7da92d4010dc7020f9aedd547996a5b68d8ddeba00abc0735dd66440c1b26aba66dba0fecc7f1c33002813021301c02cc02bc030c02fc024c023c028c027c00ac009c014c013009d009c003d003c0035002f010000a20000000c000a000007347064612e746f000500050100000000002b00050403040303000d001a001808040805080604010501020104030503020302020601060300230000000a00080006001d00170018000b000201000010000b000908687474702f312e31003300260024001d0020da0fc18ad8f155a28f26d1be4f3261dd3d593da905e9afdbd9146df55879d65e0031000000170000ff01000100002d00020101:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n",
+      "id": "flowseal-37",
+      "originalName": "Flowseal 1.10.3 · general · Общий TLS"
     }
   ]
 }

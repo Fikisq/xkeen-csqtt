@@ -10,8 +10,10 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
+	"sync"
 	"syscall"
 	"time"
 
@@ -19,24 +21,31 @@ import (
 	"github.com/quic-go/quic-go/http3"
 )
 
+var probeInterface string
+
 type result struct {
-	Protocol  string `json:"protocol"`
-	URL       string `json:"url"`
-	OK        bool   `json:"ok"`
-	Status    int    `json:"status,omitempty"`
-	Error     string `json:"error,omitempty"`
-	ElapsedMs int64  `json:"elapsedMs"`
+	ErrorStage   string   `json:"errorStage,omitempty"`
+	RemoteIP     string   `json:"remoteIp,omitempty"`
+	DNSAddresses []string `json:"dnsAddresses,omitempty"`
+	Interface    string   `json:"interface,omitempty"`
+	Protocol     string   `json:"protocol"`
+	URL          string   `json:"url"`
+	OK           bool     `json:"ok"`
+	Status       int      `json:"status,omitempty"`
+	Error        string   `json:"error,omitempty"`
+	ElapsedMs    int64    `json:"elapsedMs"`
 }
 
 func main() {
-	protocol := flag.String("protocol", "tcp", "tcp, h3 or both")
+	flag.StringVar(&probeInterface, "interface", "", "bind diagnostic sockets to this WAN interface")
+	protocol := flag.String("protocol", "tcp", "tcp, h3, both or connect (TCP handshake only)")
 	target := flag.String("url", "", "HTTPS URL to check")
 	mark := flag.Int("mark", 833, "Linux socket mark")
 	seconds := flag.Int("timeout", 5, "timeout per request in seconds (2-15)")
 	version := flag.Bool("version", false, "print probe version")
 	flag.Parse()
 	if *version {
-		fmt.Println("xkeen-nfqws-probe 2")
+		fmt.Println("xkeen-nfqws-probe 4")
 		return
 	}
 	if *seconds < 2 || *seconds > 15 {
@@ -58,16 +67,16 @@ func main() {
 
 func check(p, u string, m, seconds int) (out result) {
 	protocol, target, mark := &p, &u, &m
-	out = result{Protocol: *protocol, URL: *target}
+	out = result{Protocol: *protocol, URL: *target, Interface: probeInterface}
 	started := time.Now()
 	defer func() { out.ElapsedMs = time.Since(started).Milliseconds() }()
-	if *protocol != "tcp" && *protocol != "h3" {
+	if *protocol != "tcp" && *protocol != "h3" && *protocol != "connect" {
 		out.Error = "unknown protocol"
 		return out
 	}
 	parsed, err := url.Parse(*target)
-	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.Port() != "" {
-		out.Error = "HTTPS URL without custom port required"
+	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Hostname() == "" || parsed.Port() != "" {
+		out.Error = "HTTP(S) URL without custom port required"
 		return out
 	}
 	if *mark < 0 || *mark > 65535 {
@@ -76,12 +85,72 @@ func check(p, u string, m, seconds int) (out result) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(seconds)*time.Second)
 	defer cancel()
+	var traceMu sync.Mutex
+	stage := "dns"
+	remoteIP := ""
+	var dnsAddresses []string
+	setStage := func(next string) { traceMu.Lock(); stage = next; traceMu.Unlock() }
+	defer func() {
+		traceMu.Lock()
+		defer traceMu.Unlock()
+		out.RemoteIP = remoteIP
+		out.DNSAddresses = append([]string(nil), dnsAddresses...)
+		if out.Error != "" {
+			out.ErrorStage = stage
+		}
+	}()
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		DNSStart: func(httptrace.DNSStartInfo) { setStage("dns") },
+		DNSDone: func(info httptrace.DNSDoneInfo) {
+			traceMu.Lock()
+			for _, ip := range info.Addrs {
+				dnsAddresses = append(dnsAddresses, ip.IP.String())
+			}
+			traceMu.Unlock()
+		},
+		ConnectStart: func(_, addr string) {
+			traceMu.Lock()
+			stage = "tcp-connect"
+			remoteIP, _, _ = net.SplitHostPort(addr)
+			traceMu.Unlock()
+		},
+		TLSHandshakeStart: func() { setStage("tls-handshake") },
+		TLSHandshakeDone: func(_ tls.ConnectionState, err error) {
+			if err == nil {
+				setStage("http-response")
+			}
+		},
+		GotFirstResponseByte: func() { setStage("http-body") },
+	})
 	control := func(_, _ string, c syscall.RawConn) error {
 		var setErr error
-		if err := c.Control(func(fd uintptr) { setErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_MARK, *mark) }); err != nil {
+		if err := c.Control(func(fd uintptr) {
+			setErr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, syscall.SO_MARK, *mark)
+			if setErr == nil && probeInterface != "" {
+				setErr = syscall.SetsockoptString(int(fd), syscall.SOL_SOCKET, syscall.SO_BINDTODEVICE, probeInterface)
+			}
+		}); err != nil {
 			return err
 		}
 		return setErr
+	}
+	if *protocol == "connect" {
+		port := "443"
+		if parsed.Scheme == "http" {
+			port = "80"
+		}
+		dialer := &net.Dialer{Timeout: time.Duration(seconds) * time.Second, Control: control}
+		conn, err := dialer.DialContext(ctx, "tcp4", net.JoinHostPort(parsed.Hostname(), port))
+		if err != nil {
+			out.Error = err.Error()
+			return out
+		}
+		traceMu.Lock()
+		remoteIP, _, _ = net.SplitHostPort(conn.RemoteAddr().String())
+		traceMu.Unlock()
+		_ = conn.Close()
+		out.OK = true
+		return out
 	}
 	var transport http.RoundTripper
 	var closeTransport func()
@@ -121,6 +190,10 @@ func check(p, u string, m, seconds int) (out result) {
 			if remote == nil {
 				return nil, errors.New("no IPv4 address")
 			}
+			traceMu.Lock()
+			remoteIP = remote.IP.String()
+			stage = "quic-handshake"
+			traceMu.Unlock()
 			return quic.DialEarly(dialCtx, packet, remote, tlsCfg, cfg)
 		}}
 		transport = t

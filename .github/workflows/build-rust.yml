@@ -10,6 +10,8 @@ jobs:
   validate_version:
     runs-on: ubuntu-latest
     steps:
+      - name: Require main branch
+        run: test "$GITHUB_REF" = refs/heads/main
       - name: Validate version format
         env:
           RELEASE_VERSION: ${{ inputs.version }}
@@ -25,7 +27,7 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: Build frontend
         working-directory: frontend
-        run: bun install && bun run build
+        run: bun install --frozen-lockfile && bun run build
       - uses: actions/upload-artifact@v7
         with:
           name: frontend-dist
@@ -101,9 +103,10 @@ jobs:
           cp -r ../frontend/dist ./dist
           sed -i 's|\.\./frontend/dist|./dist|' src/frontend_embedder.rs
           # cross mounts backend/ only; embedded strategy inputs live in router/.
-          mkdir -p router-assets
-          cp ../router/nfqws2-games.args ../router/nfqws2-flowseal.json router-assets/
-          sed -i 's|../../router/nfqws2-|../router-assets/nfqws2-|g' src/nfqws2_search.rs
+          mkdir -p router-assets/nfqws2-blobs
+          cp ../router/nfqws2-games.args ../router/nfqws2-flowseal.json ../router/xkeen-manager router-assets/
+          cp ../router/nfqws2-blobs/*.bin router-assets/nfqws2-blobs/
+          sed -i 's|../../router/|../router-assets/|g' src/nfqws2_search.rs src/nfqws2_catalog.rs src/nfqws2_assets.rs src/management_script.rs
 
       - name: Build binary
         working-directory: backend

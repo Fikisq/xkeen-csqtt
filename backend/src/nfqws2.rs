@@ -8,6 +8,10 @@ use tokio::sync::Mutex;
 use crate::types::AppState;
 #[path = "nfqws2_search.rs"]
 pub(crate) mod search;
+#[path = "nfqws2_catalog.rs"]
+pub(crate) mod catalog;
+#[path="nfqws2_assets.rs"]
+mod assets;
 
 const CANARY: &str = "/opt/etc/xkeen/nfqws2-stage/canary.sh";
 const ENGINE: &str = "/opt/etc/xkeen/nfqws2-stage/engine";
@@ -34,6 +38,23 @@ struct Preview {
     report: Value,
     mode: String,
     args: String,
+}
+const REQUIRED_TCP_SITES: u64 = 2;
+const TEST_SITES: [&str; 2] = ["https://www.youtube.com/generate_204", "https://discord.com/"];
+
+// Recount stored evidence by URL so a removed target cannot inflate the new counters.
+fn normalise_report(report: &mut Value) {
+    let rows: Vec<Value> = report["results"].as_array().into_iter().flatten()
+        .filter(|row| row["url"].as_str().is_some_and(|url| TEST_SITES.contains(&url)))
+        .cloned().collect();
+    let count = |protocol: &str| rows.iter().filter(|row| row["protocol"] == protocol && row["ok"] == true)
+        .filter_map(|row| row["url"].as_str()).collect::<std::collections::HashSet<_>>().len();
+    let tcp = count("tcp"); let quic = count("h3");
+    report["results"] = json!(rows);
+    report["tcpSites"] = json!(tcp); report["http3Sites"] = json!(quic);
+    report["siteCount"] = json!(2); report["requiredTcpSites"] = json!(REQUIRED_TCP_SITES);
+    report["tcpWorking"] = json!(tcp == 2); report["quicWorking"] = json!(quic > 0);
+    report["verifiedTransport"] = json!(if tcp == 2 && quic > 0 { "tcp-quic" } else if tcp == 2 { "tcp" } else { "none" });
 }
 const YOUTUBE: &str = "https://www.youtube.com/generate_204";
 const TCP_LUA: [&str; 2] = [
@@ -95,6 +116,12 @@ fn matching_check() -> Option<Value> {
             age.num_seconds() >= 0 && age.num_minutes() < 30
         });
     if value.get("strategyKey").and_then(Value::as_str) != Some(key.as_str()) { return None; }
+    normalise_report(&mut value);
+    let tcp_ok = value["tcpSites"].as_u64().unwrap_or(0) >= REQUIRED_TCP_SITES;
+    let quic_ok = value["http3Sites"].as_u64().unwrap_or(0) >= 1;
+    value["tcpWorking"] = json!(tcp_ok);
+    value["verifiedTransport"] = json!(if tcp_ok && quic_ok { "tcp-quic" } else if tcp_ok { "tcp" } else { "none" });
+    value["requiredTcpSites"] = json!(REQUIRED_TCP_SITES);
     value["stale"] = json!(!fresh);
     Some(value)
 }
@@ -122,7 +149,8 @@ fn settings_json() -> Value {
         "tcpLua": if custom_args.trim().is_empty() { TCP_LUA.to_vec() } else { custom_args.lines().filter(|line| line.starts_with("--lua-desync=") && !line.contains("quic_initial")).collect::<Vec<_>>() },
         "quicLua": if custom_args.trim().is_empty() { QUIC_LUA[0] } else { custom_args.lines().find(|line| line.contains("quic_initial") && line.starts_with("--lua-desync=")).unwrap_or(QUIC_LUA[0]) },
         "lastCheck": matching_check(),
-        "library": search::saved(),
+        "library": search::successful(),
+        "requiredTcpSites": REQUIRED_TCP_SITES,
         "globalReady": global_ready,
         "scope": if global_ready {
             "В селекторах выберите nfqws2 для нужных маршрутов. Они пойдут напрямую с обходом DPI; прочие маршруты останутся как настроены."
@@ -182,6 +210,7 @@ pub fn start_reconciler() {
             if status_json().await["running"] != true { continue; }
             let current_mode = profile();
             let current_args = std::fs::read_to_string(CUSTOM).unwrap_or_default();
+            if search::is_running().await { continue; }
             search::reset_cancel();
             let healthy = match run_probe("preset", &current_mode, &current_args).await {
                 Ok(report) => {
@@ -266,7 +295,7 @@ fn candidate(request: &SettingsRequest) -> Result<(String, String), String> {
         || !lines.iter().any(|line| *line == "--filter-tcp=443")
         || !lines.iter().any(|line| line.starts_with("--lua-desync="))
         || lines.iter().any(|line| line.len() > 8192 || line.bytes().any(|byte| byte.is_ascii_whitespace() || byte < 33 || byte > 126)
-            || !matches!(*line, "--new" | "--filter-tcp=443" | "--filter-udp=443" | "--payload=tls_client_hello" | "--payload=quic_initial"
+            || !matches!(*line, "--new" | "--filter-tcp=80" | "--filter-l7=tls" | "--filter-l7=http" | "--filter-l7=quic" | "--payload=http_req" | "--payload=empty" | "--out-range=<s1" | "--out-range=s1<d1" | "--filter-tcp=443" | "--filter-udp=443" | "--payload=tls_client_hello" | "--payload=quic_initial"
                 | "--payload=empty,tls_client_hello" | "--filter-tcp=2053,2083,2087,2096,8443"
                 | "--filter-udp=19294-19344,50000-50100" | "--filter-udp=1024-65535"
                 | "--filter-l7=discord,stun" | "--filter-l7=unknown" | "--payload=discord_ip_discovery,stun" | "--payload=unknown" | "--out-range=-n2")
@@ -285,8 +314,27 @@ async fn run_probe(source: &str, mode: &str, custom: &str) -> Result<Value, Stri
 async fn probe_ready() -> Result<(), String> {
     let output = tokio::time::timeout(Duration::from_secs(3), Command::new(PROBE).arg("-version").kill_on_drop(true).output()).await
         .map_err(|_| "Утилита проверки nfqws2 не ответила")?.map_err(|e| e.to_string())?;
-    if !output.status.success() || String::from_utf8_lossy(&output.stdout).trim() != "xkeen-nfqws-probe 2" {
-        return Err("Обновите утилиту проверки nfqws2: установленная версия не поддерживает быструю проверку TCP + QUIC".into());
+    if !output.status.success() || String::from_utf8_lossy(&output.stdout).trim() != "xkeen-nfqws-probe 4" {
+        return Err("Обновите утилиту проверки nfqws2: нужна версия с отдельной TCP-предпроверкой".into());
+    }
+    Ok(())
+}
+
+fn validate_probe_results(results: &[Value], mode: &str) -> Result<(), String> {
+    let expected = if mode == "tcp-quic" { 4 } else { 2 };
+    if results.len() != expected { return Err("Проверка не вернула результаты всех сайтов".into()); }
+    let mut seen = std::collections::HashSet::new();
+    let mut wan: Option<&str> = None;
+    for result in results {
+        let protocol = result["protocol"].as_str().unwrap_or_default();
+        let url = result["url"].as_str().unwrap_or_default();
+        let device = result["interface"].as_str().unwrap_or_default();
+        if !TEST_SITES.contains(&url) || !(protocol == "tcp" || (mode == "tcp-quic" && protocol == "h3"))
+            || result["ok"].as_bool().is_none() || !seen.insert((protocol, url)) {
+            return Err("Проверка вернула повторный или неизвестный результат сайта".into());
+        }
+        if device.is_empty() || wan.is_some_and(|previous| previous != device) { return Err("Проверка не подтвердила привязку соединений к WAN".into()); }
+        wan = Some(device);
     }
     Ok(())
 }
@@ -296,6 +344,7 @@ async fn run_probe_timeout(source: &str, mode: &str, custom: &str, seconds: u64)
         return Err("Проверка TCP/HTTP3 ещё не установлена".into());
     }
     probe_ready().await?;
+    if custom.contains("fs_quic_google") || custom.contains("fs_tls_max") { assets::install_assets().await?; }
     tokio::fs::write(PROBE_CANDIDATE, custom).await.map_err(|e| e.to_string())?;
     tokio::fs::set_permissions(PROBE_CANDIDATE, std::fs::Permissions::from_mode(0o600)).await.map_err(|e| e.to_string())?;
     let script_source = if custom.trim().is_empty() { "preset" } else { "custom" };
@@ -317,11 +366,11 @@ async fn run_probe_timeout(source: &str, mode: &str, custom: &str, seconds: u64)
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
         .filter(|item| item.get("protocol").and_then(Value::as_str).is_some_and(|protocol| matches!(protocol, "tcp" | "h3")))
         .collect();
-    let expected = if mode == "tcp-quic" { 6 } else { 3 };
-    if results.len() != expected { return Err("Проверка не вернула результаты всех сайтов".into()); }
+    validate_probe_results(&results, mode)?;
+    let interfaces: Vec<_> = results.iter().filter_map(|result| result["interface"].as_str()).collect();
     let tcp_sites = results.iter().filter(|item| item["protocol"] == "tcp" && item["ok"] == true).count();
     let http3_sites = results.iter().filter(|item| item["protocol"] == "h3" && item["ok"] == true).count();
-    let tcp_working = tcp_sites >= 2;
+    let tcp_working = tcp_sites as u64 >= REQUIRED_TCP_SITES;
     let quic_working = http3_sites > 0;
     Ok(json!({
         "success": true,
@@ -330,10 +379,13 @@ async fn run_probe_timeout(source: &str, mode: &str, custom: &str, seconds: u64)
         "strategyKey": strategy_key(source, mode, custom),
         "checkedAt": chrono::Utc::now().to_rfc3339(),
         "tcpWorking": tcp_working,
+        "requiredTcpSites": REQUIRED_TCP_SITES,
         "quicWorking": quic_working,
         "tcpSites": tcp_sites,
         "http3Sites": http3_sites,
-        "siteCount": 3,
+        "siteCount": 2,
+        "wanInterface": interfaces.first(),
+        "directWan": true,
         "verifiedTransport": if tcp_working && quic_working { "tcp-quic" } else if tcp_working { "tcp" } else { "none" },
         "results": results,
         "args": custom,
@@ -343,7 +395,7 @@ async fn run_probe_timeout(source: &str, mode: &str, custom: &str, seconds: u64)
 fn healthy_report(report: &Value, mode: &str) -> bool {
     let tcp_sites = report["tcpSites"].as_u64().unwrap_or(0);
     let http3_sites = report["http3Sites"].as_u64().unwrap_or(0);
-    tcp_sites >= 2 && (mode == "tcp" || http3_sites >= 1)
+    tcp_sites >= REQUIRED_TCP_SITES && (mode == "tcp" || http3_sites >= 1)
 }
 
 async fn scan_preset() -> Result<(Value, String, String), String> {
@@ -462,7 +514,7 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
         return Json(json!({"success": false, "error": "Подбор не подтвердил QUIC. Текущая стратегия TCP + QUIC сохранена", "check": check}));
     }
     if !healthy_report(&check, &next_mode) {
-        return Json(json!({"success": false, "error": "Проверка не подтвердила TCP и выбранный транспорт QUIC; прежняя стратегия сохранена", "check": check}));
+        return Json(json!({"success": false, "error": "Для применения нужны ответы обоих сайтов по TCP (2/2) и проверка выбранного транспорта QUIC; прежняя стратегия сохранена", "check": check}));
     }
     if let Err(error) = apply_checked(&next_mode, &next_custom, request.source == "preset", &check).await {
         return Json(json!({"success": false, "error": error}));
@@ -471,7 +523,9 @@ pub async fn save_settings(State(_state): State<AppState>, Json(request): Json<S
 }
 
 pub async fn status(State(_state): State<AppState>) -> Json<Value> {
-    Json(status_json().await)
+    let mut status = status_json().await;
+    status["search"] = search::summary().await;
+    Json(status)
 }
 
 pub async fn attach_xray(State(_state): State<AppState>) -> Json<Value> {

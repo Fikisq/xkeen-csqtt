@@ -7,6 +7,7 @@ use tokio::sync::Mutex;
 use crate::types::{AppState, VERSION};
 
 const URL: &str = "https://api.github.com/repos/Fikisq/xkeen-csqtt/releases?per_page=20";
+const CHECK_INTERVAL: Duration = Duration::from_secs(12 * 60 * 60);
 type CachedReleases = Option<(Instant, Vec<Value>)>;
 static CACHE: OnceLock<Mutex<CachedReleases>> = OnceLock::new();
 
@@ -48,7 +49,7 @@ async fn download(state: &AppState) -> Result<Vec<Value>, String> {
 pub async fn list(State(state): State<AppState>, Query(query): Query<ReleaseQuery>) -> Json<Value> {
     let mut cache = CACHE.get_or_init(|| Mutex::new(None)).lock().await;
     if let Some((checked, releases)) = cache.as_ref() {
-        if checked.elapsed() < Duration::from_secs(1800)
+        if checked.elapsed() < CHECK_INTERVAL
             && (!query.refresh || checked.elapsed() < Duration::from_secs(60)) {
             return Json(json!({"success":true,"currentVersion":VERSION,"releases":releases,"stale":false}));
         }
@@ -64,4 +65,16 @@ pub async fn list(State(state): State<AppState>, Query(query): Query<ReleaseQuer
             None => Json(json!({"success":false,"currentVersion":VERSION,"releases":[],"error":error})),
         },
     }
+}
+
+/// Refresh independently of whether anyone has the panel open in a browser.
+pub fn start(state: AppState) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(CHECK_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            interval.tick().await;
+            let _ = list(State(state.clone()), Query(ReleaseQuery::default())).await;
+        }
+    });
 }

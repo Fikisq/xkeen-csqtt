@@ -5,6 +5,9 @@ mod router_device_id;
 mod panel_releases;
 mod panel_update;
 mod auth;
+mod management_script;
+mod terminal;
+mod terminal_session;
 mod backuper;
 mod configs;
 mod controller;
@@ -30,6 +33,7 @@ mod xray_wire;
 mod device_bypass;
 mod node_metadata;
 mod nfqws2;
+mod nfqws2_session;
 mod ruleset_inspector;
 mod settings;
 mod service_lifecycle;
@@ -475,6 +479,10 @@ async fn main() {
     };
 
     xray_subscription_refresh::start(state.clone());
+    if let Err(error) = management_script::install() {
+        log("ERROR", format!("Установка xkeen-manager: {error}"));
+    }
+    panel_releases::start(state.clone());
     geodata_update::start(state.clone());
     nfqws2::start_reconciler();
     csqtt_health::start();
@@ -567,9 +575,12 @@ async fn main() {
         .route("/api/nfqws2/control", post(nfqws2::control))
         .route("/api/nfqws2/settings", get(nfqws2::get_settings).post(nfqws2::save_settings))
         .route("/api/nfqws2/check", post(nfqws2::check_strategy))
+        .route("/api/nfqws2/session", get(nfqws2_session::status).post(nfqws2_session::start))
+        .route("/api/nfqws2/session/update", post(nfqws2_session::update))
         .route("/api/diagnostics/connections", get(connection_diagnostics::inspect))
         .route("/api/nfqws2/search", get(nfqws2::search::status).post(nfqws2::search::start))
         .route("/api/nfqws2/search/cancel", post(nfqws2::search::cancel))
+        .route("/api/nfqws2/strategies", get(nfqws2::catalog::get).post(nfqws2::catalog::save))
         .route("/api/nfqws2/attach-xray", post(nfqws2::attach_xray))
         .route("/api/addons/remove", post(addon_manager::remove))
         .route("/api/addons/install", post(addon_manager::install))
@@ -577,6 +588,8 @@ async fn main() {
         .route("/clash/{*path}", any(api_relay::proxy_http))
         .route("/clash-ws/{*path}", get(api_relay::proxy_ws))
         .route("/ws", get(websocket::ws_handler))
+        .route("/api/terminal/ws", get(terminal::connect))
+        .route("/api/management", post(management_script::control))
         .route_layer(middleware::from_fn({
             let state = state.clone();
             move |req, next| {

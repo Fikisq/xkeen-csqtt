@@ -1,6 +1,12 @@
+import { SettingInfo } from '@/components/ui/setting-info'
 import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
+import { IconListCheck, IconLoader2 } from '@tabler/icons-react'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
+import { NfqwsStrategyLists } from './NfqwsStrategyLists'
+import { NfqwsSessionCheck } from './NfqwsSessionCheck'
 import { apiCall } from '@/lib/api'
 import { useAppContext } from '@/lib/store'
 
@@ -16,11 +22,13 @@ interface Settings {
   library?: SavedStrategy[]
 }
 
-interface SavedStrategy { id: string; name?: string; games?: boolean; mode: 'tcp' | 'tcp-quic'; args: string; checkedAt: string; tcpSites: number; http3Sites: number }
-interface SearchStatus { running: boolean; phase?: string; completed?: number; total?: number; result?: CheckResult; error?: string; library?: SavedStrategy[]; gamesArgs?: string; flowsealCount?: number }
+interface SavedStrategy { results?: ProbeResult[]; id: string; name?: string; games?: boolean; mode: 'tcp' | 'tcp-quic'; args: string; checkedAt: string; tcpSites: number; http3Sites: number }
+interface SearchStatus { success?: boolean; best?: {tcpSites: number; http3Sites: number}; historyLimit?: number; id?: string; startedAt?: string; finishedAt?: string; mode?: 'tcp' | 'tcp-quic'; games?: boolean; current?: { name: string; mode: string; args: string }; candidates?: CheckResult['candidates']; running: boolean; phase?: string; completed?: number; total?: number; result?: CheckResult; error?: string; library?: SavedStrategy[]; gamesArgs?: string; listStrategyCount?: number }
 
 interface CheckResult {
   success: boolean
+  confirmationChanged?: boolean
+  initialHttp3Sites?: number
   error?: string
   checkedAt?: string
   stale?: boolean
@@ -35,22 +43,64 @@ interface CheckResult {
   args?: string
   durationSeconds?: number
   verifiedTransport?: 'tcp' | 'tcp-quic' | 'none'
-  candidates?: Array<{ name?: string; variant: number; quicVariant?: number; phase?: 'tcp' | 'quic'; mode: 'tcp' | 'tcp-quic'; tcpSites?: number; http3Sites?: number; error?: string }>
-  results?: Array<{ protocol: 'tcp' | 'h3'; url: string; ok: boolean; status?: number; error?: string }>
+  candidates?: Array<{ name?: string; args?: string; results?: ProbeResult[]; variant?: number; quicVariant?: number; phase?: 'tcp' | 'quic'; mode: 'tcp' | 'tcp-quic'; tcpSites?: number; http3Sites?: number; error?: string }>
+  results?: Array<{ protocol: 'tcp' | 'h3'; url: string; ok: boolean; status?: number; error?: string; errorStage?: string; remoteIp?: string }>
 }
 
 type ProbeResult = NonNullable<CheckResult['results']>[number]
 
+function errorStageLabel(item: ProbeResult) {
+  const labels: Record<string, string> = { dns: 'DNS', 'tcp-connect': 'TCP-соединение', 'tls-handshake': 'TLS', 'quic-handshake': 'QUIC', 'http-response': 'HTTP-ответ', 'http-body': 'HTTP-данные' }
+  return item.errorStage ? labels[item.errorStage] || item.errorStage : ''
+}
+
 function probeStatus(item?: ProbeResult) {
   if (!item) return <span className="text-muted-foreground">—</span>
-  return <span className={item.ok ? 'text-green-400' : 'text-amber-400'} title={item.error || undefined}>
-    {item.ok ? `✓ ${item.status ? `HTTP ${item.status}` : 'Ответ есть'}` : '○ Нет ответа'}
+  const failure = item.status ? `HTTP ${item.status}` : /timeout|timed out|deadline/i.test(item.error || '') ? 'Тайм-аут' : item.errorStage === 'quic-handshake' ? 'Нет ответа' : errorStageLabel(item) || 'Нет ответа'
+  return <span className={item.ok ? 'text-green-400' : 'text-red-400'} title={[item.error, item.remoteIp].filter(Boolean).join(' · ') || undefined}>
+    {item.ok ? `✓ ${item.status ? `HTTP ${item.status}` : 'Ответ есть'}` : `✕ ${failure}`}
   </span>
 }
 
+function failedTcpSites(results?: ProbeResult[]) {
+  const failed = results?.filter(item => item.protocol === 'tcp' && !item.ok) || []
+  if (!failed.length) return null
+  return <p className="mt-2 text-xs text-amber-400">Нет ответа по TCP: {failed.map(item => {
+    const site = item.url.includes('youtube') ? 'YouTube' : item.url.includes('discord') ? 'Discord' : 'Discord'
+    return errorStageLabel(item) ? `${site} (${errorStageLabel(item)}${item.remoteIp ? ` · ${item.remoteIp}` : ''})` : site
+  }).join(', ')}</p>
+}
+
 function checkCount(label: string, passed?: number, checked = true) {
-  const color = !checked || passed === undefined ? 'text-muted-foreground' : passed === 3 ? 'text-green-400' : passed > 0 ? 'text-amber-400' : 'text-red-400'
-  return <span className={`whitespace-nowrap font-medium tabular-nums ${color}`}>{label} {checked && passed !== undefined ? `${passed}/3` : '—'}</span>
+  const color = !checked || passed === undefined ? 'text-muted-foreground' : passed === 2 ? 'text-green-400' : passed > 0 ? 'text-amber-400' : 'text-red-400'
+  return <span className={`whitespace-nowrap font-medium tabular-nums ${color}`}>{label} {checked && passed !== undefined ? `${passed}/2` : '—'}</span>
+}
+
+function ResourceTable({ displayReport, title, busy = false }: { displayReport?: CheckResult | null; title: string; busy?: boolean }) {
+  const staleReport = displayReport?.stale || (!!displayReport?.checkedAt && Date.now() - Date.parse(displayReport.checkedAt) >= 20 * 60 * 1000)
+  const siteRows = ['https://www.youtube.com/generate_204', 'https://discord.com/'].map(url => ({
+    url, name: url.includes('youtube') ? 'YouTube' : 'Discord',
+    tcp: displayReport?.results?.find(item => item.url === url && item.protocol === 'tcp'),
+    quic: displayReport?.results?.find(item => item.url === url && item.protocol === 'h3'),
+  }))
+  return <div className="rounded-lg border border-border/70 bg-background/30 p-3 text-sm">
+        <p className="font-medium">{title} {displayReport?.checkedAt ? `· ${new Date(displayReport.checkedAt).toLocaleString('ru-RU')}` : ''}</p>
+        {!displayReport?.results && <p className="text-muted-foreground mt-1 text-xs">Сайты ещё не проверены. Нажмите «Проверить стратегию».</p>}
+        {staleReport && <p className="mt-1 text-xs text-amber-400">Результат устарел — повторите проверку.</p>}
+        {busy && <p role="status" className="text-muted-foreground mt-1 text-xs">Проверка идёт; ниже остаётся предыдущий результат.</p>}
+        <div className="mt-2 overflow-x-auto rounded-md border">
+          <table className="w-full min-w-[320px] table-fixed text-left text-sm">
+            <thead className="bg-input-background text-foreground"><tr><th className="w-[36%] px-2.5 py-1.5 font-medium">Ресурс<SettingInfo label="Проверка сайтов">Ответы YouTube и Discord по TCP и HTTP/3. Тайм-аут не указывает точную причину сбоя; HTTP-код показывается только при ответе сервера.</SettingInfo></th><th className="w-[32%] px-2.5 py-1.5 font-medium">TCP<SettingInfo label="TCP">Успех — ответы обоих сайтов: 2/2. Это проверка веб-доступности, не голосовых или игровых соединений.</SettingInfo></th><th className="w-[32%] px-2.5 py-1.5 font-medium">QUIC<SettingInfo label="QUIC">Проверяется HTTP/3 по UDP. Для стратегии TCP + QUIC нужен хотя бы один успешный ответ из двух.</SettingInfo></th></tr></thead>
+            <tbody>{siteRows.map(row => <tr key={row.url} className="border-t align-top">
+              <th scope="row" className="px-2.5 py-1.5 font-medium">{row.name}</th>
+              <td className="break-words px-2.5 py-1.5">{probeStatus(row.tcp)}</td>
+              <td className="break-words px-2.5 py-1.5">{probeStatus(row.quic)}</td>
+            </tr>)}</tbody>
+          </table>
+        </div>
+        {displayReport?.confirmationChanged && <p className="mt-3 text-xs text-amber-400">Результат изменился при подтверждении: QUIC {displayReport.initialHttp3Sites}/2 → {displayReport.http3Sites}/2. Показана последняя проверка.</p>}
+
+      </div>
 }
 
 export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRefresh: () => void }) {
@@ -68,54 +118,79 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
   const [searchMode, setSearchMode] = useState<'tcp' | 'tcp-quic'>('tcp-quic')
   const [searchJob, setSearchJob] = useState<SearchStatus | null>(null)
   const [games, setGames] = useState(false)
-  const sawRunning = useRef(false)
+  const [section, setSection] = useState<'main' | 'lists'>('main')
+  const [pickerOpen, setPickerOpen] = useState(false)
+  const [pickerTab, setPickerTab] = useState<'working' | 'attempts'>('working')
+  const appliedJob = useRef('')
+  const activeCheckedAt = useRef(0)
+  const pollEpoch = useRef(0)
+  const pollNow = useRef<() => void>(() => {})
 
   useEffect(() => {
     let active = true, timer: ReturnType<typeof setTimeout> | undefined
     async function poll() {
+      const epoch = ++pollEpoch.current
       try {
         const job = await apiCall<SearchStatus>('GET', 'nfqws2/search')
-        if (!active) return
+        if (!active || epoch !== pollEpoch.current) return
         setSearchJob(job)
-        if (job.running) { sawRunning.current = true; setSearching(true); timer = setTimeout(() => void poll(), 2000) }
-        else {
-          setSearching(false)
-          if (sawRunning.current) {
-            sawRunning.current = false
-            if (job.result) { setReport(job.result); setCustomArgs(job.result.args || ''); setGames(!!job.result.args?.includes('--filter-udp=1024-65535')); setSource('preset'); setMode(job.result.mode || 'tcp') }
-            else if (job.error) setError(job.error)
+        setSearching(job.running)
+        const key = job.id || job.result?.checkedAt || ''
+        if (job.running) {
+          if (job.mode) setSearchMode(job.mode)
+          setGames(!!job.games)
+        } else if (key && appliedJob.current !== key) {
+          appliedJob.current = key
+          if (job.success !== false && job.result && (job.result.tcpSites || 0) >= 2 && Date.parse(job.result.checkedAt || '') >= activeCheckedAt.current) {
+            setReport(job.result)
+            setCustomArgs(job.result.args || '')
+            setGames(!!job.result.args?.includes('--filter-udp=1024-65535'))
+            setSource('preset')
+            setMode(job.result.mode || 'tcp')
           }
         }
-      } catch { if (active && searching) timer = setTimeout(() => void poll(), 3000) }
+        timer = setTimeout(() => void poll(), job.running ? 1500 : 5000)
+      } catch {
+        if (active && epoch === pollEpoch.current) timer = setTimeout(() => void poll(), 3000)
+      }
     }
-    void poll()
-    return () => { active = false; if (timer) clearTimeout(timer) }
-  }, [searching])
+    pollNow.current = () => { if (timer) clearTimeout(timer); void poll() }
+    async function load() {
+      try {
+        const value = await apiCall<Settings>('GET', 'nfqws2/settings')
+        if (!active) return
+        setSettings(value); setMode(value.mode); setSource(value.source)
+        setCustomArgs(value.customArgs)
+        setGames(value.customArgs.includes('--filter-udp=1024-65535'))
+        activeCheckedAt.current = Date.parse(value.lastCheck?.checkedAt || '') || 0
+        setReport(value.lastCheck ?? null)
+      } catch (cause) {
+        if (active) setError(cause instanceof Error ? cause.message : 'Не удалось загрузить настройки')
+      } finally {
+        if (active) { setLoading(false); void poll() }
+      }
+    }
+    void load()
+    return () => { active = false; if (timer) clearTimeout(timer); pollNow.current = () => {} }
+  }, [])
 
   async function startSearch() {
-    setError('')
+    ++pollEpoch.current
+    setError(''); setSearching(true)
     try {
-      const result = await apiCall<{success: boolean; error?: string}>('POST', 'nfqws2/search', {mode: searchMode, games})
+      const result = await apiCall<{success: boolean; error?: string}>('POST', 'nfqws2/search', {mode: searchMode, games, plan: 'lists'})
       if (!result.success) throw new Error(result.error || 'Не удалось начать подбор')
-      sawRunning.current = true; setSearching(true)
-    } catch (error) { setError(error instanceof Error ? error.message : 'Ошибка подбора') }
+      pollNow.current()
+    } catch (cause) {
+      setSearching(false)
+      setError(cause instanceof Error ? cause.message : 'Ошибка подбора')
+    }
   }
 
-  useEffect(() => {
-    let active = true
-    void apiCall<Settings>('GET', 'nfqws2/settings').then((value) => {
-      if (!active) return
-      setSettings(value)
-      setMode(value.mode)
-      setSource(value.source)
-      setCustomArgs(value.customArgs)
-      setGames(value.customArgs.includes('--filter-udp=1024-65535'))
-      setReport(value.lastCheck ?? null)
-    }).catch((cause) => {
-      if (active) setError(cause instanceof Error ? cause.message : 'Не удалось загрузить настройки')
-    }).finally(() => { if (active) setLoading(false) })
-    return () => { active = false }
-  }, [])
+  async function cancelSearch() {
+    try { await apiCall('POST', 'nfqws2/search/cancel'); pollNow.current() }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось отменить подбор') }
+  }
 
   function withGames(args: string) {
     const extra = searchJob?.gamesArgs || ''
@@ -135,9 +210,10 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
         setMode(result.settings.mode)
         setCustomArgs(result.settings.customArgs)
       }
+      activeCheckedAt.current = Date.parse(result.check?.checkedAt || '') || Date.now()
       setReport(result.check ?? null)
       onRefresh()
-      showToast(`Стратегия сохранена: TCP ${result.check?.tcpSites ?? '—'}/3, HTTP/3 ${result.check?.http3Sites ?? '—'}/3`)
+      showToast(`Стратегия сохранена: TCP ${result.check?.tcpSites ?? '—'}/2, HTTP/3 ${result.check?.http3Sites ?? '—'}/2`)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Ошибка nfqws2')
     } finally {
@@ -151,7 +227,10 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
     try {
       const result = await apiCall<CheckResult>('POST', 'nfqws2/check', { source: draftSource, customArgs: withGames(draftArgs) })
       if (!result.success) throw new Error(result.error || 'Проверка не завершилась')
+      activeCheckedAt.current = Date.parse(result.checkedAt || '') || Date.now()
       setReport(result)
+      const active = await apiCall<Settings>('GET', 'nfqws2/settings')
+      setSettings(active)
       onRefresh()
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Ошибка проверки')
@@ -161,26 +240,38 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
   }
 
   const displayReport = report ?? settings?.lastCheck
-  const staleReport = displayReport?.stale || (!!displayReport?.checkedAt && Date.now() - Date.parse(displayReport.checkedAt) >= 30 * 60 * 1000)
-  const siteRows = ['https://www.youtube.com/generate_204', 'https://discord.com/', 'https://www.instagram.com/'].map(url => ({
-    url,
-    name: url.includes('youtube') ? 'YouTube' : url.includes('discord') ? 'Discord' : url.includes('instagram') ? 'Instagram' : url,
-    tcp: displayReport?.results?.find(item => item.url === url && item.protocol === 'tcp'),
-    quic: displayReport?.results?.find(item => item.url === url && item.protocol === 'h3'),
-  }))
 
-  return <div className="space-y-4">
+  const history = searchJob?.candidates || displayReport?.candidates || []
+  const library = (searchJob?.library || settings?.library || []).filter(item => item.tcpSites >= 2 && (item.mode === 'tcp' || item.http3Sites >= 1))
+
+  function selectStrategy(args: string, selectedMode: 'tcp' | 'tcp-quic', result?: CheckResult) {
+    setSource('custom'); setCustomArgs(args); setMode(selectedMode)
+    setGames(args.includes('--filter-udp=1024-65535')); setReport(result || null)
+    setError(''); setPickerOpen(false)
+  }
+
+  return <div className="flex min-h-0 flex-col gap-2">
+    <div role="tablist" aria-label="Разделы nfqws2" className="flex w-fit max-w-full shrink-0 flex-wrap justify-start gap-1 rounded-lg border border-border/70 bg-background/40 p-1">
+      <Button id="nfqws-main-tab" role="tab" aria-selected={section === 'main'} aria-controls="nfqws-main-panel" variant={section === 'main' ? 'default' : 'ghost'} size="sm" onClick={() => setSection('main')}>Главная</Button>
+      <Button id="nfqws-lists-tab" role="tab" aria-selected={section === 'lists'} aria-controls="nfqws-lists-panel" variant={section === 'lists' ? 'default' : 'ghost'} size="sm" onClick={() => setSection('lists')}>Списки стратегий</Button>
+    </div>
+    <div className="min-h-0 min-w-0 space-y-2 overflow-y-auto pr-1">
+    <div id="nfqws-main-panel" role="tabpanel" aria-labelledby="nfqws-main-tab" hidden={section !== 'main'} className="space-y-2">
     {loading ? <p className="text-muted-foreground text-sm">Загрузка настроек…</p> : <>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="text-sm font-medium">Стратегия
+      <div className="grid items-end gap-2 sm:grid-cols-3">
+        <label className="text-sm font-medium">Стратегия<SettingInfo label="Стратегия">Автоподбор использует списки; «Своя» — ручные параметры. Активная стратегия меняется только после сохранения и применения.</SettingInfo>
           <select className="bg-input-background border-border mt-1 h-9 w-full rounded-md border px-2 text-sm" value={source} onChange={(event) => { setSource(event.target.value as 'preset' | 'custom'); setReport(null) }}>
             <option value="preset">Автоподбор</option>
             <option value="custom">Своя</option>
           </select>
         </label>
-        <div className="rounded-md border p-3 text-sm">
+        <div className="rounded-lg border border-border/70 bg-background/30 px-2.5 py-2 text-sm">
           <div className="font-medium">Настроено: {source === 'custom' ? customArgs.split('\n').some((line) => line.trim() === '--filter-udp=443') ? 'TCP + QUIC' : 'TCP' : mode === 'tcp' ? 'TCP' : 'TCP + QUIC'}</div>
           <div className="mt-1 flex gap-3 text-xs">{checkCount('TCP', displayReport?.tcpSites)}{checkCount('QUIC', displayReport?.http3Sites, displayReport?.mode === 'tcp-quic')}</div>
+        </div>
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-border/70 bg-background/30 px-2.5 py-2">
+          <label htmlFor="nfqws-games" className="cursor-pointer text-sm font-medium" title="Добавляет фиксированные TCP/UDP-правила после «Сохранить и применить». Проверьте вход в Roblox и подключение к голосовому каналу Discord: TCP 2/2 не подтверждает их работу.">Roblox и голос Discord<SettingInfo label="Roblox и голос Discord">Добавляет TCP/UDP-правила после сохранения и применения. Успех сайта не подтверждает игру или голос: для этого нужен реальный сеанс на устройстве.</SettingInfo></label>
+          <Switch id="nfqws-games" size="lg" checked={games} disabled={searching || checking || saving || !searchJob?.gamesArgs} onCheckedChange={checked => { setGames(checked); setReport(null) }} />
         </div>
       </div>
       {!settings?.globalReady && <p className="rounded-md border border-amber-500/40 px-3 py-2 text-xs text-amber-500">Выход nfqws2 ещё не доступен в Xray.</p>}
@@ -194,52 +285,74 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
           void check('custom', next)
         }} spellCheck={false} placeholder={'--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=...'} />
       </label>}
-      {source === 'preset' && <details className="rounded-md border p-3">
-        <summary className="cursor-pointer text-sm font-medium">Параметры стратегии</summary>
+      {source === 'preset' && <details className="rounded-lg border border-border/70 bg-background/30 px-3 py-2.5">
+        <summary className="cursor-pointer text-sm font-medium">Параметры стратегии<SettingInfo label="Параметры стратегии">Показан черновик параметров TCP/QUIC. Применение меняет работающую стратегию; раскрытие этого блока — нет.</SettingInfo></summary>
         <div className="text-muted-foreground mt-2 text-xs">TCP</div>
         <pre className="overflow-x-auto whitespace-pre-wrap break-all text-xs">{withGames(customArgs).split('--new')[0]}</pre>
         {mode === 'tcp-quic' && <><div className="text-muted-foreground mt-2 text-xs">QUIC</div><pre className="overflow-x-auto whitespace-pre-wrap break-all text-xs">{withGames(customArgs).split('--new').find(block => block.includes('--filter-udp=443'))?.trim() || settings?.quicLua}</pre></>}
       </details>}
-      <div className="space-y-3 rounded-md border p-3">
-        <div className="flex flex-wrap items-center gap-2"><select className="bg-input-background rounded-md border px-2 py-2 text-sm" value={searchMode} disabled={searching} onChange={event => setSearchMode(event.target.value as 'tcp' | 'tcp-quic')}><option value="tcp-quic">TCP + QUIC</option><option value="tcp">Только TCP</option></select><Button variant="outline" disabled={saving || checking || searching} onClick={() => void startSearch()}>Подобрать стратегию</Button>{searching && <Button variant="outline" onClick={() => void apiCall('POST', 'nfqws2/search/cancel')}>Отменить подбор</Button>}</div>
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={games} disabled={searching || checking || saving || !searchJob?.gamesArgs} onChange={event => { setGames(event.target.checked); setReport(null) }} />Голос Discord и игры (Roblox) · UDP</label>
-        {searching && <p role="status" className="text-sm">{searchJob?.phase || 'Подготовка'} · проверено {searchJob?.completed || 0} из {searchJob?.total || '…'}</p>}
-        <p className="text-muted-foreground text-xs">Подбор — до 2 минут. Применение — после сохранения.</p>
-        <h4 className="text-sm font-medium">Проверенные стратегии</h4>
-        <div className="max-h-44 space-y-2 overflow-y-auto">{(searchJob?.library || settings?.library || []).map(item => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border p-2 text-sm"><div className="min-w-0 flex-1"><p className="break-words">{item.name || item.args.split('\n').filter(line => line.startsWith('--lua-desync=') && !line.includes('quic_initial')).slice(0, 2).map(line => line.slice(13).split(':')[0]).join(' + ') || 'Своя стратегия'}{item.games ? ' · Голос/игры' : ''}</p><div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs">{checkCount('TCP', item.tcpSites)}{checkCount('QUIC', item.http3Sites, item.mode === 'tcp-quic')}<span className="text-muted-foreground">{new Date(item.checkedAt).toLocaleString('ru-RU')}</span></div></div><Button size="sm" variant="outline" disabled={searching || checking || saving} onClick={() => { setSource('custom'); setCustomArgs(item.args); setMode(item.mode); setGames(!!item.games); setReport(null) }}>Выбрать</Button></div>)}{!(searchJob?.library || settings?.library || []).length && <p className="text-muted-foreground text-sm">Пока нет проверенных стратегий.</p>}</div>
-      </div>
-      <div className="rounded-md border p-3 text-sm">
-        <p className="font-medium">Проверка сайтов {displayReport?.checkedAt ? `· ${new Date(displayReport.checkedAt).toLocaleString('ru-RU')}` : ''}</p>
-        {!displayReport?.results && <p className="text-muted-foreground mt-1 text-xs">Сайты ещё не проверены. Нажмите «Проверить стратегию».</p>}
-        {staleReport && <p className="mt-1 text-xs text-amber-400">Результат устарел — повторите проверку.</p>}
-        {!report && displayReport && <p className="text-muted-foreground mt-1 text-xs">Показана прежняя проверка.</p>}
-        {(searching || checking) && <p role="status" className="text-muted-foreground mt-1 text-xs">Проверка идёт; ниже остаётся предыдущий результат.</p>}
-        <div className="mt-2 overflow-x-auto rounded-md border">
-          <table className="w-full min-w-[650px] table-fixed text-left text-sm">
-            <thead className="bg-input-background text-foreground"><tr><th className="w-[18%] px-3 py-2 font-medium">Ресурс</th><th className="w-[27%] px-3 py-2 font-medium">TCP</th><th className="w-[27%] px-3 py-2 font-medium">QUIC</th><th className="w-[28%] px-3 py-2 font-medium">TCP + QUIC</th></tr></thead>
-            <tbody>{siteRows.map(row => <tr key={row.url} className="border-t align-top">
-              <th scope="row" className="px-3 py-2 font-medium">{row.name}</th>
-              <td className="break-words px-3 py-2">{probeStatus(row.tcp)}</td>
-              <td className="break-words px-3 py-2">{probeStatus(row.quic)}</td>
-              <td className="px-3 py-2">{!row.tcp || !row.quic ? <span className="text-muted-foreground">—</span> : row.tcp.ok && row.quic.ok ? <span className="text-green-400">✓ Оба доступны</span> : <span className="text-amber-400">○ Не оба доступны</span>}</td>
-            </tr>)}</tbody>
-          </table>
+      <div className="space-y-2 rounded-lg border border-border/70 bg-background/30 p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <select aria-label="Транспорт для подбора" className="bg-input-background border-border h-8 rounded-md border px-2 text-sm" value={searchMode} disabled={searching || checking || saving} onChange={event => { setSearchMode(event.target.value as 'tcp' | 'tcp-quic') }}><option value="tcp-quic">TCP + QUIC</option><option value="tcp">Только TCP</option></select>
+          <Button size="sm" disabled={saving || checking || searching} onClick={() => void startSearch()}>{searching && <IconLoader2 className="size-4 animate-spin" />}{searching ? 'Подбор идёт…' : 'Подобрать стратегии'}</Button>
+          <Button size="sm" variant="outline" disabled={loading} onClick={() => setPickerOpen(true)}><IconListCheck className="size-4" />Выбрать стратегию{library.length ? ` (${library.length})` : ''}</Button>
+          <NfqwsSessionCheck /><SettingInfo label="Подбор и проверка">Подбор выполняется в фоне по включённым спискам; обновление страницы его не останавливает. Быстрый проход — до 3 секунд, подтверждение — до 6. Успех: TCP 2/2, для TCP + QUIC также нужен ответ HTTP/3. Выбор результата заполняет черновик.</SettingInfo>
+          {searching && <Button variant="outline" onClick={() => void cancelSearch()}>Остановить</Button>}
         </div>
-        {report?.candidates && <details className="mt-3 space-y-1 border-t pt-3">
-          <summary className="cursor-pointer text-xs font-medium">Ход подбора · {report.candidates.length} проверок</summary>
-          {report.candidates.map((item) => {
-            const selected = typeof item.variant === 'number' && item.variant === report.selectedVariant && (item.mode === 'tcp' ? report.mode === 'tcp' : item.quicVariant === report.selectedQuicVariant && report.mode === 'tcp-quic')
-            const name = item.name || ['TLS + Multisplit', 'Fake TLS', 'Multisplit', 'Fake TLS + Multidisorder'][item.variant] || 'Вариант'
-            return <div key={item.name || `${item.variant}:${item.mode}:${item.quicVariant ?? 0}`} className={`flex flex-wrap justify-between gap-x-3 rounded px-2 py-1 text-xs ${selected ? 'bg-green-500/10 text-green-400' : 'text-muted-foreground'}`}>
-              <span>{selected ? '✓ ' : ''}{name} · {item.name ? item.mode.toUpperCase() : item.mode === 'tcp-quic' ? `QUIC ${item.quicVariant === 1 ? '6' : '11'} повторов` : 'TCP'}</span>
-              <span className="flex gap-3" title={item.error}>{item.error ? 'Проверка не удалась' : <>{checkCount('TCP', item.tcpSites)}{checkCount('QUIC', item.http3Sites, item.mode === 'tcp-quic')}</>}</span>
-            </div>
-          })}
-        </details>}
+        {searching && <div role="status" className="rounded-lg border border-primary/30 bg-primary/10 p-3 text-sm"><p className="font-medium">{searchJob?.phase || 'Подготовка'}</p><p className="text-muted-foreground mt-1 text-xs">Завершено проверок: {searchJob?.completed || 0}{searchJob?.total ? ` · до ${searchJob.total} вариантов` : ''}. Можно закрыть окно или обновить страницу.</p></div>}
+        {searchJob?.best && <p className="flex gap-3 text-xs">Лучший замер: {checkCount('TCP', searchJob.best.tcpSites)}{checkCount('QUIC', searchJob.best.http3Sites)}</p>}
+
+
       </div>
-      <details className="text-muted-foreground text-xs"><summary className="cursor-pointer">О проверке</summary><p className="mt-2">Проверяются ответы сайтов, не звонки и игры. Результат можно применить в течение 5 минут; затем параметры проверяются снова. Подбор включает {searchJob?.flowsealCount ?? 38} адаптаций Flowseal.</p></details>
+      <ResourceTable displayReport={settings?.lastCheck} title="Ресурсы текущей стратегии" busy={checking} />
+
       {error && <p role="alert" className="text-destructive text-sm">{error}</p>}
-      <div className="flex flex-wrap justify-end gap-2"><Button variant="outline" onClick={onBack}>Назад</Button><Button variant="outline" disabled={saving || checking || searching || (source === 'custom' && !customArgs.trim())} onClick={() => void check()}>{checking ? 'Проверка…' : 'Проверить стратегию'}</Button><Button disabled={saving || checking || searching || (source === 'custom' && !customArgs.trim())} onClick={() => void save()}>{saving ? 'Сохраняется…' : 'Сохранить и применить'}</Button></div>
+      <div className="bg-card sticky bottom-0 flex flex-wrap justify-end gap-2 border-t py-2"><Button variant="outline" onClick={onBack}>Назад</Button><Button variant="outline" disabled={saving || checking || searching || (source === 'custom' && !customArgs.trim())} onClick={() => void check()}>{checking ? 'Проверка…' : 'Проверить стратегию'}</Button><Button disabled={saving || checking || searching || (source === 'custom' && !customArgs.trim())} onClick={() => void save()}>{saving ? 'Сохраняется…' : 'Сохранить и применить'}</Button></div>
     </>}
+    </div>
+    <div id="nfqws-lists-panel" role="tabpanel" aria-labelledby="nfqws-lists-tab" hidden={section !== 'lists'}>
+      <NfqwsStrategyLists active={section === 'lists'} readOnly={searching || checking || saving} />
+    </div>
+    </div>
+    <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
+      <DialogContent className="flex! max-h-[90dvh] max-w-[min(96vw,920px)]! flex-col gap-4 overflow-hidden">
+        <DialogHeader className="shrink-0 pr-8">
+          <DialogTitle className="flex items-center gap-2"><IconListCheck className="text-chart-2 size-6" />Выбрать стратегию</DialogTitle>
+          <DialogDescription>Успешная стратегия: TCP 2/2. Для TCP + QUIC также нужен ответ по QUIC. Выбор заполняет черновик; применение — после сохранения.</DialogDescription>
+        </DialogHeader>
+        {searching && <div role="status" className="shrink-0 rounded-xl border border-primary/30 bg-primary/10 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2"><p className="flex items-center gap-2 font-medium"><IconLoader2 className="size-4 animate-spin" />{searchJob?.phase || 'Подготовка'}</p><Button size="sm" variant="outline" onClick={() => void cancelSearch()}>Остановить подбор</Button></div>
+          <p className="text-muted-foreground mt-1 text-xs">Завершено проверок: {searchJob?.completed || 0}{searchJob?.total ? ` из ${searchJob.total}` : ''}. Закрытие окна не останавливает подбор.</p>
+          {searchJob?.current && <details className="mt-2 text-xs"><summary className="cursor-pointer">Сейчас: {searchJob.current.name}</summary><pre className="text-muted-foreground mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-all font-mono">{searchJob.current.args}</pre></details>}
+        </div>}
+        <div className="flex shrink-0 flex-wrap gap-2 border-b pb-3" aria-label="Разделы результатов">
+          <Button size="sm" variant={pickerTab === 'working' ? 'default' : 'outline'} aria-pressed={pickerTab === 'working'} onClick={() => setPickerTab('working')}>Успешные ({library.length})</Button>
+          <Button size="sm" variant={pickerTab === 'attempts' ? 'default' : 'outline'} aria-pressed={pickerTab === 'attempts'} onClick={() => setPickerTab('attempts')}>Все проверки ({searchJob?.completed || history.length})</Button>
+        </div>
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
+          {pickerTab === 'working' && <>
+            {!library.length && <p className="text-muted-foreground rounded-xl border border-dashed p-6 text-center">Стратегий с TCP 2/2 пока нет. Неполные результаты доступны в разделе «Все проверки». Запустите подбор или проверьте свой вариант.</p>}
+            {library.map(item => <div key={item.id} className={`rounded-xl border p-4 ${item.args === customArgs ? 'border-primary/40 bg-primary/10' : 'border-border/70 bg-background/30'}`}>
+              <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0 flex-1"><p className="break-words font-medium">{item.name || 'Сохранённая стратегия'}{item.games ? ' · Roblox и голос Discord' : ''}</p><div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">{checkCount('TCP', item.tcpSites)}{checkCount('QUIC', item.http3Sites, item.mode === 'tcp-quic')}<span className="text-muted-foreground">{new Date(item.checkedAt).toLocaleString('ru-RU')}</span></div></div>
+                <Button size="sm" disabled={searching || checking || saving} onClick={() => selectStrategy(item.args, item.mode, {success: true, mode: item.mode, args: item.args, checkedAt: item.checkedAt, tcpSites: item.tcpSites, http3Sites: item.http3Sites, results: item.results})}>Выбрать</Button>
+              </div>
+              <details className="text-muted-foreground mt-3 text-xs"><summary className="cursor-pointer">Результаты и параметры</summary>{item.results?.map(row => <div key={`${row.url}:${row.protocol}`} className="mt-2 flex flex-wrap justify-between gap-1"><span>{row.url.includes('youtube') ? 'YouTube' : row.url.includes('discord') ? 'Discord' : 'Discord'} · {row.protocol === 'h3' ? 'QUIC' : 'TCP'}</span>{probeStatus(row)}</div>)}<pre className="mt-3 whitespace-pre-wrap break-all font-mono">{item.args}</pre></details>
+            </div>)}
+          </>}
+          {pickerTab === 'attempts' && <>
+            {!!searchJob?.historyLimit && (searchJob.completed || 0) > searchJob.historyLimit && <p className="text-muted-foreground text-xs">Показаны последние {searchJob.historyLimit} проверок из {searchJob.completed}.</p>}
+            {!history.length && <p className="text-muted-foreground rounded-xl border border-dashed p-6 text-center">После запуска подбора здесь появятся результаты каждой попытки.</p>}
+            {history.map((item, index) => <div key={index} className="rounded-xl border border-border/70 bg-background/30 p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0 flex-1"><p className="break-words font-medium"><span className="text-muted-foreground mr-2 tabular-nums">{Math.max(0, (searchJob?.completed || history.length) - history.length) + index + 1}.</span>{item.name || 'Стратегия'}</p><div className="mt-2 flex flex-wrap gap-3 text-xs">{item.error ? <span className="text-destructive break-words">{item.error}</span> : <>{checkCount('TCP', item.tcpSites)}{checkCount('QUIC', item.http3Sites, item.mode === 'tcp-quic')}</>}</div>{failedTcpSites(item.results)}</div>
+                {item.args && !item.error && (item.tcpSites || 0) >= 2 && (item.mode === 'tcp' || (item.http3Sites || 0) >= 1) && <Button size="sm" disabled={searching || checking || saving} onClick={() => selectStrategy(item.args!, item.mode)}>Выбрать</Button>}
+              </div>
+              <details className="text-muted-foreground mt-3 text-xs"><summary className="cursor-pointer">Результаты и параметры</summary>{item.results?.map(row => <div key={`${row.url}:${row.protocol}`} className="mt-2 flex flex-wrap justify-between gap-1"><span>{row.url.includes('youtube') ? 'YouTube' : row.url.includes('discord') ? 'Discord' : 'Discord'} · {row.protocol === 'h3' ? 'QUIC' : 'TCP'}</span>{probeStatus(row)}</div>)}{item.args && <pre className="mt-3 whitespace-pre-wrap break-all font-mono">{item.args}</pre>}</details>
+            </div>)}
+          </>}
+          {searchJob?.error && <p role="alert" className="text-destructive text-sm">{searchJob.error}</p>}
+        </div>
+        <DialogFooter className="shrink-0 border-t pt-3"><Button variant="outline" onClick={() => setPickerOpen(false)}>Закрыть</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 }
