@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "entries": [
+    {
+      "args": "--filter-tcp=443\n--filter-l7=tls\n--payload=tls_client_hello\n--lua-desync=hostfakesplit:host=google.com:tcp_ts=-600000\n--new\n--filter-udp=443\n--filter-l7=quic\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=2\n",
+      "id": "zm-yv08",
+      "name": "Yv08 · Google host / QUIC ×2"
+    },
+    {
+      "args": "--filter-tcp=443\n--filter-l7=tls\n--payload=tls_client_hello\n--in-range=-s5556\n--lua-desync=circular:fails=3:maxtime=20:nld=2\n--in-range=x\n--lua-desync=fake:blob=tls_clienthello:tcp_flags_set=SYN:strategy=1\n--lua-desync=multidisorder:pos=2,midsld:seqovl=1:seqovl_pattern=tls_clienthello:strategy=1\n--lua-desync=fake:blob=tls_clienthello:badsum:tcp_seq=10000000:repeats=1:strategy=2\n--lua-desync=multisplit:blob=tls_clienthello:badsum:tcp_ack=-66000:pos=2:nodrop:strategy=2:final\n--new\n--filter-udp=443\n--filter-l7=quic\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=2\n",
+      "id": "zm-circular",
+      "name": "Discord circular · 3 приёма / QUIC ×2"
+    }
+  ],
+  "id": "zapret-manager-nfqws2",
+  "name": "Zapret Manager · адаптации nfqws2"
+}

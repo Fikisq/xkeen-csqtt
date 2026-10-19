@@ -97,6 +97,10 @@ jobs:
         working-directory: backend
         run: cargo test --example xray_api_checks
 
+      - name: Check Roblox and Discord rules toggle
+        working-directory: backend
+        run: cargo test --bin xkeen-ui nfqws2::search::timeout_tests::games_switch_adds_removes_and_does_not_duplicate_rules
+
       - name: Inject frontend dist for cross
         working-directory: backend
         run: |
@@ -104,7 +108,7 @@ jobs:
           sed -i 's|\.\./frontend/dist|./dist|' src/frontend_embedder.rs
           # cross mounts backend/ only; embedded strategy inputs live in router/.
           mkdir -p router-assets/nfqws2-blobs
-          cp ../router/nfqws2-games.args ../router/nfqws2-flowseal.json ../router/xkeen-manager router-assets/
+          cp ../router/nfqws2-games.args ../router/nfqws2-flowseal.json ../router/nfqws2-own.json ../router/nfqws2-martinbacker.json ../router/nfqws2-zapret-manager.json ../router/xkeen-manager ../router/nfqws2-probe.sh router-assets/
           cp ../router/nfqws2-blobs/*.bin router-assets/nfqws2-blobs/
           sed -i 's|../../router/|../router-assets/|g' src/nfqws2_search.rs src/nfqws2_catalog.rs src/nfqws2_assets.rs src/management_script.rs
 
@@ -195,7 +199,8 @@ jobs:
       - name: Write release checksums
         run: |
           sh router/build-bootstrap.sh
-          sha256sum xkeen-bootstrap-arm64-v8a.tar.gz setup.sh > SHA256SUMS
+          python3 router/export-nfqws2-strategies.py nfqws2-strategies.json
+          sha256sum xkeen-bootstrap-arm64-v8a.tar.gz setup.sh nfqws2-strategies.json > SHA256SUMS
           for file in artifacts/xkeen-ui-*/* artifacts/xkeen-nfqws2-*/* artifacts/csqtt-client-*/* artifacts/wdtt-plus-client-*/*; do
             printf '%s  %s\n' "$(sha256sum "$file" | cut -d ' ' -f 1)" "$(basename "$file")"
           done >> SHA256SUMS
@@ -214,3 +219,4 @@ jobs:
             xkeen-bootstrap-arm64-v8a.tar.gz
             setup.sh
             SHA256SUMS
+            nfqws2-strategies.json

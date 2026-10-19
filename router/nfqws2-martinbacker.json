@@ -1,0 +1,17 @@
+{
+  "id": "community-martinbacker",
+  "name": "Сообщество · MartinBacker",
+  "enabled": true,
+  "entries": [
+    {
+      "id": "martinbacker-2",
+      "name": "MartinBacker · ACK fake + Multisplit",
+      "args": "--filter-tcp=443\n--filter-l7=tls\n--payload=tls_client_hello\n--lua-desync=fake:blob=0x00000000:tcp_ack=-66000:tls_mod=rnd,dupsid,sni=www.google.com:repeats=2\n--lua-desync=multisplit:pos=1,midsld\n--new\n--filter-udp=443\n--filter-l7=quic\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n"
+    },
+    {
+      "id": "martinbacker-4",
+      "name": "MartinBacker · TS fake + Multidisorder",
+      "args": "--filter-tcp=443\n--filter-l7=tls\n--payload=tls_client_hello\n--lua-desync=fake:blob=fake_default_tls:tls_mod=rnd,dupsid,sni=www.google.com:tcp_ts=-1000\n--lua-desync=multidisorder:pos=1,midsld,sniext+1,endhost-2,-10:seqovl=1:seqovl_pattern=tls_clienthello:tcp_ts_up\n--new\n--filter-udp=443\n--filter-l7=quic\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n"
+    }
+  ]
+}

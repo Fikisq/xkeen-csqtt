@@ -118,6 +118,7 @@ run_engine() {
         --qnum="$QUEUE" --pidfile="$PID" --user=nobody --fastpath-workaround=auto \
         --lua-init="@$ROOT/nfqws2/lua/zapret-lib.lua.gz" \
         --lua-init="@$ROOT/nfqws2/lua/zapret-antidpi.lua.gz" \
+        --lua-init="@$ROOT/nfqws2/lua/zapret-auto.lua.gz" \
         --blob="quic_initial:@$ROOT/nfqws2/blobs/quic_initial.bin" \
         --blob="tls_clienthello:@$ROOT/nfqws2/blobs/tls_clienthello.bin"
     if [ -r "$ROOT/nfqws2/blobs/fs_quic_google.bin" ] && [ -r "$ROOT/nfqws2/blobs/fs_tls_max.bin" ]; then
@@ -126,7 +127,7 @@ run_engine() {
     if [ -s "$CUSTOM" ]; then
         while IFS= read -r arg || [ -n "$arg" ]; do
             case "$arg" in
-                --new|--filter-tcp=80|--filter-l7=tls|--filter-l7=http|--filter-l7=quic|--payload=http_req|--payload=empty|'--out-range=<s1'|'--out-range=s1<d1'|--filter-tcp=443|--filter-udp=443|--payload=tls_client_hello|--payload=quic_initial|--payload=empty,tls_client_hello|--filter-tcp=2053,2083,2087,2096,8443|--filter-udp=19294-19344,50000-50100|--filter-udp=1024-65535|--filter-l7=discord,stun|--filter-l7=unknown|--payload=discord_ip_discovery,stun|--payload=unknown|--out-range=-n2|--lua-desync=*)
+                --in-range=-s5556|--in-range=x|--new|--filter-tcp=80|--filter-l7=tls|--filter-l7=http|--filter-l7=quic|--payload=http_req|--payload=empty|'--out-range=<s1'|'--out-range=s1<d1'|--filter-tcp=443|--filter-udp=443|--payload=tls_client_hello|--payload=quic_initial|--payload=empty,tls_client_hello|--filter-tcp=2053,2083,2087,2096,8443|--filter-udp=19294-19344,50000-50100|--filter-udp=1024-65535|--filter-l7=discord,stun|--filter-l7=unknown|--payload=discord_ip_discovery,stun|--payload=unknown|--out-range=-n2|--lua-desync=*)
                     set -- "$@" "$arg" ;;
                 *) log_error 'invalid custom strategy argument'; return 1 ;;
             esac

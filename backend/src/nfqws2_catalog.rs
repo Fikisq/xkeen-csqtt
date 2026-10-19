@@ -37,9 +37,13 @@ fn read_lists() -> Result<Vec<StrategyList>, String> {
     }
 }
 
-pub fn entries() -> Vec<Value> {
+pub fn entries() -> Vec<Value> { named_entries(false) }
+
+pub fn known_entries() -> Vec<Value> { named_entries(true) }
+
+fn named_entries(include_disabled: bool) -> Vec<Value> {
     let mut seen = std::collections::HashSet::new();
-    read_lists().unwrap_or_default().into_iter().filter(|list| list.enabled).flat_map(|list| list.entries.into_iter().map(move |entry|
+    read_lists().unwrap_or_default().into_iter().filter(|list| include_disabled || list.enabled).flat_map(|list| list.entries.into_iter().map(move |entry|
         json!({"id": entry.id, "name": format!("{} · {}", list.name, entry.name), "args": entry.args})))
         .filter(|entry| {
             let args = entry["args"].as_str().unwrap_or_default().lines().map(str::trim).filter(|line| !line.is_empty()).collect::<Vec<_>>().join("\n");
@@ -65,7 +69,7 @@ fn revision(lists: &[StrategyList]) -> String {
 
 pub async fn get() -> Json<Value> {
     match read_lists() {
-        Ok(lists) => Json(json!({"success": true, "revision": revision(&lists), "lists": lists, "requiredTcpSites": REQUIRED_TCP_SITES})),
+        Ok(lists) => Json(json!({"success": true, "revision": revision(&lists), "lists": lists, "requiredTcpSites": required_tcp_sites()})),
         Err(error) => Json(json!({"success": false, "error": error})),
     }
 }
@@ -127,11 +131,67 @@ pub fn extract(args: &str, transport: &str) -> Result<String, String> {
                     || (transport == "tcp" && *line == "--filter-l7=tls") || (transport == "quic" && *line == "--filter-l7=quic")
                     || (transport == "tcp" && matches!(*line, "--payload=tls_client_hello" | "--payload=empty,tls_client_hello" | "--payload=empty"))
                     || (transport == "quic" && *line == "--payload=quic_initial")
-                    || matches!(*line, "--out-range=-n2" | "--out-range=<s1" | "--out-range=s1<d1"))) {
+                    || matches!(*line, "--in-range=-s5556" | "--in-range=x" | "--out-range=-n2" | "--out-range=<s1" | "--out-range=s1<d1"))) {
             return Err("Блок 443 содержит несовместимые параметры. Нужны отдельные TCP и QUIC, параметры — по одному в строке".into());
         }
         selected.push(block.join("\n"));
     }
     if selected.is_empty() { return Err(format!("В источнике нет блока {} с --lua-desync", if transport == "tcp" { "TCP/443" } else { "QUIC/443" })); }
     Ok(selected.join("\n--new\n") + "\n")
+}
+
+// Independent nfqws2 adaptations of the Yv08 and Discord_circular profiles:
+// https://github.com/StressOzz/Zapret-Manager/blob/main/files/Zapret2/zapret2
+// Existing presets remain intact; install this as an ordinary list once.
+fn zapret_manager() -> StrategyList {
+    serde_json::from_str(include_str!("../../router/nfqws2-zapret-manager.json")).expect("Valid embedded Zapret Manager strategies")
+}
+
+fn install_zapret_pack() -> Result<(), String> {
+    let marker = format!("{ROOT}/catalog-zm-v1.done");
+    if !Path::new(ROOT).is_dir() || Path::new(&marker).exists() { return Ok(()); }
+    let mut lists = read_lists()?;
+    if !lists.iter().any(|list| list.id == "zapret-manager-nfqws2") {
+        if lists.len() >= 16 || lists.iter().map(|list| list.entries.len()).sum::<usize>() > 254 { return Err("Нет места для дополнительного списка стратегий".into()); }
+        // Retain the original file for recovery; subsequent edits/removal of the
+        // imported list are respected because the migration runs only once.
+        if Path::new(LISTS).exists() {
+            let backup = format!("{LISTS}.before-zm-v1");
+            if !Path::new(&backup).exists() { std::fs::copy(LISTS,&backup).map_err(|e|e.to_string())?; std::fs::set_permissions(&backup,std::fs::Permissions::from_mode(0o600)).map_err(|e|e.to_string())?; }
+        }
+        lists.push(zapret_manager());
+        let next = format!("{LISTS}.new");
+        std::fs::write(&next,serde_json::to_vec(&lists).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+        std::fs::set_permissions(&next,std::fs::Permissions::from_mode(0o600)).map_err(|e|e.to_string())?;
+        std::fs::rename(next,LISTS).map_err(|e|e.to_string())?;
+    }
+    std::fs::write(marker,b"1\n").map_err(|e|e.to_string())
+}
+
+// Shipped ordinary lists: no live reports, DNS overrides or router-specific data.
+pub(super) fn install_pack() -> Result<(), String> {
+    install_zapret_pack()?;
+    for (key,source) in [
+        ("own-v1",include_str!("../../router/nfqws2-own.json")),
+        ("martinbacker-v1",include_str!("../../router/nfqws2-martinbacker.json")),
+    ] {
+        let marker = format!("{ROOT}/catalog-{key}.done");
+        if !Path::new(ROOT).is_dir() || Path::new(&marker).exists() { continue; }
+        let pack: StrategyList = serde_json::from_str(source).map_err(|e|e.to_string())?;
+        let mut lists = read_lists()?;
+        if !lists.iter().any(|list|list.id == pack.id) {
+            if lists.len() >= 16 || lists.iter().map(|list|list.entries.len()).sum::<usize>() + pack.entries.len() > 256 { return Err("Нет места для дополнительного списка стратегий".into()); }
+            if Path::new(LISTS).exists() {
+                let backup = format!("{LISTS}.before-{key}");
+                if !Path::new(&backup).exists() { std::fs::copy(LISTS,&backup).map_err(|e|e.to_string())?; std::fs::set_permissions(&backup,std::fs::Permissions::from_mode(0o600)).map_err(|e|e.to_string())?; }
+            }
+            lists.push(pack);
+            let next = format!("{LISTS}.new");
+            std::fs::write(&next,serde_json::to_vec(&lists).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+            std::fs::set_permissions(&next,std::fs::Permissions::from_mode(0o600)).map_err(|e|e.to_string())?;
+            std::fs::rename(next,LISTS).map_err(|e|e.to_string())?;
+        }
+        std::fs::write(marker,b"1\n").map_err(|e|e.to_string())?;
+    }
+    Ok(())
 }

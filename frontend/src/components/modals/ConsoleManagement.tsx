@@ -20,8 +20,9 @@ export function ConsoleManagement({ connected, onAction }: { connected: boolean;
       <Button size="sm" className="min-w-0 px-2 text-xs" variant="outline" disabled={!connected} onClick={() => run('restart')}><IconRefresh className="size-3.5" />Перезапуск</Button>
       <Button size="sm" className="min-w-0 px-2 text-xs" variant="outline" disabled={!connected} onClick={() => run('log')}><IconFileText className="size-3.5" />Журнал</Button>
     </div>
-    <Button size="sm" className="text-xs" variant="outline" disabled={!connected} onClick={() => run('status')}>Статус всех компонентов</Button>
+    <Button size="sm" className="text-xs" variant="outline" disabled={!connected} onClick={() => run('status')}>Статус выбранного компонента</Button>
+    <Button size="sm" className="text-xs" variant="outline" disabled={!connected} onClick={() => run('status-all')}>Статус всех компонентов</Button>
     <Button size="sm" className="text-xs" variant="outline" disabled={!connected} onClick={() => run('update')}><IconDownload className="size-3.5" />Обновить панель</Button>
-    <p className="text-muted-foreground text-[11px]">Вывод — в консоли. Для выхода из журнала нажмите «Прервать» или Ctrl+C.</p>
+    <p className="text-muted-foreground text-[11px]">Вывод — в консоли. Для выхода из журнала нажмите «Прервать операцию» или Ctrl+C.</p>
   </aside>
 }

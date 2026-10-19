@@ -44,7 +44,7 @@ pub(crate) fn same_strategy(previous: &str, current: &str) -> bool { previous ==
 #[cfg(test)]
 mod tests {
     use super::*;
-    const DEVICE: &str = "192.168.0.130";
+    const DEVICE: &str = "192.168.1.100";
     fn udp(extra: &str) -> String { format!("ipv4 2 udp 17 100 src={DEVICE} dst=203.0.113.42 sport=12345 dport=50000 {extra} src=203.0.113.42 dst={DEVICE} sport=50000 dport=12345") }
     #[test] fn unanswered_udp() { let f = parse(&udp("[UNREPLIED]"), DEVICE).unwrap(); assert!(!f.replied); assert_eq!(f.port, 50000); }
     #[test] fn replied_udp() { assert!(parse(&udp("[ASSURED]"), DEVICE).unwrap().replied); }

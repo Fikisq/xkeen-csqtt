@@ -49,6 +49,16 @@ async fn current() -> Result<Arc<Session>, Error> {
         .stdin(Stdio::from(slave.try_clone()?)).stdout(Stdio::from(slave.try_clone()?)).stderr(Stdio::from(slave))
         .kill_on_drop(true);
     unsafe { command.pre_exec(|| {
+        // Init scripts may launch the panel with SIGINT/SIGQUIT ignored.
+        // exec preserves ignored dispositions; interactive ash and its children
+        // would then ignore the PTY's Ctrl+C too. Reset only in the child.
+        for signal in [libc::SIGINT, libc::SIGQUIT, libc::SIGPIPE, libc::SIGTSTP, libc::SIGTTIN, libc::SIGTTOU] {
+            if libc::signal(signal, libc::SIG_DFL) == libc::SIG_ERR { return Err(io::Error::last_os_error()); }
+        }
+        let mut mask = std::mem::zeroed();
+        if libc::sigemptyset(&mut mask) < 0 || libc::sigprocmask(libc::SIG_SETMASK, &mask, std::ptr::null_mut()) < 0 {
+            return Err(io::Error::last_os_error());
+        }
         if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY, 0) < 0 { return Err(io::Error::last_os_error()); }
         Ok(())
     }); }
@@ -109,10 +119,10 @@ async fn input_loop(session: Arc<Session>, master: Arc<AsyncFd<std::fs::File>>, 
             },
             Input::Manage(action, component) => {
                 if unsafe { libc::tcgetpgrp(fd) } != pid {
-                    emit(&session, "\r\n\x1b[33mКонсоль занята. Сначала завершите текущую команду: «Прервать» или Ctrl+C.\x1b[0m\r\n".as_bytes().to_vec()).await;
+                    emit(&session, "\r\n\x1b[33mКонсоль занята. Сначала завершите текущую команду: «Прервать операцию» или Ctrl+C.\x1b[0m\r\n".as_bytes().to_vec()).await;
                     continue;
                 }
-                if matches!(action.as_str(), "status" | "update") { format!("\x15xkeen-manager {action}\r").into_bytes() }
+                if matches!(action.as_str(), "status-all" | "update") { format!("\x15xkeen-manager {}\r", if action == "status-all" { "status" } else { "update" }).into_bytes() }
                 else { format!("\x15xkeen-manager {action} {component}\r").into_bytes() }
             },
         };
@@ -182,7 +192,7 @@ pub async fn run(socket: &mut WebSocket) -> Result<(), Error> {
                     Some("manage") => {
                         let action = value["action"].as_str().unwrap_or("");
                         let component = value["component"].as_str().unwrap_or("panel");
-                        if !matches!(action, "status" | "start" | "stop" | "restart" | "log" | "update")
+                        if !matches!(action, "status" | "status-all" | "start" | "stop" | "restart" | "log" | "update")
                             || !matches!(component, "panel" | "xray" | "csqtt" | "wdtt-plus" | "nfqws2") { continue; }
                         Input::Manage(action.into(), component.into())
                     },

@@ -77,12 +77,15 @@ update_panel() {
 }
 
 usage() {
-    echo 'xkeen-manager [status | {start|stop|restart} {panel|xray|csqtt|wdtt-plus|nfqws2} | update | log COMPONENT]'
+    echo 'xkeen-manager [status [COMPONENT] | {start|stop|restart} COMPONENT | update | log COMPONENT]'
+    echo 'COMPONENT: panel, xray, csqtt, wdtt-plus, nfqws2'
 }
 
 if [ "$#" -gt 0 ]; then
     case "$1" in
-        status) show_status ;;
+        status)
+            case "$#" in 1) show_status ;; 2) service_action "$2" status ;; *) usage; exit 2 ;; esac
+            ;;
         start|stop|restart) [ "$#" -eq 2 ] || { usage; exit 2; }; service_action "$2" "$1" ;;
         update)
             nohup /opt/bin/sh /opt/sbin/xkeen-manager update-run </dev/null >/opt/var/log/xkeen-manager-update.log 2>&1 &

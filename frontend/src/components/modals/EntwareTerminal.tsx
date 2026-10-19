@@ -95,7 +95,7 @@ export function EntwareTerminal({ onClose }: { onClose: () => void }) {
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 text-xs">
         <span role="status" className="text-muted-foreground flex items-center gap-2"><span className={`size-1.5 shrink-0 rounded-full ${connected ? 'bg-green-400' : phase === 'connecting' ? 'animate-pulse bg-amber-400' : 'bg-red-400'}`} />{message}</span>
         <div className="flex gap-2">
-          <Button size="sm" variant="ghost" disabled={!connected} onClick={() => input('\x03')}><IconPlayerStop className="size-3.5" />Прервать</Button>
+          <Button size="sm" variant="ghost" disabled={!connected} onClick={() => input('\x03')}><IconPlayerStop className="size-3.5" />Прервать операцию</Button>
           <Button size="sm" variant="ghost" disabled={!connected} onClick={clear}><IconEraser className="size-3.5" />Очистить терминал</Button>
           {(phase === 'closed' || phase === 'error') && <Button size="sm" variant="outline" onClick={() => setAttempt(value => value + 1)}><IconRefresh className="size-3.5" />Переподключиться</Button>}
         </div>

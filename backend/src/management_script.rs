@@ -47,7 +47,7 @@ pub async fn control(Json(request): Json<Action>) -> Json<Value> {
 async fn execute(action: &str, component: &str) -> Result<String, String> {
     let mut command = tokio::process::Command::new("/opt/sbin/xkeen-manager");
     command.arg(if action == "log" { "log-once" } else { action });
-    if !matches!(action, "status" | "update") { command.arg(component); }
+    if action != "update" { command.arg(component); }
     command.stdin(std::process::Stdio::null()).kill_on_drop(true);
     let result = tokio::time::timeout(Duration::from_secs(45), command.output()).await
         .map_err(|_| "Действие не завершилось за 45 секунд. Проверьте статус компонента.".to_string())?

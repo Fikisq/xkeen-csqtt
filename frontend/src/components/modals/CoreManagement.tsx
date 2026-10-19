@@ -55,7 +55,7 @@ interface NfqwsStatus {
   scope: string
   strategyMode: 'tcp' | 'tcp-quic'
   verifiedTransport: 'tcp' | 'tcp-quic' | 'none' | 'unmeasured'
-  lastCheck?: { tcpSites?: number; http3Sites?: number; results?: Array<{ protocol: 'tcp' | 'h3'; ok: boolean }> } | null
+  lastCheck?: { checkedAt?: string; stale?: boolean; siteCount?: number; tcpSites?: number; http3Sites?: number; results?: Array<{ protocol: 'tcp' | 'h3'; ok: boolean }> } | null
   blocking: Record<string, string>
 }
 
@@ -397,7 +397,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
         {(editingCsqtt || editingWdtt || editingNfqws) && <Button variant="ghost" size="icon" className="text-ring hover:bg-muted! absolute top-4 right-4 transition-colors hover:text-white" aria-label="Вернуться к управлению ядром" onClick={closeCurrentView}><IconX className="size-6" /></Button>}
         <DialogHeader className="shrink-0">
           <DialogTitle className={`flex items-center gap-2 ${editingNfqws ? 'pr-8' : 'pb-3'}`}>
-          <IconCpu size={24} className="text-chart-2" /> {editingWdtt ? 'Настройка WDTT Plus' : editingCsqtt ? 'Настройка CSQTT' : editingNfqws ? 'Настройка nfqws2' : 'Управление ядром'}
+          <IconCpu size={24} className="text-chart-2" /> {editingWdtt ? 'Настройка WDTT Plus · Экспериментальный' : editingCsqtt ? 'Настройка CSQTT' : editingNfqws ? 'Настройка nfqws2' : 'Управление ядром'}
           </DialogTitle>
         </DialogHeader>
 
@@ -506,9 +506,9 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
             )
           })}
           <Separator />
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-3">
+          <div className="grid items-start gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
+            <div className="min-w-0">
+              <div className="flex min-h-8 flex-wrap items-center gap-2">
                 <span className="text-sm font-medium">CSQTT</span>
                 {csqttStatus && (
                   <Badge variant="outline" className={csqttStatus.ready ? 'rounded-sm border-none bg-green-500/10 px-2 text-xs text-green-400' : 'rounded-sm border-none bg-amber-500/10 px-2 text-xs text-amber-400'}>
@@ -522,7 +522,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
               {csqttStatus?.vkAccountNotice && <p className="mt-1 max-w-100 text-xs text-amber-400">{csqttStatus.vkAccountNotice}</p>}
               {csqttStatus?.diagnostic && <p role="alert" className="mt-1 max-w-100 text-xs text-amber-400">{csqttStatus.diagnostic}</p>}
             </div>
-            <div className="ml-auto flex max-w-full flex-wrap justify-end gap-2">
+            <div className="flex min-w-0 max-w-full flex-wrap justify-end gap-2">
               <Button variant="outline" size="sm" disabled={!csqttStatus?.installed} onClick={() => void openCsqttSettings()}>Настроить</Button>
 
               {csqttStatus?.installed && (csqttStatus.running ? <>
@@ -538,15 +538,16 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
           </div>
           {csqttStatus?.captcha && <div className="space-y-2 rounded-md border border-amber-500 p-3"><p>VK запросил капчу.</p><a className="text-blue-400 underline" href={csqttStatus.captcha.redirect_uri} target="_blank" rel="noopener noreferrer">Открыть капчу VK</a><p className="text-muted-foreground text-xs">После ручного прохождения вставьте success_token из ответа captchaNotRobot.check (вкладка «Сеть» в инструментах браузера). Автоматическое получение результата из другой вкладки пока не поддерживается.</p><Input type="password" autoComplete="off" value={captchaResult} onChange={(event) => setCaptchaResult(event.target.value)} placeholder="Результат прохождения капчи" /><Button disabled={controlPending || !captchaResult.trim()} onClick={() => void submitCsqttCaptcha()}>Передать результат</Button></div>}{csqttError && <p role="alert" className="text-sm text-red-500">{csqttError}</p>}
           <Separator />
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-3">
+          <div className="grid items-start gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
+            <div className="min-w-0">
+              <div className="flex min-h-8 flex-wrap items-center gap-2">
                 <span className="text-sm font-medium">WDTT Plus</span>
                 {wdttStatus && <Badge variant="outline" className={wdttStatus.ready ? 'rounded-sm border-none bg-green-500/10 px-2 text-xs text-green-400' : 'rounded-sm border-none bg-amber-500/10 px-2 text-xs text-amber-400'}>{wdttStatus.ready ? 'Туннель отвечает' : wdttStatus.running ? 'Туннель не отвечает' : wdttStatus.installed ? 'Остановлен' : 'Не установлен'}</Badge>}
               </div>
-              <p className="text-muted-foreground mt-0.5 text-xs">Отдельный сервис · {wdttStatus?.clientVersion ?? 'v18'} · SOCKS5 с UDP · {wdttStatus?.attached ? 'узел Xray добавлен' : 'узел Xray не добавлен'}</p>
+              <p className="text-muted-foreground mt-0.5 break-words text-xs">Экспериментальный · {wdttStatus?.clientVersion ?? 'v18'}</p>
+              <p className="text-muted-foreground mt-1 break-words text-xs">SOCKS5 с UDP · {wdttStatus?.attached ? 'узел Xray добавлен' : 'узел Xray не добавлен'}</p>
             </div>
-            <div className="ml-auto flex max-w-full flex-wrap justify-end gap-2">
+            <div className="flex min-w-0 max-w-full flex-wrap justify-end gap-2">
               <Button variant="outline" size="sm" disabled={!wdttStatus?.installed} onClick={() => setEditingWdtt(true)}>Настроить</Button>
               {wdttStatus?.installed && (wdttStatus.running ? <>
                 <Button variant="outline" size="sm" disabled={controlPending} onClick={() => void controlWdtt('restart')}>Перезапустить</Button>
@@ -559,16 +560,16 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
           </div>
           {wdttError && <p role="alert" className="text-sm text-red-500">{wdttError}</p>}
           <Separator />
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
+          <div className="grid items-start gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.6fr)]">
+            <div className="min-w-0">
+              <div className="flex min-h-8 flex-wrap items-center gap-2">
                 <span className="text-sm font-medium">nfqws2 · zapret2</span>
-                {nfqwsStatus && <Badge variant="outline" className={nfqwsStatus.running ? 'rounded-sm border-none bg-green-500/10 px-2 text-xs text-green-400' : 'rounded-sm border-none bg-amber-500/10 px-2 text-xs text-amber-400'}>{nfqwsStatus.running ? nfqwsStatus.mode === 'global' ? 'Активен' : 'Пробный режим' : nfqwsStatus.installed ? 'Остановлен' : 'Не установлен'}</Badge>}
-                {nfqwsStatus?.installed && <Badge variant="outline" className={nfqwsStatus.running && nfqwsStatus.lastCheck ? 'rounded-sm border-green-500/30 bg-green-500/10 px-2 text-xs text-green-400' : 'rounded-sm border-amber-500/30 bg-amber-500/10 px-2 text-xs text-amber-400'}>{nfqwsStatus.lastCheck ? `TCP ${nfqwsStatus.lastCheck.tcpSites ?? nfqwsStatus.lastCheck.results?.filter(item => item.protocol === 'tcp' && item.ok).length ?? 0}/2 · QUIC ${nfqwsStatus.lastCheck.http3Sites ?? nfqwsStatus.lastCheck.results?.filter(item => item.protocol === 'h3' && item.ok).length ?? 0}/2` : `${nfqwsStatus.strategyMode === 'tcp' ? 'TCP' : 'TCP + QUIC'} · не проверено`}</Badge>}
+                {nfqwsStatus && <Badge variant="outline" className={nfqwsStatus.running ? 'rounded-sm border-none bg-green-500/10 px-2 text-xs text-green-400' : 'rounded-sm border-none bg-yellow-500/10 px-2 text-xs text-yellow-400'}>{nfqwsStatus.running ? nfqwsStatus.mode === 'global' ? 'Активен' : 'Пробный режим' : nfqwsStatus.installed ? 'Остановлен' : 'Не установлен'}</Badge>}
+                {nfqwsStatus?.installed && <Badge variant="outline" title={`Последняя проверка активной стратегии: ${nfqwsStatus.lastCheck?.checkedAt ? new Date(nfqwsStatus.lastCheck.checkedAt).toLocaleString('ru-RU') : 'не выполнялась'}. Выбор в настройках применяется после сохранения.`} className={nfqwsStatus.running && nfqwsStatus.lastCheck ? 'rounded-sm border-green-500/30 bg-green-500/10 px-2 text-xs text-green-400' : 'rounded-sm border-yellow-500/30 bg-yellow-500/10 px-2 text-xs text-yellow-400'}>{nfqwsStatus.lastCheck ? `TCP ${nfqwsStatus.lastCheck.tcpSites ?? nfqwsStatus.lastCheck.results?.filter(item => item.protocol === 'tcp' && item.ok).length ?? 0}/${nfqwsStatus.lastCheck.siteCount || 3} · QUIC ${nfqwsStatus.lastCheck.http3Sites ?? nfqwsStatus.lastCheck.results?.filter(item => item.protocol === 'h3' && item.ok).length ?? 0}/${nfqwsStatus.lastCheck.siteCount || 3}` : `${nfqwsStatus.strategyMode === 'tcp' ? 'TCP' : 'TCP + QUIC'} · не проверено`}</Badge>}
                 {nfqwsStatus?.search?.running && <Badge variant="outline" className="rounded-sm border-sky-500/30 bg-sky-500/10 px-2 text-xs text-sky-400" title={`${nfqwsStatus.search.phase || 'Подготовка'} · проверено ${nfqwsStatus.search.completed || 0}${nfqwsStatus.search.total ? ` из ${nfqwsStatus.search.total}` : ''}`}><IconLoader2 className="mr-1 size-3 animate-spin" />Подбор стратегий · Списки</Badge>}
               </div>
             </div>
-            <div className="ml-auto flex flex-wrap gap-2">
+            <div className="flex min-w-0 max-w-full flex-wrap justify-end gap-2">
               {nfqwsStatus?.installed && <Button size="sm" variant="outline" onClick={() => setEditingNfqws(true)}>Настроить</Button>}
               {nfqwsStatus?.installed && !nfqwsStatus.globalReady && <Button size="sm" variant="outline" disabled={controlPending} onClick={() => void attachNfqwsToXray()}>Подключить к Xray</Button>}
               {nfqwsStatus?.installed && <Button size="sm" variant="outline" disabled={controlPending} onClick={() => void controlNfqws(nfqwsStatus.running ? 'stop' : 'start')}>{nfqwsStatus.running ? 'Остановить' : 'Запустить'}</Button>}

@@ -1,0 +1,72 @@
+{
+  "id": "own-strategies-v1",
+  "name": "Своя стратегия",
+  "enabled": true,
+  "entries": [
+    {
+      "id": "own-ttl2-11",
+      "name": "TS fake + Multisplit · TTL 2 / QUIC ×11",
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tls_mod=rnd,dupsid,sni=fonts.google.com:tcp_seq=10000:strategy=1\n--lua-desync=multisplit:pos=1,midsld:seqovl=1:seqovl_pattern=tls_clienthello:tcp_ts_up:strategy=1\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:ip_ttl=2:repeats=11\n"
+    },
+    {
+      "id": "own-ttl2-6",
+      "name": "TS fake + Multisplit · TTL 2 / QUIC ×6",
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tls_mod=rnd,dupsid,sni=fonts.google.com:tcp_seq=10000:strategy=1\n--lua-desync=multisplit:pos=1,midsld:seqovl=1:seqovl_pattern=tls_clienthello:tcp_ts_up:strategy=1\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:ip_ttl=2:repeats=6\n"
+    },
+    {
+      "id": "own-ttl3-11",
+      "name": "TS fake + Multisplit · TTL 3 / QUIC ×11",
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tls_mod=rnd,dupsid,sni=fonts.google.com:tcp_seq=10000:strategy=1\n--lua-desync=multisplit:pos=1,midsld:seqovl=1:seqovl_pattern=tls_clienthello:tcp_ts_up:strategy=1\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:ip_ttl=3:repeats=11\n"
+    },
+    {
+      "id": "own-ttl4-11",
+      "name": "TS fake + Multisplit · TTL 4 / QUIC ×11",
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tls_mod=rnd,dupsid,sni=fonts.google.com:tcp_seq=10000:strategy=1\n--lua-desync=multisplit:pos=1,midsld:seqovl=1:seqovl_pattern=tls_clienthello:tcp_ts_up:strategy=1\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:ip_ttl=4:repeats=11\n"
+    },
+    {
+      "id": "own-default11",
+      "name": "TS fake + Multisplit · QUIC ×11",
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tls_mod=rnd,dupsid,sni=fonts.google.com:tcp_seq=10000:strategy=1\n--lua-desync=multisplit:pos=1,midsld:seqovl=1:seqovl_pattern=tls_clienthello:tcp_ts_up:strategy=1\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=11\n"
+    },
+    {
+      "id": "own-default6",
+      "name": "TS fake + Multisplit · QUIC ×6",
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tls_mod=rnd,dupsid,sni=fonts.google.com:tcp_seq=10000:strategy=1\n--lua-desync=multisplit:pos=1,midsld:seqovl=1:seqovl_pattern=tls_clienthello:tcp_ts_up:strategy=1\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:repeats=6\n"
+    },
+    {
+      "id": "own-tcp-split2",
+      "name": "TS fake + Multisplit pos 2 / QUIC TTL 4 ×11",
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tls_mod=rnd,dupsid,sni=fonts.google.com:tcp_seq=10000:strategy=1\n--lua-desync=multisplit:pos=2,midsld:seqovl=1:seqovl_pattern=tls_clienthello:tcp_ts_up:strategy=1\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:ip_ttl=4:repeats=11\n"
+    },
+    {
+      "id": "own-tcp-disorder",
+      "name": "TS fake + Multidisorder / QUIC TTL 4 ×11",
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tls_mod=rnd,dupsid,sni=fonts.google.com:tcp_seq=10000:strategy=1\n--lua-desync=multidisorder:pos=1,midsld:seqovl=1:seqovl_pattern=tls_clienthello:tcp_ts_up:strategy=1\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:ip_ttl=4:repeats=11\n"
+    },
+    {
+      "id": "own-tcp-ack",
+      "name": "ACK fake + Multisplit / QUIC TTL 4 ×11",
+      "args": "--filter-tcp=443\n--filter-l7=tls\n--payload=tls_client_hello\n--lua-desync=fake:blob=0x00000000:tcp_ack=-66000:tls_mod=rnd,dupsid,sni=www.google.com:repeats=2\n--lua-desync=multisplit:pos=1,midsld\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:ip_ttl=4:repeats=11\n"
+    },
+    {
+      "id": "own-tcp-timestamp",
+      "name": "Timestamp fake + Multidisorder / QUIC TTL 4 ×11",
+      "args": "--filter-tcp=443\n--filter-l7=tls\n--payload=tls_client_hello\n--lua-desync=fake:blob=fake_default_tls:tls_mod=rnd,dupsid,sni=www.google.com:tcp_ts=-1000\n--lua-desync=multidisorder:pos=1,midsld,sniext+1,endhost-2,-10:seqovl=1:seqovl_pattern=tls_clienthello:tcp_ts_up\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:ip_ttl=4:repeats=11\n"
+    },
+    {
+      "id": "own-tcp-md5",
+      "name": "MD5 fake + Multidisorder / QUIC TTL 4 ×11",
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:tcp_md5:tcp_seq=-10000\n--lua-desync=multidisorder:pos=1,midsld\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:ip_ttl=4:repeats=11\n"
+    },
+    {
+      "id": "own-tcp-badsum",
+      "name": "Badsum fake + Multisplit / QUIC TTL 4 ×11",
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=fake:blob=tls_clienthello:badsum:tcp_seq=10000000:repeats=6\n--lua-desync=multisplit:pos=1,midsld\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:ip_ttl=4:repeats=11\n"
+    },
+    {
+      "id": "own-tcp-host",
+      "name": "Host fake Google / QUIC TTL 4 ×11",
+      "args": "--filter-tcp=443\n--payload=tls_client_hello\n--lua-desync=hostfakesplit:host=google.com:tcp_ts=-600000\n--new\n--filter-udp=443\n--payload=quic_initial\n--lua-desync=fake:blob=quic_initial:ip_ttl=4:repeats=11\n"
+    }
+  ]
+}
