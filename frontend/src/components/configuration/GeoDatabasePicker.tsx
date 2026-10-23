@@ -18,11 +18,12 @@ function resourceValue(kind: 'domain' | 'ip', item: Category): string {
   return `ext:${item.file}:${name}`
 }
 
-export function GeoDatabasePicker({ kind, resources, onChange, onPick }: {
+export function GeoDatabasePicker({ kind, resources, onChange, onPick, nativeOnly = false }: {
   kind: 'domain' | 'ip'
   resources: string[]
   onChange: (resources: string[]) => void
   onPick?: (name: string) => void
+  nativeOnly?: boolean
 }) {
   const [files, setFiles] = useState<string[]>([])
   const [fileFilter, setFileFilter] = useState('')
@@ -44,10 +45,10 @@ export function GeoDatabasePicker({ kind, resources, onChange, onPick }: {
     let alive = true
     void apiCall<Result<{ site_files?: string[]; ip_files?: string[] }>>('GET', 'geo').then(result => {
       if (!result.success) throw new Error(result.error || 'Не удалось загрузить базы')
-      if (alive) setFiles((kind === 'ip' ? result.ip_files : result.site_files) ?? [])
+      if (alive) setFiles(((kind === 'ip' ? result.ip_files : result.site_files) ?? []).filter(file => !nativeOnly || file === (kind === 'ip' ? 'geoip.dat' : 'geosite.dat')))
     }).catch(e => { if (alive) setError(String(e)) })
     return () => { alive = false }
-  }, [kind])
+  }, [kind, nativeOnly])
 
   useEffect(() => {
     let alive = true
@@ -109,8 +110,7 @@ export function GeoDatabasePicker({ kind, resources, onChange, onPick }: {
         <option value="">Все базы ({files.length})</option>
         {files.map(name => <option key={name} value={name}>{geoDatabaseLabel(name)}</option>)}
       </select>
-      <input ref={uploadInput} type="file" accept=".dat" className="hidden" onChange={event => { const selected = event.target.files?.[0]; if (selected) void upload(selected) }} />
-      <Button size="sm" variant="outline" disabled={uploading} onClick={() => uploadInput.current?.click()}>{uploading ? 'Загрузка…' : 'Добавить базу .dat'}</Button>
+      {!nativeOnly && <><input ref={uploadInput} type="file" accept=".dat" className="hidden" onChange={event => { const selected = event.target.files?.[0]; if (selected) void upload(selected) }} /><Button size="sm" variant="outline" disabled={uploading} onClick={() => uploadInput.current?.click()}>{uploading ? 'Загрузка…' : 'Добавить базу .dat'}</Button></>}
     </div>
     <Input value={search} onChange={event => setSearch(event.target.value)} placeholder="Поиск категории во всех базах…" aria-label="Поиск категории базы" />
     {error && <p role="alert" className="text-sm text-red-400">{error}</p>}

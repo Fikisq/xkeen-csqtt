@@ -5,8 +5,26 @@ use axum::response::{IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::io::Write;
 use std::path::Path;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+fn atomic_write_config(path: &str, content: &str) -> std::io::Result<()> {
+    let temporary = format!("{path}.{}.tmp", uuid::Uuid::new_v4());
+    let result = (|| {
+        let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary)?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()?;
+        let permissions = fs::metadata(path).map(|metadata| metadata.permissions())
+            .unwrap_or_else(|_| fs::Permissions::from_mode(0o600));
+        fs::set_permissions(&temporary, permissions)?;
+        fs::rename(&temporary, path)?;
+        if let Some(parent) = Path::new(path).parent() { if let Ok(directory) = fs::File::open(parent) { let _ = directory.sync_all(); } }
+        Ok(())
+    })();
+    if result.is_err() { let _ = fs::remove_file(&temporary); }
+    result
+}
 
 #[derive(Serialize)]
 struct ConfigItem {
@@ -439,7 +457,7 @@ pub async fn put_config(
         }
     }
 
-    if fs::write(&req.file, &content).is_err() {
+    if atomic_write_config(&req.file, &content).is_err() {
         return Json(ApiResponse::<()> {
             success: false,
             error: Some("Write error".into()),

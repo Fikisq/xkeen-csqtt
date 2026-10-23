@@ -42,7 +42,7 @@ import { fetchClashProxies, getAppState, useProxiesStore, syncClashApiPort, useA
 import type { Config } from '../../lib/types'
 import { cn } from '../../lib/utils'
 import { normalizeDevicePriority, baseRuleTag, type RouteTag, type RoutingRule } from '../../lib/xrayDeviceRouting'
-import { addMihomoCustomRoute, defaultMihomoChoices, readMihomoFullBypass, withMihomoFullBypass, isMihomoFullRoute, mihomoRouteTags, readMihomoDevices, removeMihomoRoute as removeMihomoRouteDefinition, editMihomoRouteResources, renameMihomoCustomRoute, reorderMihomoRoutes, updateMihomoDevice } from '../../lib/mihomoDeviceRouting'
+import { addMihomoCustomRoute, defaultMihomoChoices, prepareMihomoRouteGroups, readMihomoFullBypass, withMihomoFullBypass, isMihomoFullRoute, mihomoRouteTags, readMihomoDevices, removeMihomoRoute as removeMihomoRouteDefinition, editMihomoRouteResources, renameMihomoCustomRoute, reorderMihomoRoutes, updateMihomoDevice, withMihomoRouteEnabled } from '../../lib/mihomoDeviceRouting'
 import { enableXrayRoutingCards } from '../../lib/xraySubscription'
 import { createXrayRoutingQueue, rebaseXrayRouting } from '../../lib/xrayRoutingQueue'
 import { applyEdits, modify, parse as parseJsonc } from 'jsonc-parser'
@@ -732,7 +732,8 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
     if (configs.some(config => config.isDirty)) { showToast('Сначала сохраните изменения в редакторе', 'error'); return false }
     try {
       if (routingDraft && (routingDraft.file !== mihomoConfig.file || routingDraft.base !== mihomoConfig.savedContent)) throw new Error('Конфигурация изменилась. Скачайте черновик и отмените его перед повторным применением')
-      const content = transform(routingDraft?.content ?? withSelections(mihomoConfig.savedContent, liveMihomoSelections()))
+      const base = prepareMihomoRouteGroups(routingDraft?.content ?? withSelections(mihomoConfig.savedContent, liveMihomoSelections()))
+      const content = transform(base)
       setRoutingDraft({ file: mihomoConfig.file, base: mihomoConfig.savedContent, content })
       return true
     } catch (error) { showToast(error instanceof Error ? error.message : 'Не удалось изменить маршрут', 'error'); return false }
@@ -818,7 +819,7 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
         updated = addMihomoCustomRoute(updated, name, resources)
         routeTag = `custom:${encodeURIComponent(name.trim())}`
       } else {
-        if (routeTag !== 'VPN') updated = editMihomoRouteResources(updated, routeTag, resources)
+        if (routeTag !== 'VPN' && !deviceIp) updated = editMihomoRouteResources(updated, routeTag, resources)
         if (routeTag.startsWith('custom:') && name.trim() !== decodeURIComponent(routeTag.slice(7))) {
           updated = renameMihomoCustomRoute(updated, routeTag, name)
           routeTag = `custom:${encodeURIComponent(name.trim())}`
@@ -857,6 +858,10 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
 
   async function reorderMihomoRoute(source: RouteTag, target: RouteTag): Promise<boolean> {
     return editMihomoCustomRoute((content) => reorderMihomoRoutes(content, source, target), 'Порядок правил Mihomo сохранён')
+  }
+
+  async function toggleMihomoRoute(tag: RouteTag, enabled: boolean): Promise<boolean> {
+    return editMihomoCustomRoute((content) => withMihomoRouteEnabled(content, tag, enabled), 'Состояние правила изменено')
   }
 
   const isMihomo = currentCore === 'mihomo' && (!!activeClashApiPort || !!activeClashApiUnix)
@@ -1040,6 +1045,7 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
                         onImportRoutes={importMihomoRoutes}
                         onRemoveRoute={removeMihomoRoute}
                         onReorderRoute={reorderMihomoRoute}
+                        onToggleRoute={toggleMihomoRoute}
                       />
                       <section className="m-3"><LogPanel initialFile="mihomo.log" /></section>
                     </LazyBoundary>

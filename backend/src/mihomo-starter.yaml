@@ -9,12 +9,21 @@ routing-mark: 255
 external-controller-unix: /opt/etc/mihomo/mihomo-api.sock
 profile:
   store-selected: true
-proxies: []
+proxies:
+  - name: CSQTT
+    type: direct
+    interface-name: csqtt0
+    udp: true
+  - name: WDTT Plus
+    type: socks5
+    server: 127.0.0.1
+    port: 1088
+    udp: true
 proxy-providers:
 proxy-groups:
   - name: VPN
     type: select
-    proxies: [DIRECT]
+    proxies: [DIRECT, CSQTT, WDTT Plus]
 rules:
   - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
   - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
