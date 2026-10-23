@@ -785,7 +785,7 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
         return false
       }
       const profiles = readMihomoDevices(content)
-      const ips = profiles.filter(p => p.choices.VPN !== '@direct' && direct(p.choices.VPN)).map(p => p.ip)
+      const ips = profiles.filter(p => p.choices['__disabled:VPN'] !== 'true' && p.choices.VPN !== '@direct' && direct(p.choices.VPN)).map(p => p.ip)
       const bypass = await apiCall<{success: boolean; error?: string; warning?: string}>('POST', 'mihomo/device-direct', {ips})
       if (!bypass.success) throw new Error(bypass.error || 'Не удалось применить обход устройств')
       let name: string | undefined = proxies.VPN ? 'VPN' : 'Селектор'
@@ -804,8 +804,19 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
       if (!put.success) throw new Error(put.error || 'Проверка Mihomo не пройдена')
       saved = true
       const warning = await applyRuntime(draft.content, readSelections(draft.content))
+      const latestConfigs = getAppState().configs
+      const index = latestConfigs.findIndex(item => item.file === draft.file)
+      if (index >= 0) {
+        const existing = latestConfigs[index]
+        dispatch({ type: 'SAVE_CONFIG', index, content: draft.content })
+        if (existing.isDirty) dispatch({ type: 'UPDATE_CONFIG_DIRTY', index, content: existing.content, isDirty: true })
+        configsRef.current = latestConfigs.map((item, i) => i === index ? { ...item, savedContent: draft.content, content: existing.isDirty ? existing.content : draft.content, isDirty: existing.isDirty } : item)
+        if (activeIndexRef.current === index && editorRef.current) {
+          if (existing.isDirty) editorRef.current.setSavedContent(draft.content)
+          else editorRef.current.setValue(draft.content, draft.content)
+        }
+      }
       setRoutingDraft(null)
-      await onRefreshConfigs().catch(() => showToast('Маршрут применён, но список конфигураций не обновился. Обновите страницу', 'error'))
       showToast(warning || message || 'Маршрутизация Mihomo применена')
       return true
     } catch (error) {
@@ -869,8 +880,8 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
     return editMihomoCustomRoute((content) => reorderMihomoRoutes(content, source, target), 'Порядок правил Mihomo сохранён')
   }
 
-  async function toggleMihomoRoute(tag: RouteTag, enabled: boolean): Promise<boolean> {
-    return editMihomoCustomRoute((content) => withMihomoRouteEnabled(content, tag, enabled), 'Состояние правила изменено')
+  async function toggleMihomoRoute(tag: RouteTag, enabled: boolean, deviceIp?: string): Promise<boolean> {
+    return editMihomoCustomRoute((content) => withMihomoRouteEnabled(content, tag, enabled, deviceIp), 'Состояние правила изменено')
   }
 
   const isMihomo = currentCore === 'mihomo' && (!!activeClashApiPort || !!activeClashApiUnix)

@@ -194,6 +194,7 @@ export function readMihomoDevices(content: string): DeviceProfile[] {
       const stored = JSON.parse(decodeURIComponent(match[2])) as DeviceChoices
       const choices = {} as DeviceChoices
       for (const route of mihomoRouteTags(content)) if (typeof stored[route] === 'string') choices[route] = stored[route]
+      for (const route of mihomoRouteTags(content)) if (stored[`__disabled:${route}`] === 'true') choices[`__disabled:${route}`] = 'true'
       if (typeof choices.VPN === 'string') {
         for (const route of mihomoRouteTags(content)) if (typeof choices[route] !== 'string') choices[route] = choices.VPN
         profiles.push({ ip: match[1], choices })
@@ -285,7 +286,8 @@ export function updateMihomoDevice(content: string, ip: string, route: RouteTag 
   const existing = new Set([...groupNames(cleanContent), ...inlineProxyNames(cleanContent), 'DIRECT', 'REJECT', 'REJECT-DROP', 'PASS'])
   const providers = providerNames(cleanContent)
   const aliases = new Map<string, string>()
-  for (const profile of profiles) for (const name of Object.values(profile.choices)) {
+  for (const profile of profiles) for (const [key, name] of Object.entries(profile.choices)) {
+    if (key.startsWith('__disabled:')) continue
     if (name === '@direct' || existing.has(name) || aliases.has(name)) continue
     if (!providers.length) throw new Error(`Узел ${name} не объявлен в конфигурации Mihomo`)
     aliases.set(name, aliasFor(name))
@@ -294,17 +296,18 @@ export function updateMihomoDevice(content: string, ip: string, route: RouteTag 
   const managed = profiles.map((profile) => {
     const source = `SRC-IP-CIDR,${profile.ip}/32`
     const lines = [`  # ${START} ${profile.ip} ${encodeURIComponent(JSON.stringify(profile.choices))}`]
-    if (isMihomoFullRoute(profile.choices.VPN)) {
+    if (profile.choices['__disabled:VPN'] !== 'true' && isMihomoFullRoute(profile.choices.VPN)) {
       lines.push(`  - ${source},${ruleTarget(profile.choices.VPN)}`, `  # ${END} ${profile.ip}`)
       return lines.join('\n') + '\n'
     }
     for (const category of [...orderedMihomoRouteTags(content), ...mihomoRouteTags(content).filter((tag) => tag !== 'VPN' && !orderedMihomoRouteTags(content).includes(tag))]) {
+      if (profile.choices[`__disabled:${category}`] === 'true') continue
       const target = ruleTarget(profile.choices[category] === defaults.VPN ? profile.choices.VPN : profile.choices[category])
       for (const matcher of matchersForRoute(base, category, defaults)) {
         lines.push(`  - AND,((${source}),${matcher}),${target}`)
       }
     }
-    lines.push(`  - ${source},${ruleTarget(profile.choices.VPN)}`)
+    if (profile.choices['__disabled:VPN'] !== 'true') lines.push(`  - ${source},${ruleTarget(profile.choices.VPN)}`)
     lines.push(`  # ${END} ${profile.ip}`)
     return lines.join('\n') + '\n'
   }).join('')
@@ -448,15 +451,28 @@ export function readMihomoRouteNetwork(content: string, tag: RouteTag): MihomoRo
   return networks.size === 1 ? [...networks][0] : networks.size === 0 ? 'tcp,udp' : 'mixed'
 }
 
-export function isMihomoRouteEnabled(content: string, tag: RouteTag): boolean {
-  if (tag === 'VPN') return true
+export function isMihomoRouteEnabled(content: string, tag: RouteTag, deviceIp?: string): boolean {
+  if (deviceIp) return readMihomoDevices(content).find(p => p.ip === deviceIp)?.choices[`__disabled:${tag}`] !== 'true'
+  if (tag === 'VPN') return !/^  # xkeen-disabled-default /m.test(content)
   const block = uniqueRouteBlock(content, tag)
   if (!block) return true
   return !/^  # xkeen-disabled-rule /m.test(block.text)
 }
 
-export function withMihomoRouteEnabled(content: string, tag: RouteTag, enabled: boolean): string {
-  if (tag === 'VPN') throw new Error('Маршрут по умолчанию нельзя отключить')
+export function withMihomoRouteEnabled(content: string, tag: RouteTag, enabled: boolean, deviceIp?: string): string {
+  if (deviceIp) {
+    const profile = readMihomoDevices(content).find(p => p.ip === deviceIp)
+    if (!profile) throw new Error('Устройство не найдено')
+    const old = encodeURIComponent(JSON.stringify(profile.choices))
+    if (enabled) delete profile.choices[`__disabled:${tag}`]
+    else profile.choices[`__disabled:${tag}`] = 'true'
+    const updated = content.replace(`  # ${START} ${deviceIp} ${old}`, `  # ${START} ${deviceIp} ${encodeURIComponent(JSON.stringify(profile.choices))}`)
+    return updateMihomoDevice(updated, deviceIp, 'VPN')
+  }
+  if (tag === 'VPN') {
+    if (enabled) return content.replace(/^  # xkeen-disabled-default (MATCH,[^\r\n]+)\r?\n  - MATCH,DIRECT(?:\r?\n|$)/m, '  - $1\n')
+    return content.replace(/^  - (MATCH,[^\r\n]+)(?:\r?\n|$)/m, '  # xkeen-disabled-default $1\n  - MATCH,DIRECT\n')
+  }
   const block = uniqueRouteBlock(content, tag)
   if (!block) throw new Error('У маршрута нет отдельного непрерывного блока правил')
   const section = rulesSection(content)

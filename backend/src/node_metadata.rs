@@ -11,6 +11,7 @@ fn transport(proxy: &Yaml) -> Option<String> {
     let text = match kind.as_str() {
         "hysteria2" | "hy2" => "Hysteria2 · TLS / QUIC".to_string(),
         "tuic" => "TUIC · TLS / QUIC".to_string(),
+        "wireguard" => if proxy["amnezia-wg-option"].is_badvalue() { "WireGuard · UDP".to_string() } else { "AmneziaWG · UDP".to_string() },
         "vless" => {
             let network = proxy["network"].as_str().unwrap_or("tcp").to_ascii_lowercase();
             let transport = match network.as_str() {

@@ -72,7 +72,7 @@ interface Props {
   onImportRoutes: (rules: Array<{ tag: string; name: string; resources: string[]; outbound: string; network?: MihomoRouteNetwork }>) => Promise<boolean>
   onRemoveRoute: (tag: string) => Promise<boolean>
   onReorderRoute: (source: RouteTag, target: RouteTag) => Promise<boolean>
-  onToggleRoute: (tag: RouteTag, enabled: boolean) => Promise<boolean>
+  onToggleRoute: (tag: RouteTag, enabled: boolean, deviceIp?: string) => Promise<boolean>
 }
 
 const NO_DELAY_TYPES = new Set(['reject', 'reject-drop', 'dns', 'pass', 'passrule', 'relay'])
@@ -990,6 +990,7 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
           if (Number.isFinite(response.delay) && response.delay > 0) return response.delay
           throw new Error('Нет ответа через выбранное подключение')
         } catch (apiError) {
+          if (proxies[name]?.type.toLowerCase() === 'wireguard') throw new Error('AWG не ответил через работающий Mihomo. Повторный туннель с тем же ключом не запускается')
           if (!diagnostic) throw apiError
           const data = await apiCall<{ success: boolean; delay?: number; error?: string }>('POST', 'mihomo/node-ping', { name })
           if (!data.success || !Number.isFinite(data.delay) || !data.delay || data.delay <= 0) throw new Error(data.error || 'Нет ответа через выбранное подключение')
@@ -1270,7 +1271,7 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
         </div>
         <div className="flex flex-col gap-4">
         <section className="border-border bg-input-background/70 order-1 space-y-3 rounded-xl border p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-base font-semibold">Протоколы</h3><div className="ml-auto flex items-center gap-2"><Button size="sm" variant="outline" onClick={() => window.dispatchEvent(new Event('mihomo:open-subscriptions'))}>Подписки</Button><Button size="sm" variant="outline" disabled={!!testingGroups[generalSelector ?? 'VPN']} onClick={() => void testAll(generalSelector ?? 'VPN', protocolCards.filter(name => canProbe(allProxyData[name])))}><IconBoltFilled size={16} />{testingGroups[generalSelector ?? 'VPN'] ? 'Проверка…' : 'Пинг'}</Button></div></div>
+          <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-base font-semibold">Общий маршрут</h3><div className="ml-auto flex items-center gap-2"><Button size="sm" variant="outline" onClick={() => window.dispatchEvent(new Event('mihomo:open-subscriptions'))}>Подписки</Button><Button size="sm" variant="outline" disabled={!!testingGroups[generalSelector ?? 'VPN']} onClick={() => void testAll(generalSelector ?? 'VPN', protocolCards.filter(name => canProbe(allProxyData[name])))}><IconBoltFilled size={16} />{testingGroups[generalSelector ?? 'VPN'] ? 'Проверка…' : 'Пинг'}</Button></div></div>
           <div className="grid grid-cols-2 auto-rows-[100px] gap-2 sm:grid-cols-3 lg:grid-cols-6 2xl:grid-cols-7">
             {orderedCards(protocolCards.filter(name => name !== 'DIRECT' || !!allProxyData.DIRECT), cardOrder).map((name, _, cards) => {
               const proxy = allProxyData[name]
@@ -1278,7 +1279,7 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
               const selected = activeDevice ? activeDevice.choices.VPN === name : allProxyData[generalSelector ?? 'VPN']?.now === name
               return <div key={name} draggable title="Перетащите карточку, чтобы изменить порядок" onDragStart={event => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', name); setDraggedProtocol(name) }} onDragEnd={() => setDraggedProtocol(null)} onDragOver={event => { if (draggedProtocol) event.preventDefault() }} onDrop={event => { event.preventDefault(); if (draggedProtocol) moveCard(draggedProtocol, name, cards); setDraggedProtocol(null) }} className={cn('relative cursor-grab rounded-md border text-sm transition-colors active:cursor-grabbing', selected ? 'border-blue-400 bg-blue-500/20' : 'border-ring/40 hover:border-blue-400 hover:bg-blue-500/10')}>
                 <button type="button" className="flex h-full min-w-0 w-full flex-col gap-1 px-3 py-1.5 text-left" onClick={() => { if (activeDevice) void changeDevice(activeDevice.ip, 'VPN', name === 'DIRECT' ? '@direct' : name); else void onSelectDraft(generalSelector ?? 'VPN', name) }}>
-                  <span title={name} className="line-clamp-2 h-10 shrink-0 w-full break-words pr-16 font-medium leading-5">{displayName(name)}</span>
+                  <IconGripVertical size={15} className="text-muted-foreground absolute bottom-2 right-2" aria-label="Перетащить карточку" /><span title={name} className="line-clamp-2 h-10 shrink-0 w-full break-words pr-16 font-medium leading-5">{displayName(name)}</span>
                   <span className="text-muted-foreground line-clamp-2 break-words">{nodeTransports[name] ?? (proxy ? getProxyTransport(proxy) : 'Прямое соединение')}</span>
                 </button>
                 {canProbe(proxy) && <button type="button" className={cn('absolute right-2 top-1.5 w-16 rounded p-1 text-xs font-medium tabular-nums hover:bg-blue-500/20', delay === null ? 'text-sky-400' : delayColor(delay))} title={pingErrors[name] || 'HTTPS через выбранное подключение'} aria-label={`Пинг ${name}`} onClick={() => void testSingle(name)}>{useSelectorsStore.getState().testingSingle[name] ? '…' : delay === null ? <IconBoltFilled size={17} /> : delay > 0 ? `${delay} мс` : '✕'}</button>}
@@ -1337,7 +1338,7 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
                 onDrop={event => { event.preventDefault(); if (draggedRoute && route !== 'VPN') void moveRoute(draggedRoute, route) }}>
                 <td className="px-3 py-3 text-muted-foreground tabular-nums">{route === 'VPN' ? orderedTags.length + 1 : orderedTags.indexOf(route) + 1}</td>
                 <td className="px-3 py-3"><div className="flex items-center gap-1">{route !== 'VPN' && <><span draggable={!routePending} onDragStart={event => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', route); setDraggedRoute(route) }} onDragEnd={() => setDraggedRoute(null)} className="text-muted-foreground cursor-grab p-1" title="Перетащить правило"><IconGripVertical size={17} /></span><Button size="icon-xs" title="Повысить приоритет" aria-label={`Повысить приоритет ${routeLabel(route)}`} variant="outline" disabled={routePending || orderedTags.indexOf(route) < 1} onClick={() => void moveRoute(route, orderedTags[orderedTags.indexOf(route) - 1])}><IconChevronUp size={14} /></Button><Button size="icon-xs" title="Понизить приоритет" aria-label={`Понизить приоритет ${routeLabel(route)}`} variant="outline" disabled={routePending || orderedTags.indexOf(route) >= orderedTags.length - 1} onClick={() => void moveRoute(route, orderedTags[orderedTags.indexOf(route) + 1])}><IconChevronDown size={14} /></Button></>}<Button size="icon-xs" title="Изменить правило" aria-label="Изменить правило" variant="outline" onClick={() => openRouteEditor(route)}>✎</Button>{route !== 'VPN' && <Button size="icon-xs" title="Удалить правило" aria-label="Удалить правило" variant="outline" onClick={() => setDeletingTag(route)}>×</Button>}</div></td>
-                <td className="px-3 py-3">{route === 'VPN' ? '—' : <Switch size="sm" checked={isMihomoRouteEnabled(configContent, route)} disabled={routePending || !!activeDevice} aria-label={`${isMihomoRouteEnabled(configContent, route) ? 'Выключить' : 'Включить'} ${routeLabel(route)}`} onCheckedChange={checked => { setRoutePending(true); void onToggleRoute(route, checked).finally(() => setRoutePending(false)) }} />}</td>
+                <td className="px-3 py-3"><Switch size="sm" checked={isMihomoRouteEnabled(configContent, route, activeDevice?.ip)} disabled={routePending} aria-label={`${isMihomoRouteEnabled(configContent, route, activeDevice?.ip) ? 'Выключить' : 'Включить'} ${routeLabel(route)}`} onCheckedChange={checked => { setRoutePending(true); void onToggleRoute(route, checked, activeDevice?.ip).finally(() => setRoutePending(false)) }} /></td>
                 <td className="px-3 py-3 font-medium">{routeLabel(route)}</td>
                 <td className="text-muted-foreground px-3 py-3">{route === 'VPN' ? 'TCP, UDP' : readMihomoRouteNetwork(configContent, route) === 'mixed' ? 'Смешанная' : readMihomoRouteNetwork(configContent, route).toUpperCase().replace(',', ', ')}</td>
                 <td className="px-3 py-3 text-sm">{route === 'VPN' ? 'Остальной трафик' : destinationSummary(values)}</td>
