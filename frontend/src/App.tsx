@@ -524,7 +524,6 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           <ConfigPanel
             editorRef={editorRef}
             configActionsRef={configActionsRef}
-            onOpenImport={() => openModal('showImportModal')}
             onOpenTemplate={() => openModal('showTemplateModal')}
             onOpenGeoScan={() => openModal('showGeoScanModal')}
             onOpenBackups={() => openModal('showBackupsModal')}

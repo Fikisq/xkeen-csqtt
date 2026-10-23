@@ -479,6 +479,7 @@ async fn main() {
     };
 
     xray_subscription_refresh::start(state.clone());
+    mihomo_subscription_refresh::start(state.clone());
     if let Err(error) = management_script::install() {
         log("ERROR", format!("Установка xkeen-manager: {error}"));
     }

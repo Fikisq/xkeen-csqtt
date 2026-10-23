@@ -28,7 +28,6 @@ import {
   IconExternalLinkFilled,
   IconFilePlus,
   IconFileText,
-  IconListDetails,
   IconPencil,
   IconRefresh,
   IconSearch,
@@ -46,7 +45,6 @@ import { normalizeDevicePriority, baseRuleTag, type RouteTag, type RoutingRule }
 import { addMihomoCustomRoute, defaultMihomoChoices, readMihomoFullBypass, withMihomoFullBypass, isMihomoFullRoute, mihomoRouteTags, readMihomoDevices, removeMihomoRoute as removeMihomoRouteDefinition, editMihomoRouteResources, renameMihomoCustomRoute, reorderMihomoRoutes, updateMihomoDevice } from '../../lib/mihomoDeviceRouting'
 import { enableXrayRoutingCards } from '../../lib/xraySubscription'
 import { createXrayRoutingQueue, rebaseXrayRouting } from '../../lib/xrayRoutingQueue'
-import { linkProviderToVpn } from '../../lib/mihomoSubscription'
 import { applyEdits, modify, parse as parseJsonc } from 'jsonc-parser'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '../ui/context-menu'
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '../ui/input-group'
@@ -54,7 +52,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover'
 import type { CodeMirrorRef } from './CodeMirror'
 
 const ConnectionsPanel = lazyLoad(() => import('./mihomo/Connections'), 'ConnectionsPanel')
-const ProvidersModal = lazyLoad(() => import('../modals/Providers'), 'ProvidersModal')
 const BackupsModal = lazyLoad(() => import('../modals/Backups'), 'BackupsModal')
 const SelectorsPanel = lazyLoad(() => import('./mihomo/Selectors'), 'SelectorsPanel')
 const XrayGlobalRoutingTable = lazyLoad(() => import('./xray/XrayGlobalRoutingTable'), 'XrayGlobalRoutingTable')
@@ -80,12 +77,10 @@ const BackupsModalContainer = memo(function BackupsModalContainer({
 })
 
 type ClashMode = 'rule' | 'global' | 'direct'
-type ProvidersModalKind = 'rules' | 'proxies'
 
 const TOGGLE_ALL_SELECTORS_EVENT = 'mihomo:toggle-all-selectors'
 
 interface Props {
-  onOpenImport: () => void
   onOpenTemplate: () => void
   onOpenGeoScan: () => void
   onOpenBackups: () => void
@@ -276,7 +271,7 @@ function ConfigTab({ config, currentCore, showToast, onRefreshConfigs, withConte
   )
 }
 
-export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpenBackups, onRefreshConfigs, editorRef, configActionsRef }: Props) {
+export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRefreshConfigs, editorRef, configActionsRef }: Props) {
   const { state, dispatch, showToast } = useAppContext({ includeConfigs: true })
   const { configs, isConfigsLoading, currentCore, serviceStatus, clashApiPort, clashApiSecret, clashApiUnix } = state
 
@@ -313,9 +308,6 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
     return () => window.removeEventListener('beforeunload', warn)
   }, [routingDraft, routingAutoSaving])
   const [allSelectorsCollapsed, setAllSelectorsCollapsed] = useState(false)
-  const [providersModalKind, setProvidersModalKind] = useState<ProvidersModalKind | null>(null)
-  const [isProvidersModalOpen, setIsProvidersModalOpen] = useState(false)
-  const mountProvidersModal = useLazyMount(isProvidersModalOpen)
   const currentPanel = isRunning ? currentCore === 'xray' && activePanel === 'connections' ? 'selectors' : activePanel : 'config'
 
   useEffect(() => {
@@ -456,12 +448,6 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
     setValidationState((prev) => (prev?.isValid === isValid && prev?.error === error ? prev : { isValid, error }))
   }, [])
 
-  const openProvidersModal = useCallback((kind: ProvidersModalKind) => {
-    setProvidersModalKind(kind)
-    setIsProvidersModalOpen(true)
-  }, [])
-
-  const handleProvidersModalOpenChange = useCallback((open: boolean) => setIsProvidersModalOpen(open), [])
 
   const refreshConfigsAndEditor = useCallback(async () => {
     const currentCfg = configsRef.current[activeIndexRef.current]
@@ -824,59 +810,53 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
     } finally { setRoutingSaving(false) }
   }
 
-  async function addMihomoRoute(name: string, domains: string[]): Promise<boolean> {
-    return editMihomoCustomRoute((content) => addMihomoCustomRoute(content, name, domains), `Маршрут «${name}» добавлен`)
+  async function saveMihomoRoute(tag: RouteTag | null, name: string, resources: string[], target: string, deviceIp?: string): Promise<boolean> {
+    return editMihomoCustomRoute(content => {
+      let updated = content
+      let routeTag = tag
+      if (!routeTag) {
+        updated = addMihomoCustomRoute(updated, name, resources)
+        routeTag = `custom:${encodeURIComponent(name.trim())}`
+      } else {
+        if (routeTag !== 'VPN') updated = editMihomoRouteResources(updated, routeTag, resources)
+        if (routeTag.startsWith('custom:') && name.trim() !== decodeURIComponent(routeTag.slice(7))) {
+          updated = renameMihomoCustomRoute(updated, routeTag, name)
+          routeTag = `custom:${encodeURIComponent(name.trim())}`
+        }
+      }
+      const group = defaultMihomoChoices(updated)[routeTag]
+      if (!group) throw new Error('Группа маршрута не найдена')
+      if (deviceIp) return updateMihomoDevice(updated, deviceIp, routeTag, target === '@inherit' ? group : target === 'DIRECT' && routeTag === 'VPN' ? '@direct' : target)
+      return withSelections(updated, { ...readSelections(updated), [group]: target })
+    }, 'Маршрут обновлён')
+  }
+
+  async function importMihomoRoutes(rules: Array<{ tag: string; name: string; resources: string[]; outbound: string }>): Promise<boolean> {
+    return editMihomoCustomRoute(content => {
+      let updated = content
+      for (const rule of rules) {
+        if (rule.tag === 'VPN') continue
+        let tag = rule.tag
+        if (tag.startsWith('custom:') && !mihomoRouteTags(updated).includes(tag)) {
+          updated = addMihomoCustomRoute(updated, rule.name, rule.resources)
+          tag = `custom:${encodeURIComponent(rule.name.trim())}`
+        } else {
+          if (!mihomoRouteTags(updated).includes(tag)) throw new Error(`Неизвестное правило: ${tag}`)
+          updated = editMihomoRouteResources(updated, tag, rule.resources)
+        }
+        const group = defaultMihomoChoices(updated)[tag]
+        if (group) updated = withSelections(updated, { ...readSelections(updated), [group]: rule.outbound })
+      }
+      return updated
+    }, 'Правила импортированы')
   }
 
   async function removeMihomoRoute(tag: string): Promise<boolean> {
     return editMihomoCustomRoute((content) => removeMihomoRouteDefinition(content, tag), 'Маршрут удалён')
   }
 
-  async function editMihomoResources(tag: RouteTag, values: string[]): Promise<boolean> {
-    return editMihomoCustomRoute(content => editMihomoRouteResources(content, tag, values), 'Ресурсы маршрута обновлены')
-  }
-
-  async function renameMihomoRoute(tag: string, name: string): Promise<boolean> {
-    return editMihomoCustomRoute((content) => renameMihomoCustomRoute(content, tag, name), `Маршрут переименован в «${name.trim()}»`)
-  }
-
   async function reorderMihomoRoute(source: RouteTag, target: RouteTag): Promise<boolean> {
     return editMihomoCustomRoute((content) => reorderMihomoRoutes(content, source, target), 'Порядок правил Mihomo сохранён')
-  }
-
-  async function connectMihomoSubscriptions() {
-    if (configs.some((config) => config.isDirty)) return showToast('Сначала сохраните изменения в редакторе', 'error')
-    const config = configs.find((item) => item.file.endsWith('/config.yaml') || item.file === 'config.yaml')
-    if (!config) return showToast('Mihomo config.yaml не найден', 'error')
-    let saved = false
-    try {
-      const parsed = jsyaml.load(config.savedContent) as Record<string, any>
-      const providers = Object.keys(parsed?.['proxy-providers'] ?? {})
-      if (providers.length === 0) throw new Error('В config.yaml нет proxy-providers')
-      let content = config.savedContent
-      for (const provider of providers) content = linkProviderToVpn(content, `  ${provider}:\n`)
-      if (content === config.savedContent) return showToast('Провайдеры уже доступны в группах')
-      dispatch({ type: 'SET_SERVICE_STATUS', status: 'pending', pendingText: 'Обновление групп Mihomo...' })
-      const put = await apiCall<{ success: boolean; error?: string }>('PUT', 'configs?validate=mihomo', { file: config.file, content })
-      if (!put.success) throw new Error(put.error || 'Mihomo не принял конфигурацию')
-      saved = true
-      const restart = await apiCall<{ success: boolean; error?: string }>('POST', 'control', { action: 'hardRestart', core: 'mihomo' })
-      if (!restart.success) throw new Error(restart.error || 'Mihomo не перезапустился')
-      const status = await apiCall<{ success: boolean; running: boolean }>('GET', 'control')
-      if (!status.success || !status.running) throw new Error('Mihomo не запустился после обновления групп')
-      await onRefreshConfigs()
-      if (activeClashApiPort || activeClashApiUnix) await fetchClashProxies(activeClashApiPort ?? '', clashApiSecret, true, activeClashApiUnix ?? null)
-      showToast('Узлы подписок подключены к группам')
-      dispatch({ type: 'SET_SERVICE_STATUS', status: 'running' })
-    } catch (error) {
-      if (saved) {
-        const rollback = await apiCall<{ success: boolean }>('PUT', 'configs?validate=mihomo', { file: config.file, content: config.savedContent }).catch(() => null)
-        if (rollback?.success) await apiCall('POST', 'control', { action: 'hardRestart', core: 'mihomo' }).catch(() => null)
-      }
-      const status = await apiCall<{ success: boolean; running: boolean }>('GET', 'control').catch(() => null)
-      dispatch({ type: 'SET_SERVICE_STATUS', status: status?.running ? 'running' : 'stopped' })
-      showToast(error instanceof Error ? error.message : 'Не удалось подключить узлы к группам', 'error')
-    }
   }
 
   const isMihomo = currentCore === 'mihomo' && (!!activeClashApiPort || !!activeClashApiUnix)
@@ -969,10 +949,6 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
             {isMihomo && currentPanel === 'selectors' && (
               <div className="ml-auto flex items-center gap-1.5">
                 <Button variant="outline" className="text-[13px]" onClick={() => window.dispatchEvent(new Event('mihomo:open-subscriptions'))}>Подписки</Button>
-                <Button variant="outline" className="text-[13px]" onClick={() => openProvidersModal('rules')}>
-                  <IconListDetails data-icon="inline-start" />
-                  Рулсеты
-                </Button>
                 <Tooltip>
                   <TooltipTrigger render={
                     <Button
@@ -1060,10 +1036,9 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
                         isDraft={!!activeRoutingDraft}
                         onSelectDraft={selectMihomoDraft}
                         onDeviceSelect={selectMihomoDevice}
-                        onAddRoute={addMihomoRoute}
+                        onSaveRoute={saveMihomoRoute}
+                        onImportRoutes={importMihomoRoutes}
                         onRemoveRoute={removeMihomoRoute}
-                        onEditResources={editMihomoResources}
-                        onRenameRoute={renameMihomoRoute}
                         onReorderRoute={reorderMihomoRoute}
                       />
                       <section className="m-3"><LogPanel initialFile="mihomo.log" /></section>
@@ -1215,20 +1190,6 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
             </div>
           )}
         </div>
-        {providersModalKind && mountProvidersModal && (
-          <LazyBoundary>
-            <ProvidersModal
-              open={isProvidersModalOpen}
-              kind={providersModalKind}
-              clashApiPort={activeClashApiPort ?? ''}
-              clashApiSecret={clashApiSecret ?? null}
-              clashApiUnix={activeClashApiUnix ?? null}
-              onOpenChange={handleProvidersModalOpenChange}
-              onAddSubscription={onOpenImport}
-              onConnectProviders={connectMihomoSubscriptions}
-            />
-          </LazyBoundary>
-        )}
         <BackupsModalContainer onRefreshConfigs={refreshConfigsAndEditor} />
       </>
     </TooltipProvider>

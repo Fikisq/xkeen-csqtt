@@ -153,7 +153,7 @@ async fn refresh(state: &AppState, apply: bool, diagnostics: &mut Vec<String>) -
     if entries.is_empty() { return Ok(false); }
     let mut downloaded = Vec::new();
     for entry in &entries {
-        let response = subscription::preview_subscription(Json(SubscriptionRequest { url: entry.url.clone(), allow_lan: entry.allow_lan })).await.0;
+        let response = subscription::preview_subscription(Json(SubscriptionRequest { url: entry.url.clone(), allow_lan: true })).await.0;
         let content = response["content"].as_str().ok_or("Не удалось загрузить подписку Xray")?;
         downloaded.push(uris(content)?);
     }

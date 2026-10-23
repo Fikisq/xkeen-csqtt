@@ -20,7 +20,7 @@ import {
   IconGripVertical,
   IconPlugX,
 } from '@tabler/icons-react'
-import { createContext, useContext, memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { createContext, useContext, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
@@ -65,10 +65,9 @@ interface Props {
   configContent: string
   onSelectDraft: (name: string, target: string) => Promise<boolean>
   onDeviceSelect: (ip: string, route: RouteTag | null, target?: string) => Promise<boolean>
-  onAddRoute: (name: string, domains: string[]) => Promise<boolean>
-  onEditResources: (tag: RouteTag, values: string[]) => Promise<boolean>
+  onSaveRoute: (tag: RouteTag | null, name: string, resources: string[], target: string, deviceIp?: string) => Promise<boolean>
+  onImportRoutes: (rules: Array<{ tag: string; name: string; resources: string[]; outbound: string }>) => Promise<boolean>
   onRemoveRoute: (tag: string) => Promise<boolean>
-  onRenameRoute: (tag: string, name: string) => Promise<boolean>
   onReorderRoute: (source: RouteTag, target: RouteTag) => Promise<boolean>
 }
 
@@ -827,7 +826,7 @@ const SelectorRow = memo(function SelectorRow({
 })
 
 /* ====================== ОСНОВНОЙ КОМПОНЕНТ ====================== */
-function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCollapsedStateChange, configContent, onDeviceSelect, onAddRoute, onRemoveRoute, onEditResources, onRenameRoute, onReorderRoute, onSelectDraft }: Props) {
+function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCollapsedStateChange, configContent, onDeviceSelect, onSaveRoute, onImportRoutes, onRemoveRoute, onReorderRoute, onSelectDraft }: Props) {
   const { showToast } = useAppContext()
   const loading = useRoutingProxies((s) => s.loading)
   const error = useRoutingProxies((s) => s.error)
@@ -840,12 +839,14 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
   const [routeSearch, setRouteSearch] = useState('')
   const [routeName, setRouteName] = useState('')
   const [routeDomains, setRouteDomains] = useState('')
+  const [routeTarget, setRouteTarget] = useState('DIRECT')
   const [routePending, setRoutePending] = useState(false)
+  const importInput = useRef<HTMLInputElement>(null)
   const [draggedRoute, setDraggedRoute] = useState<RouteTag | null>(null)
-  const [renamingTag, setRenamingTag] = useState('')
-  const [renamingName, setRenamingName] = useState('')
   const [deletingTag, setDeletingTag] = useState<RouteTag | null>(null)
   const [editingTag, setEditingTag] = useState<RouteTag | null>(null)
+  const [editingName, setEditingName] = useState('')
+  const [editingTarget, setEditingTarget] = useState('DIRECT')
   const [resources, setResources] = useState<string[]>([])
   const [resourceSearch, setResourceSearch] = useState('')
   const cardOrder = useCardOrder(s => s.order)
@@ -871,7 +872,7 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
     return [...new Set(names)]
   }, [allProxyData])
   const protocolCards = useMemo(() => deviceOptions.filter(name =>
-    name === 'DIRECT' || (!name.startsWith('xkeen-device-node-') && !!allProxyData[name] && !SELECTOR_TYPES.has(allProxyData[name]!.type))
+    name === 'DIRECT' || (!name.startsWith('xkeen-device-node-') && !!allProxyData[name] && !NO_SORT_TYPES.has(allProxyData[name]!.type) && !['compatible', 'pass', 'pass-rule', 'reject', 'reject-drop', 'rejectdrop', 'dns'].includes(allProxyData[name]!.type.toLowerCase()))
   ), [deviceOptions, allProxyData])
 
   async function changeDevice(ip: string, route: RouteTag | null, target?: string): Promise<boolean> {
@@ -1021,18 +1022,60 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
       return [...new Set([...providers, ...existing])]
     } catch { return [] }
   }, [configContent, orderedTags])
+  const providerBehaviors = useMemo(() => {
+    try {
+      const providers = (yaml.load(configContent) as any)?.['rule-providers'] ?? {}
+      return Object.fromEntries(Object.entries(providers).map(([name, value]) => [name, String((value as any)?.behavior ?? '')])) as Record<string, string>
+    } catch { return {} as Record<string, string> }
+  }, [configContent])
+  function destinationSummary(values: string[]) {
+    const domains: string[] = []
+    const ips: string[] = []
+    for (const value of values) {
+      const [kind, ...rest] = value.split(',')
+      const name = rest.join(',')
+      const target = kind === 'GEOIP' || kind === 'IP-CIDR' || kind === 'IP-CIDR6' || (kind === 'RULE-SET' && providerBehaviors[name] === 'ipcidr') ? ips : domains
+      target.push(kind === 'RULE-SET' ? name : kind === 'GEOSITE' || kind === 'GEOIP' ? `${kind}: ${name}` : kind.startsWith('DOMAIN') ? name : value)
+    }
+    return <div className="max-h-24 overflow-auto break-words">{domains.length > 0 && <div><span className="font-medium text-foreground">Домены:</span> {domains.join(' · ')}</div>}{ips.length > 0 && <div><span className="font-medium text-foreground">IP:</span> {ips.join(' · ')}</div>}{!domains.length && !ips.length && '—'}</div>
+  }
+  function exportRoutes() {
+    const rules = orderedTags.map(tag => ({ tag, name: routeLabel(tag), resources: readMihomoRouteResources(configContent, tag), outbound: allProxyData[defaultChoices[tag]]?.now ?? 'DIRECT' }))
+    const blob = new Blob([JSON.stringify({ format: 'xkeen-mihomo-routes-v1', rules }, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url; anchor.download = 'mihomo-routes.json'; anchor.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+  async function importRoutes(file: File) {
+    try {
+      if (file.size > 1024 * 1024) throw new Error('Файл правил слишком большой')
+      const data = JSON.parse(await file.text()) as { format?: string; rules?: unknown }
+      if (data.format !== 'xkeen-mihomo-routes-v1' || !Array.isArray(data.rules) || data.rules.length > 50 || data.rules.some((rule: any) => typeof rule?.tag !== 'string' || typeof rule?.name !== 'string' || !Array.isArray(rule?.resources) || rule.resources.some((value: unknown) => typeof value !== 'string') || typeof rule?.outbound !== 'string')) throw new Error('Неверный формат файла правил Mihomo')
+      setRoutePending(true)
+      await onImportRoutes(data.rules as Array<{ tag: string; name: string; resources: string[]; outbound: string }>)
+    } catch (error) { showToast(error instanceof Error ? error.message : 'Не удалось импортировать правила', 'error') }
+    finally { setRoutePending(false) }
+  }
+  function openRouteEditor(route: RouteTag) {
+    const group = defaultChoices[route]
+    const choice = activeDevice?.choices[route]
+    setEditingTag(route)
+    setEditingName(routeLabel(route))
+    setResources(route === 'VPN' ? [] : readMihomoRouteResources(configContent, route))
+    setEditingTarget(choice === group ? '@inherit' : choice === '@direct' ? 'DIRECT' : choice ?? allProxyData[group]?.now ?? 'DIRECT')
+    setResourceSearch('')
+  }
   function routeControls(route: RouteTag) {
     const index = orderedTags.indexOf(route)
     return <div className="flex flex-wrap items-center gap-1.5 text-xs">
       <span className="text-muted-foreground flex w-7 justify-center rounded border px-1 py-0.5 tabular-nums">{route === 'VPN' ? orderedTags.length + 1 : index + 1}</span>
       {route !== 'VPN' && <>
         <span draggable={!routePending} onDragStart={event => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', route); setDraggedRoute(route) }} onDragEnd={() => setDraggedRoute(null)} className="text-muted-foreground cursor-grab p-1 active:cursor-grabbing" title="Перетащить правило"><IconGripVertical size={18} /></span>
-        <Button size="icon-xs" title="Выше" aria-label="Выше" variant="outline" disabled={routePending || index <= 0} onClick={() => void moveRoute(route, orderedTags[index - 1])}>↑</Button>
-        <Button size="icon-xs" title="Ниже" aria-label="Ниже" variant="outline" disabled={routePending || index === orderedTags.length - 1} onClick={() => void moveRoute(route, orderedTags[index + 1])}>↓</Button>
-        <Button size="icon-xs" title="Изменить ресурсы" aria-label="Изменить ресурсы" variant="outline" disabled={routePending} onClick={() => { setEditingTag(route); setResources(readMihomoRouteResources(configContent, route)); setResourceSearch('') }}>✎</Button>
-        {route.startsWith('custom:') && <Button size="icon-xs" title="Переименовать" aria-label="Переименовать" variant="outline" disabled={routePending} onClick={() => { setRenamingTag(route); setRenamingName(routeLabel(route)) }}>А</Button>}
+        <Button size="icon-xs" title="Изменить правило" aria-label="Изменить правило" variant="outline" disabled={routePending} onClick={() => openRouteEditor(route)}>✎</Button>
         <Button size="icon-xs" title="Удалить маршрут" aria-label="Удалить маршрут" variant="outline" disabled={routePending} onClick={() => setDeletingTag(route)}>×</Button>
       </>}
+      {route === 'VPN' && <Button size="icon-xs" title="Изменить исходящее" aria-label="Изменить исходящее" variant="outline" disabled={routePending} onClick={() => openRouteEditor(route)}>✎</Button>}
     </div>
   }
 
@@ -1152,59 +1195,57 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
             })}
           </div>
         </section>
-        {!activeDeviceDirect && <div className="order-2 flex flex-wrap items-center gap-2">
-          <Button size="sm" onClick={() => setAddingRoute(true)}>+ Добавить правило</Button>
-          <Dialog open={addingRoute} onOpenChange={setAddingRoute}><DialogContent className="max-w-[min(94vw,680px)]! max-h-[85dvh] overflow-y-auto"><DialogHeader><DialogTitle>Новый маршрут</DialogTitle></DialogHeader><div className="flex flex-col gap-4">
-<label className="space-y-2 text-sm font-medium">Название маршрута<Input value={routeName} onChange={(event) => setRouteName(event.target.value)} placeholder="Например, Работа или Видеосервисы" aria-label="Название маршрута" maxLength={40} /></label>
+        {<div className="order-2 flex flex-wrap items-center gap-2">
+          <Button size="sm" onClick={() => { setRouteTarget(allProxyData[defaultChoices.VPN]?.now ?? 'DIRECT'); setAddingRoute(true) }}>+ Добавить правило</Button>
+          <input ref={importInput} type="file" accept=".json,application/json" className="hidden" aria-label="Файл правил Mihomo" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importRoutes(file) }} />
+          <Button size="sm" variant="outline" disabled={routePending} onClick={() => importInput.current?.click()}>Импорт</Button>
+          <Button size="sm" variant="outline" onClick={exportRoutes}>Экспорт</Button>
+          {!activeDevice && <Button size="sm" className="ml-auto" variant={globalDirect ? 'default' : 'outline'} disabled={routePending} onClick={() => void onSelectDraft(defaultChoices.VPN, globalDirect ? 'DIRECT' : '@bypass')}>🔓 Полный обход без VPN: {globalDirect ? 'включён' : 'выключен'}</Button>}
+          <Dialog open={addingRoute} onOpenChange={setAddingRoute}><DialogContent className="max-w-[min(94vw,680px)]! max-h-[85dvh] overflow-y-auto"><DialogHeader><DialogTitle>Новое правило</DialogTitle></DialogHeader><div className="flex flex-col gap-4">
+<label className="space-y-2 text-sm font-medium">Комментарий<Input value={routeName} onChange={(event) => setRouteName(event.target.value)} placeholder="Например, Работа или Видеосервисы" aria-label="Название маршрута" maxLength={40} /></label>
             <Input value={routeSearch} onChange={(event) => setRouteSearch(event.target.value)} placeholder="Найти сервис: Telegram, YouTube, нейронки…" aria-label="Поиск сервиса" />
             <div className="flex flex-wrap gap-2">{findRoutePresets(routeSearch).map((preset) => <Button key={preset.name} size="sm" variant="outline" onClick={() => { setRouteName(current => current || preset.name); setRouteDomains(current => [...new Set([...current.split('\n').filter(Boolean), ...preset.domains])].join('\n')) }}>{preset.name}</Button>)}</div>
 
             <div className="flex flex-wrap gap-2">{routeDomains.split('\n').filter(Boolean).map(value => <button key={value} type="button" className="rounded border border-blue-400 bg-blue-500/20 px-2 py-1 text-xs" onClick={() => setRouteDomains(routeDomains.split('\n').filter(item => item !== value).join('\n'))}>{value} ×</button>)}</div>
             <div className="max-h-64 overflow-y-auto rounded border p-1">{resourceOptions.filter(value => value.toLowerCase().includes(routeSearch.toLowerCase())).map(value => { const selected = routeDomains.split('\n').includes(value); return <button type="button" key={value} aria-pressed={selected} className={cn('block w-full rounded px-2 py-2 text-left hover:bg-blue-500/10', selected && 'bg-blue-500/20')} onClick={() => setRouteDomains(selected ? routeDomains.split('\n').filter(item => item !== value).join('\n') : [...routeDomains.split('\n').filter(Boolean), value].join('\n'))}>{selected ? '✓ ' : ''}{value}</button> })}</div>
 
-            <Button size="sm" disabled={routePending || !routeName.trim() || !routeDomains.trim()} onClick={async () => { setRoutePending(true); try { const saved = await onAddRoute(routeName, routeDomains.split(/\r?\n/).map((domain) => domain.trim()).filter(Boolean)); if (saved) { setRouteName(''); setRouteDomains(''); setRouteSearch(''); setAddingRoute(false) } } finally { setRoutePending(false) } }}>Создать маршрут</Button>
+            <label className="space-y-2 text-sm font-medium">Исходящее<select className="border-border bg-input-background w-full rounded-lg border px-3 py-2 text-sm" value={routeTarget} onChange={event => setRouteTarget(event.target.value)}>{[...new Set([routeTarget, ...protocolCards])].map(name => <option key={name} value={name}>{displayName(name)}</option>)}</select></label>
+            <Button size="sm" disabled={routePending || !routeName.trim() || !routeDomains.trim()} onClick={async () => { setRoutePending(true); try { const saved = await onSaveRoute(null, routeName, routeDomains.split(/\r?\n/).map((domain) => domain.trim()).filter(Boolean), routeTarget, activeDevice?.ip); if (saved) { setRouteName(''); setRouteDomains(''); setRouteSearch(''); setAddingRoute(false) } } finally { setRoutePending(false) } }}>Создать правило</Button>
           </div></DialogContent></Dialog>
 
         </div>}
         <p className="text-muted-foreground order-1 text-xs">Карточки можно перетаскивать мышью. <button type="button" className="ml-2 underline" onClick={resetCards}>Стандартный порядок</button></p>
         <Dialog open={!!deletingTag} onOpenChange={open => { if (!open && !routePending) setDeletingTag(null) }}><DialogContent><DialogHeader><DialogTitle>Удалить маршрут «{deletingTag ? routeLabel(deletingTag) : ''}»?</DialogTitle></DialogHeader><p className="text-muted-foreground">Маршрут будет удалён из общей маршрутизации и правил устройств. Изменения применяются после сохранения.</p><div className="flex justify-end gap-2"><Button variant="outline" disabled={routePending} onClick={() => setDeletingTag(null)}>Отмена</Button><Button variant="destructive" disabled={routePending} onClick={async () => { if (!deletingTag) return; setRoutePending(true); try { if (await onRemoveRoute(deletingTag)) setDeletingTag(null) } finally { setRoutePending(false) } }}>{routePending ? 'Удаление…' : 'Удалить'}</Button></div></DialogContent></Dialog>
-        <Dialog open={!!editingTag} onOpenChange={open => { if (!open) setEditingTag(null) }}><DialogContent className="max-w-[min(94vw,680px)]! max-h-[85dvh] overflow-y-auto"><DialogHeader><DialogTitle>Ресурсы: {editingTag ? routeLabel(editingTag) : ''}</DialogTitle></DialogHeader>
-          <p className="text-muted-foreground text-sm">Ресурсы маршрута общие для всех устройств. Выберите несколько наборов из конфигурации Mihomo.</p>
+        <Dialog open={!!editingTag} onOpenChange={open => { if (!open) setEditingTag(null) }}><DialogContent className="max-w-[min(94vw,680px)]! max-h-[85dvh] overflow-y-auto"><DialogHeader><DialogTitle>Правило: {editingTag ? routeLabel(editingTag) : ''}</DialogTitle></DialogHeader>
+          {editingTag?.startsWith('custom:') && <label className="space-y-2 text-sm font-medium">Комментарий<Input value={editingName} maxLength={40} onChange={event => setEditingName(event.target.value)} /></label>}
+          {editingTag !== 'VPN' && <><p className="text-muted-foreground text-sm">Ресурсы правила общие для всех устройств.</p>
           <div className="flex flex-wrap gap-2">{resources.map(value => <button key={value} type="button" className="rounded border border-blue-400 bg-blue-500/20 px-2 py-1 text-xs" onClick={() => setResources(resources.filter(item => item !== value))}>{value} ×</button>)}</div>
           <Input value={resourceSearch} onChange={event => setResourceSearch(event.target.value)} placeholder="Поиск ресурса…" />
-          <div className="max-h-64 overflow-y-auto rounded border p-1">{resourceOptions.filter(value => value.toLowerCase().includes(resourceSearch.toLowerCase())).map(value => <button type="button" key={value} aria-pressed={resources.includes(value)} className={cn('block w-full rounded px-2 py-2 text-left hover:bg-blue-500/10', resources.includes(value) && 'bg-blue-500/20')} onClick={() => setResources(resources.includes(value) ? resources.filter(item => item !== value) : [...resources, value])}>{resources.includes(value) ? '✓ ' : ''}{value}</button>)}</div>
-          <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setEditingTag(null)}>Отмена</Button><Button disabled={routePending || !resources.length} onClick={async () => { if (!editingTag) return; setRoutePending(true); try { if (await onEditResources(editingTag, resources)) setEditingTag(null) } finally { setRoutePending(false) } }}>Сохранить ресурсы</Button></div>
+          <div className="max-h-64 overflow-y-auto rounded border p-1">{resourceOptions.filter(value => value.toLowerCase().includes(resourceSearch.toLowerCase())).map(value => <button type="button" key={value} aria-pressed={resources.includes(value)} className={cn('block w-full rounded px-2 py-2 text-left hover:bg-blue-500/10', resources.includes(value) && 'bg-blue-500/20')} onClick={() => setResources(resources.includes(value) ? resources.filter(item => item !== value) : [...resources, value])}>{resources.includes(value) ? '✓ ' : ''}{value}</button>)}</div></>}
+          <label className="space-y-2 text-sm font-medium">Исходящее<select className="border-border bg-input-background w-full rounded-lg border px-3 py-2 text-sm" value={editingTarget} onChange={event => setEditingTarget(event.target.value)}>{activeDevice && <option value="@inherit">Общая настройка</option>}{[...new Set([editingTarget, ...protocolCards])].filter(name => name !== '@inherit').map(name => <option key={name} value={name}>{displayName(name)}</option>)}</select></label>
+          <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setEditingTag(null)}>Отмена</Button><Button disabled={routePending || (editingTag !== 'VPN' && !resources.length) || !editingName.trim()} onClick={async () => { if (!editingTag) return; setRoutePending(true); try { if (await onSaveRoute(editingTag, editingName, resources, editingTarget, activeDevice?.ip)) setEditingTag(null) } finally { setRoutePending(false) } }}>Сохранить</Button></div>
         </DialogContent></Dialog>
-        <Dialog open={!!renamingTag} onOpenChange={open => { if (!open) setRenamingTag('') }}><DialogContent><DialogHeader><DialogTitle>Переименовать маршрут</DialogTitle></DialogHeader><Input value={renamingName} maxLength={40} onChange={event => setRenamingName(event.target.value)} /><Button disabled={routePending || !renamingName.trim()} onClick={async () => { setRoutePending(true); try { if (await onRenameRoute(renamingTag, renamingName)) setRenamingTag('') } finally { setRoutePending(false) } }}>Сохранить</Button></DialogContent></Dialog>
-        {!activeDevice && <Button size="sm" className="order-2 self-start" variant={globalDirect ? 'default' : 'outline'} disabled={routePending} onClick={() => void onSelectDraft(defaultChoices.VPN, globalDirect ? 'DIRECT' : '@bypass')}>🔓 Полный обход без VPN: {globalDirect ? 'включён' : 'выключен'}</Button>}
         {globalDirect && <p className="text-muted-foreground order-2 text-sm">Общий трафик идёт напрямую. Для отдельных правил и устройств можно выбрать VPN ниже.</p>}
         {<div className="border-border bg-card order-3 overflow-x-auto rounded-xl border">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-muted/30 text-muted-foreground"><tr><th className="px-4 py-3 font-medium"># · Действия</th><th className="px-4 py-3 font-medium">Комментарий</th><th className="px-4 py-3 font-medium">Сеть</th><th className="px-4 py-3 font-medium">Пункт назначения</th><th className="px-4 py-3 font-medium">Исходящее</th></tr></thead>
-            <tbody>{[...orderedTags, 'VPN'].filter(route => !(activeDeviceDirect || (!activeDevice && globalDirect)) || route === 'VPN').map(route => {
+          <table className="w-full min-w-[900px] table-fixed text-left text-sm">
+            <thead className="bg-input-background text-muted-foreground"><tr><th className="w-16 px-3 py-3 font-medium">#</th><th className="w-24 px-3 py-3 font-medium">Действия</th><th className="w-40 px-3 py-3 font-medium">Комментарий</th><th className="w-24 px-3 py-3 font-medium">Сеть</th><th className="px-3 py-3 font-medium">Пункт назначения</th><th className="w-52 px-3 py-3 font-medium">Исходящее</th></tr></thead>
+            <tbody>{[...orderedTags, 'VPN'].map(route => {
               const group = defaultChoices[route]
               const inherited = !!activeDevice && activeDevice.choices[route] === group
               const choice = activeDevice ? activeDevice.choices[route] : allProxyData[group]?.now
               const target = choice === '@direct' ? 'DIRECT' : inherited ? allProxyData[group]?.now ?? group : choice ?? 'DIRECT'
-              const options = activeDevice ? deviceOptions.filter(name => name === 'DIRECT' || (!isNoVpn(name) && isRouteOption(name, route === 'VPN', allProxyData))) : allProxyData[group]?.all ?? []
               const proxy = allProxyData[target]
               const delay = proxy ? getLastDelay(proxy) : null
               const values = route === 'VPN' ? [] : readMihomoRouteResources(configContent, route)
               return <tr key={route} className="border-border border-t hover:bg-muted/20"
                 onDragOver={event => { if (draggedRoute && route !== 'VPN' && route !== draggedRoute) event.preventDefault() }}
                 onDrop={event => { event.preventDefault(); if (draggedRoute && route !== 'VPN') void moveRoute(draggedRoute, route) }}>
-                <td className="min-w-40 space-y-2 px-4 py-3">{routeControls(route)}</td>
-                <td className="px-4 py-3 font-medium">{routeLabel(route)}</td>
-                <td className="text-muted-foreground px-4 py-3">TCP, UDP</td>
-                <td className="max-w-96 px-4 py-3 text-sm"><div className="max-h-24 overflow-auto break-words">{route === 'VPN' ? 'Остальной трафик' : values.join(', ') || '—'}</div></td>
-                <td className="min-w-56 px-4 py-3"><div className="flex items-center gap-2"><select aria-label={`Исходящее: ${routeLabel(route)}`} className="border-border bg-input-background w-full rounded-lg border px-3 py-2 text-sm" value={inherited ? '@inherit' : target} disabled={devicePending || routePending} onChange={event => {
-                  const value = event.target.value
-                  if (activeDevice) void changeDevice(activeDevice.ip, route, value === '@inherit' ? group : route === 'VPN' && value === 'DIRECT' ? '@direct' : value)
-                  else void onSelectDraft(group, value)
-                }}>
-                  {activeDevice && <option value="@inherit">Общая настройка · {displayName(allProxyData[group]?.now ?? group)}</option>}
-                  {[...new Set([target, ...options])].map(name => <option key={name} value={name}>{displayName(name)}</option>)}
-                </select>{canProbe(proxy) && <button type="button" className={cn('shrink-0 text-xs tabular-nums', delay === null ? 'text-sky-400' : delayColor(delay))} title="HTTPS через выбранное подключение" onClick={() => void testSingle(target)}>{delay === null ? 'Пинг' : delay > 0 ? `${delay} мс` : '✕'}</button>}</div></td>
+                <td className="px-3 py-3 text-muted-foreground tabular-nums">{route === 'VPN' ? orderedTags.length + 1 : orderedTags.indexOf(route) + 1}</td>
+                <td className="px-3 py-3"><div className="flex items-center gap-1">{route !== 'VPN' && <span draggable={!routePending} onDragStart={event => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', route); setDraggedRoute(route) }} onDragEnd={() => setDraggedRoute(null)} className="text-muted-foreground cursor-grab p-1" title="Перетащить правило"><IconGripVertical size={17} /></span>}<Button size="icon-xs" title="Изменить правило" aria-label="Изменить правило" variant="outline" onClick={() => openRouteEditor(route)}>✎</Button>{route !== 'VPN' && <Button size="icon-xs" title="Удалить правило" aria-label="Удалить правило" variant="outline" onClick={() => setDeletingTag(route)}>×</Button>}</div></td>
+                <td className="px-3 py-3 font-medium">{routeLabel(route)}</td>
+                <td className="text-muted-foreground px-3 py-3">TCP, UDP</td>
+                <td className="px-3 py-3 text-sm">{route === 'VPN' ? 'Остальной трафик' : destinationSummary(values)}</td>
+                <td className="px-3 py-3"><div className="flex items-center gap-2"><button type="button" className="min-w-0 truncate text-left text-primary hover:underline" onClick={() => openRouteEditor(route)} title="Изменить исходящее в правиле">{displayName(target)}</button>{canProbe(proxy) && <button type="button" className={cn('shrink-0 text-xs tabular-nums', delay === null ? 'text-sky-400' : delayColor(delay))} title="HTTPS через выбранное подключение" onClick={() => void testSingle(target)}>{delay === null ? 'Пинг' : delay > 0 ? `${delay} мс` : '✕'}</button>}</div></td>
               </tr>
             })}</tbody>
           </table>

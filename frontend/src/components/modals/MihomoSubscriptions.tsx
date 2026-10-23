@@ -17,8 +17,6 @@ export function MihomoSubscriptionsModal({ open, onOpenChange, onApplied }: Prop
   const { state, showToast } = useAppContext()
   const [config, setConfig] = useState<ConfigItem | null>(null)
   const [url, setUrl] = useState('')
-  const [allowLan, setAllowLan] = useState(false)
-  const [name, setName] = useState('')
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -72,14 +70,11 @@ export function MihomoSubscriptionsModal({ open, onOpenChange, onApplied }: Prop
       if (!config) throw new Error('config.yaml не загружен')
       const trimmed = url.trim()
       if (!/^https:\/\/[^\s]+$/i.test(trimmed)) throw new Error('Нужна HTTPS ссылка подписки')
-      const preview = await apiCall<{ success: boolean; error?: string; requiresLanAccess?: boolean }>('POST', 'subscription/preview', { url: trimmed, allow_lan: allowLan })
-      if (!preview.success) {
-        if (preview.requiresLanAccess) setAllowLan(true)
-        throw new Error(preview.error || 'Подписка не загрузилась')
-      }
-      const id = name.trim() || `subscription_${Date.now().toString(36)}`
+      const preview = await apiCall<{ success: boolean; error?: string }>('POST', 'subscription/preview', { url: trimmed, allow_lan: true })
+      if (!preview.success) throw new Error(preview.error || 'Подписка не загрузилась')
+      const id = `subscription_${Date.now().toString(36)}`
       await save(addMihomoProvider(config.content, id, trimmed), state.currentCore === 'mihomo' ? 'Подписка Mihomo добавлена' : 'Подписка сохранена; Mihomo загрузит её при переключении')
-      setUrl(''); setName(''); setAllowLan(false)
+      setUrl('')
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось добавить подписку') }
     finally { setBusy(false) }
   }
@@ -93,7 +88,7 @@ export function MihomoSubscriptionsModal({ open, onOpenChange, onApplied }: Prop
         await clashFetch(state.clashApiPort ?? '', 'configs?force=true', {method: 'PUT', secret: state.clashApiSecret, unix: state.clashApiUnix, body: {path: config.file, payload: ''}, retry: false})
       }
       await onApplied()
-      showToast(`Подписка ${provider.name} обновлена`)
+      showToast(`Подписка ${hostname(provider.url)} обновлена`)
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось обновить подписку') }
     finally { setBusy(false) }
   }
@@ -114,17 +109,15 @@ export function MihomoSubscriptionsModal({ open, onOpenChange, onApplied }: Prop
       <p className="text-muted-foreground text-sm">Ссылки хранятся в config.yaml. Узлы добавляются в группы маршрутизации. Существующие правила сохраняются. Кнопка обновляет сохранённые узлы подписки и при неактивном ядре. Автоматическое обновление — каждый час.</p>
       <div className="space-y-2">
         {providers.length === 0 && !loading && <p className="text-muted-foreground text-sm">Подписок пока нет.</p>}
-        {providers.map((provider) => <div key={provider.name} className="border-border flex flex-wrap items-center gap-2 rounded-lg border p-3">
-          <div className="min-w-0 flex-1"><div className="font-medium">{provider.name}</div><div className="text-muted-foreground text-xs">{hostname(provider.url)}</div></div>
-          {confirmDelete === provider.name ? <><Button size="sm" variant="outline" disabled={busy} onClick={() => setConfirmDelete(null)}>Отмена</Button><Button size="sm" variant="destructive" disabled={busy} onClick={() => void remove(provider.name)}>Подтвердить удаление</Button></> : <><Button size="sm" variant="outline" disabled={busy} onClick={() => void refresh(provider)}>{state.currentCore === 'mihomo' && state.serviceStatus === 'running' ? 'Обновить' : 'Проверить ссылку'}</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => setConfirmDelete(provider.name)}>Удалить</Button></>}
+        {providers.map((provider, index) => <div key={provider.name} className="border-border flex flex-wrap items-center gap-2 rounded-lg border p-3">
+          <div className="min-w-0 flex-1"><div className="font-medium">Подписка {index + 1} · {hostname(provider.url)}</div><div className="text-muted-foreground text-xs">{provider.name.startsWith('subscription_') ? 'Узлы обновляются отдельно от правил маршрутизации' : provider.name}</div></div>
+          {confirmDelete === provider.name ? <><Button size="sm" variant="outline" disabled={busy} onClick={() => setConfirmDelete(null)}>Отмена</Button><Button size="sm" variant="destructive" disabled={busy} onClick={() => void remove(provider.name)}>Подтвердить удаление</Button></> : <><Button size="sm" variant="outline" disabled={busy} onClick={() => void refresh(provider)}>Обновить</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => setConfirmDelete(provider.name)}>Удалить</Button></>}
         </div>)}
       </div>
       <div className="border-border space-y-2 border-t pt-3">
-        <label htmlFor="mihomo-subscription-name" className="text-sm font-medium">Добавить подписку</label>
-        <Input id="mihomo-subscription-name" value={name} disabled={busy || loading} onChange={(event) => setName(event.target.value)} placeholder="Имя (необязательно)" />
-        <Input type="password" value={url} disabled={busy || loading} onChange={(event) => setUrl(event.target.value)} placeholder="https://..." autoComplete="off" spellCheck={false} aria-label="URL подписки Mihomo" />
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={allowLan} disabled={busy} onChange={(event) => setAllowLan(event.target.checked)} />Локальный сервер подписки</label>
-        <Button disabled={busy || loading || !url.trim()} onClick={() => void add()}>{busy ? 'Сохранение...' : 'Добавить'}</Button>
+        <label htmlFor="mihomo-new-subscription" className="text-sm font-medium">Добавить подписку</label>
+        <Input id="mihomo-new-subscription" type="password" value={url} disabled={busy || loading} onChange={(event) => setUrl(event.target.value)} placeholder="https://..." autoComplete="off" spellCheck={false} aria-label="URL подписки Mihomo" />
+        <Button disabled={busy || loading || !url.trim()} onClick={() => void add()}>{busy ? 'Сохранение...' : 'Добавить и загрузить'}</Button>
       </div>
       {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
       <div className="flex justify-end"><Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>Закрыть</Button></div>

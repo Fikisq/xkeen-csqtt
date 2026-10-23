@@ -23,8 +23,6 @@ export function XraySubscriptionsModal({ open, onOpenChange, onApplied }: Props)
   const [content, setContent] = useState('')
   const [entries, setEntries] = useState<SubscriptionEntry[]>([])
   const [url, setUrl] = useState('')
-  const [allowLan, setAllowLan] = useState(false)
-  const [needsLanAccess, setNeedsLanAccess] = useState(false)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -74,11 +72,10 @@ export function XraySubscriptionsModal({ open, onOpenChange, onApplied }: Props)
     }
   }
 
-  async function preview(subscriptionUrl: string, local: boolean): Promise<string> {
+  async function preview(subscriptionUrl: string): Promise<string> {
     if (!/^https:\/\/[^\s]+$/i.test(subscriptionUrl)) throw new Error('Нужна HTTPS ссылка подписки')
-    const result = await apiCall<{ success: boolean; content?: string; error?: string; requiresLanAccess?: boolean }>('POST', 'subscription/preview', { url: subscriptionUrl, allow_lan: local })
+    const result = await apiCall<{ success: boolean; content?: string; error?: string }>('POST', 'subscription/preview', { url: subscriptionUrl, allow_lan: true })
     if (!result.success || !result.content) {
-      if (result.requiresLanAccess) setNeedsLanAccess(true)
       throw new Error(result.error || 'Подписка не загрузилась')
     }
     return result.content
@@ -91,9 +88,9 @@ export function XraySubscriptionsModal({ open, onOpenChange, onApplied }: Props)
     setBusy(true); setError('')
     try {
       const id = `s${Date.now().toString(36)}`
-      const generated = xrayConfigFromSubscription(await preview(trimmed, allowLan), content, id)
-      await save(generated.json, [...entries, { id, url: trimmed, allowLan }], `Подписка добавлена: ${generated.count} узлов`)
-      setUrl(''); setAllowLan(false); setNeedsLanAccess(false)
+      const generated = xrayConfigFromSubscription(await preview(trimmed), content, id)
+      await save(generated.json, [...entries, { id, url: trimmed, allowLan: true }], `Подписка добавлена: ${generated.count} узлов`)
+      setUrl('')
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось добавить подписку') }
     finally { setBusy(false) }
   }
@@ -101,8 +98,8 @@ export function XraySubscriptionsModal({ open, onOpenChange, onApplied }: Props)
   async function refresh(entry: SubscriptionEntry) {
     setBusy(true); setError('')
     try {
-      const generated = xrayConfigFromSubscription(await preview(entry.url, entry.allowLan || allowLan), content, entry.id)
-      await save(generated.json, entries.map(item => item.id === entry.id ? {...item, allowLan: entry.allowLan || allowLan} : item), `Подписка обновлена: ${generated.count} узлов`)
+      const generated = xrayConfigFromSubscription(await preview(entry.url), content, entry.id)
+      await save(generated.json, entries.map(item => item.id === entry.id ? {...item, allowLan: true} : item), `Подписка обновлена: ${generated.count} узлов`)
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось обновить подписку') }
     finally { setBusy(false) }
   }
@@ -121,14 +118,13 @@ export function XraySubscriptionsModal({ open, onOpenChange, onApplied }: Props)
       <div className="space-y-2">
         {entries.length === 0 && !loading && <p className="text-muted-foreground text-sm">Подписок пока нет.</p>}
         {entries.map((entry, index) => <div key={entry.id} className="border-border flex flex-wrap items-center gap-2 rounded-lg border p-3">
-          <div className="min-w-0 flex-1"><div className="font-medium">Подписка {index + 1} · {hostname(entry.url)}</div><div className="text-muted-foreground text-xs">Узлов: {countXraySubscriptionNodes(content, entry.id)}{entry.allowLan ? ' · локальный сервер' : ''}</div></div>
+          <div className="min-w-0 flex-1"><div className="font-medium">Подписка {index + 1} · {hostname(entry.url)}</div><div className="text-muted-foreground text-xs">Узлов: {countXraySubscriptionNodes(content, entry.id)}</div></div>
           {confirmDelete === entry.id ? <><span className="text-xs text-amber-400">Используемые маршруты перейдут на другой узел или «Без VPN».</span><Button size="sm" variant="outline" disabled={busy} onClick={() => setConfirmDelete(null)}>Отмена</Button><Button size="sm" variant="destructive" disabled={busy} onClick={() => void remove(entry)}>Подтвердить</Button></> : <><Button size="sm" variant="outline" disabled={busy || loading} onClick={() => void refresh(entry)}>Обновить</Button><Button size="sm" variant="outline" disabled={busy || loading} onClick={() => setConfirmDelete(entry.id)}>Удалить</Button></>}
         </div>)}
       </div>
       <div className="border-border space-y-2 border-t pt-3">
         <label htmlFor="xray-new-subscription" className="text-sm font-medium">Добавить подписку</label>
         <Input id="xray-new-subscription" type="password" value={url} disabled={loading || busy} onChange={(event) => setUrl(event.target.value)} placeholder="https://..." autoComplete="off" spellCheck={false} />
-        {(needsLanAccess || allowLan) && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={allowLan} disabled={busy} onChange={(event) => setAllowLan(event.target.checked)} />Разрешить локальный сервер</label>}
         <Button disabled={loading || busy || !url.trim()} onClick={() => void add()}>{busy ? 'Сохранение...' : 'Добавить и загрузить'}</Button>
       </div>
       {error && <p role="alert" className="text-sm text-red-500">{error}</p>}
