@@ -193,7 +193,7 @@ pub async fn run(socket: &mut WebSocket) -> Result<(), Error> {
                         let action = value["action"].as_str().unwrap_or("");
                         let component = value["component"].as_str().unwrap_or("panel");
                         if !matches!(action, "status" | "status-all" | "start" | "stop" | "restart" | "log" | "update")
-                            || !matches!(component, "panel" | "xray" | "csqtt" | "wdtt-plus" | "nfqws2") { continue; }
+                            || !matches!(component, "panel" | "xray" | "mihomo" | "csqtt" | "wdtt-plus" | "nfqws2") { continue; }
                         Input::Manage(action.into(), component.into())
                     },
                     _ => continue,

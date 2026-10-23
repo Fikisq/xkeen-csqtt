@@ -11,8 +11,9 @@ import { copyText } from '@/lib/utils'
 import { IconCheck, IconCopy, IconLink, IconPlus, IconRefresh, IconX } from '@tabler/icons-react'
 import { useState } from 'react'
 import { useAppContext, useModalContext } from '../../lib/store'
-import { InputGroup, InputGroupAddon, InputGroupInput } from '../ui/input-group'
+import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupTextarea } from '../ui/input-group'
 import { SelectGroup } from '@/components/ui/select'
+import { isAwgInput } from '@/lib/amneziaWg'
 
 const USER_AGENTS = [
   'ClashMeta/1.19.30; mihomo/1.19.30',
@@ -211,7 +212,7 @@ export function ImportModal({ onGenerate, onAddToConfig }: Props) {
   const [customUA, setCustomUA] = useState('')
   const [generated, setGenerated] = useState(false)
 
-  const isValidUri = SUPPORTED_PROTOCOLS.some((p) => {
+  const isValidUri = (state.currentCore === 'mihomo' && isAwgInput(uri)) || SUPPORTED_PROTOCOLS.some((p) => {
     if (state.currentCore !== 'mihomo' && (p === 'http://' || p === 'https://')) return false
     return uri.trim().toLowerCase().startsWith(p)
   })
@@ -245,7 +246,7 @@ export function ImportModal({ onGenerate, onAddToConfig }: Props) {
     try {
       const generated = onGenerate(trimmed)
       if (generated) {
-        const protocol = trimmed.match(/^([a-zA-Z0-9+\-.]+):\/\//)?.[1]?.toUpperCase() ?? ''
+        const protocol = isAwgInput(trimmed) ? 'AWG 3.1' : trimmed.match(/^([a-zA-Z0-9+\-.]+):\/\//)?.[1]?.toUpperCase() ?? ''
         setResult({ ...generated, protocol })
         setSubForm(null)
       } else {
@@ -312,7 +313,7 @@ export function ImportModal({ onGenerate, onAddToConfig }: Props) {
               <IconLink size={24} className="text-chart-2" /> Добавить подключение
             </DialogTitle>
             <DialogDescription>
-              Вставьте ссылку узла protocol://{state.currentCore === 'mihomo' && ' или URL подписки https://'}
+              Вставьте ссылку узла protocol://{state.currentCore === 'mihomo' && ', URL подписки или конфигурацию AWG 3.1 (.conf / vpn:// 3x-ui). AWG — экспериментально, нужен Mihomo v1.19.30 или новее.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -612,14 +613,33 @@ export function ImportModal({ onGenerate, onAddToConfig }: Props) {
             )}
 
             <div className="mt-auto flex shrink-0 flex-col gap-3 pt-1">
+              {state.currentCore === 'mihomo' && <>
+                <label className="text-sm">Импорт AWG 3.1 (.conf)
+                  <Input type="file" accept=".conf,text/plain" className="mt-1 w-full text-sm" onChange={async (event) => {
+                    const file = event.target.files?.[0]
+                    if (!file) return
+                    if (file.size > 65536) { showToast('Файл AWG слишком большой', 'error'); return }
+                    try { setUri(await file.text()); setResult(null); setSubForm(null) }
+                    catch { showToast('Не удалось прочитать файл', 'error') }
+                    event.target.value = ''
+                  }} />
+                </label>
+              </>}
               <InputGroup>
-                <InputGroupInput
+                {state.currentCore === 'mihomo' ? <InputGroupTextarea
+                  aria-label="Ссылка подключения или конфигурация AWG"
+                  value={uri}
+                  onChange={event => { setUri(event.target.value); setResult(null); setSubForm(null); setGenerated(false) }}
+                  placeholder="vless://… · vpn://… · https://подписка или содержимое AWG .conf"
+                  className="max-h-40 min-h-20 text-sm"
+                  spellCheck={false}
+                /> : <InputGroupInput
                   value={uri}
                   onChange={(e) => setUri(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && isValidUri && generate()}
                   placeholder={state.currentCore === 'mihomo' ? 'vless://... или https://подписка' : 'vless://...'}
                   className={uri ? 'pr-7' : ''}
-                />
+                />}
                 <InputGroupAddon align="inline-end">
                   {uri && (
                     <Button

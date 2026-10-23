@@ -93,7 +93,7 @@ export function XrayDeviceRoutingTable({ deviceIp, content, onChange, onError, u
     ? parsed.outbounds.filter((out: any) => typeof out?.tag === 'string').map((out: any) => ({ tag: out.tag, protocol: out.protocol ?? '', label: out.tag === 'direct' ? 'direct' : out.tag === 'block' ? 'blocked' : outboundTitle(out) })) : []
   const balancers: string[] = Array.isArray(parsed?.routing?.balancers)
     ? parsed.routing.balancers.map((item: any) => item?.tag).filter((tag: unknown): tag is string => typeof tag === 'string') : []
-  const destinations = [...outbounds, ...balancers.map(tag => ({ tag: `@balancer:${tag}`, protocol: 'balancer', label: `Автовыбор: ${tag}` })), { tag: '@bypass', protocol: 'freedom', label: '🔓 Полный обход без VPN' }]
+  const destinations = [...outbounds, ...balancers.filter(tag => tag !== 'auto-vless').map(tag => ({ tag: `@balancer:${tag}`, protocol: 'balancer', label: `Автовыбор: ${tag}` })), { tag: '@bypass', protocol: 'freedom', label: '🔓 Полный обход без VPN' }]
   const availableOutbounds = new Set(outbounds.map(out => out.tag))
   const availableBalancers = new Set(balancers)
   const fullBypass = own.some(({ rule }) => baseRuleTag(rule) === FALLBACK && isFullBypass(rule))

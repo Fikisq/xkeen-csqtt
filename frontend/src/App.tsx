@@ -10,6 +10,7 @@ import { LazyBoundary, lazyLoad, useLazyMount } from './lib/loader'
 import { fetchClashProxies, getAppState, useAppActions, useModalContext, useSettings } from './lib/store'
 import { applyTheme, THEME_MEDIA_QUERY } from './lib/theme'
 import { linkProviderToVpn } from './lib/mihomoSubscription'
+import { isAwgInput, importAwg, addAwgProxy } from './lib/amneziaWg'
 import { type Config, type ThemeMode } from './lib/types'
 import { parseClashApiCredentials } from './lib/utils'
 import { parse as parseJsonc } from 'jsonc-parser'
@@ -24,6 +25,7 @@ const TemplateModal = lazyLoad(() => import('./components/modals/Templates'), 'T
 const SettingsModal = lazyLoad(() => import('./components/modals/Settings'), 'SettingsModal')
 const GeoScanModal = lazyLoad(() => import('./components/modals/GeoScan'), 'GeoScanModal')
 const XraySubscriptionsModal = lazyLoad(() => import('./components/modals/XraySubscriptions'), 'XraySubscriptionsModal')
+const MihomoSubscriptionsModal = lazyLoad(() => import('./components/modals/MihomoSubscriptions'), 'MihomoSubscriptionsModal')
 
 function useThemeMode(theme: ThemeMode) {
   useEffect(() => {
@@ -46,7 +48,7 @@ interface ModalManagerProps {
   onAddToConfig: (content: string, type: string, position: 'start' | 'end') => void
   onImportTemplate: (url: string) => Promise<void>
   openModal: (modal: string) => void
-  onOpenSubscriptions: () => void
+  onOpenSubscriptions: (core: string) => void
 }
 
 const ModalManager = memo(function ModalManager({
@@ -122,6 +124,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   const { dispatch, showToast } = useAppActions()
   const [xraySubscriptionsOpen, setXraySubscriptionsOpen] = useState(false)
   const mountXraySubscriptions = useLazyMount(xraySubscriptionsOpen)
+  const [mihomoSubscriptionsOpen, setMihomoSubscriptionsOpen] = useState(false)
+  const mountMihomoSubscriptions = useLazyMount(mihomoSubscriptionsOpen)
+  useEffect(() => {
+    const open = () => setMihomoSubscriptionsOpen(true)
+    window.addEventListener('mihomo:open-subscriptions', open)
+    return () => window.removeEventListener('mihomo:open-subscriptions', open)
+  }, [])
   const editorRef = useRef<CodeMirrorRef | null>(null)
   const configActionsRef = useRef<{ switchTab: (index: number) => void; getActiveIndex: () => number }>({
     switchTab: () => { },
@@ -342,6 +351,14 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const generateConfig = useCallback((uri: string) => {
     const currentCore = getAppState().currentCore
+    if (isAwgInput(uri)) {
+      if (currentCore !== 'mihomo') throw new Error('AWG 3.1 доступен только в Mihomo')
+      const version = /v?(\d+)\.(\d+)\.(\d+)/.exec(getAppState().coreVersions.mihomo ?? '')
+      if (version && (+version[1] < 1 || (+version[1] === 1 && (+version[2] < 19 || (+version[2] === 19 && +version[3] < 30))))) {
+        throw new Error('Для AWG 3.1 обновите Mihomo до v1.19.30 или новее')
+      }
+      return importAwg(uri)
+    }
     if (typeof (window as any).generateConfigForCore === 'function')
       return (window as any).generateConfigForCore(uri, currentCore, editorRef.current?.getValue() ?? '')
     throw new Error('Parser not loaded')
@@ -406,6 +423,11 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         const editorWrapper = editorRef.current
         if (!editorWrapper) return
         let current = editorWrapper.getValue()
+        if (core === 'mihomo' && type === 'awg-proxy') {
+          try { editorWrapper.replaceAll(addAwgProxy(current, generated)) }
+          catch (error) { showToast(error instanceof Error ? error.message : 'Ошибка добавления AWG', 'error') }
+          return
+        }
         const lineAtOffset = (text: string, offset: number) => text.slice(0, Math.min(offset, text.length)).split('\n').length
         const scrollToLine = (line: number) => setTimeout(() => editorWrapper.revealLine(Math.max(1, line)), 0)
         const insertAtOffset = (offset: number, text: string, scrollLine?: number) => {
@@ -519,9 +541,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         onAddToConfig={addToConfig}
         onImportTemplate={importTemplate}
         openModal={openModal}
-        onOpenSubscriptions={() => setXraySubscriptionsOpen(true)}
+        onOpenSubscriptions={(core) => core === 'mihomo' ? setMihomoSubscriptionsOpen(true) : setXraySubscriptionsOpen(true)}
       />
       {mountXraySubscriptions && <LazyBoundary><XraySubscriptionsModal open={xraySubscriptionsOpen} onOpenChange={setXraySubscriptionsOpen} onApplied={() => loadConfigs(undefined, false, true)} /></LazyBoundary>}
+      {mountMihomoSubscriptions && <LazyBoundary><MihomoSubscriptionsModal open={mihomoSubscriptionsOpen} onOpenChange={setMihomoSubscriptionsOpen} onApplied={() => loadConfigs(undefined, false, true)} /></LazyBoundary>}
     </div>
   )
 }

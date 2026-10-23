@@ -11,14 +11,14 @@ import type { WsMessage } from '../../lib/websocket'
 import { useWebSocket } from '../../lib/websocket'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '../ui/input-group'
 
-const LOG_FILES = ['access.log', 'error.log', 'csqtt.log', 'wdtt-plus.log', 'nfqws2.log']
+const LOG_FILES = ['access.log', 'error.log', 'mihomo.log', 'csqtt.log', 'wdtt-plus.log', 'nfqws2.log']
 const MAX_LINES = 1000
 
-export function LogPanel({ inDialog = false }: { inDialog?: boolean } = {}) {
+export function LogPanel({ inDialog = false, initialFile = 'access.log' }: { inDialog?: boolean; initialFile?: string } = {}) {
   const timezone = useSettings((s) => s.timezone)
   const [filter, setFilter] = useState('')
-  const [currentFile, setCurrentFile] = useState('access.log')
-  const [availableFiles, setAvailableFiles] = useState(['access.log', 'error.log'])
+  const [currentFile, setCurrentFile] = useState(initialFile)
+  const [availableFiles, setAvailableFiles] = useState([...new Set([initialFile, 'access.log', 'error.log'])])
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
   const [isAnimating, setIsAnimating] = useState(false)

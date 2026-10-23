@@ -5,6 +5,7 @@ pub(crate) fn sources() -> Vec<(&'static str, String)> {
     vec![
         ("access.log", access_log_path()),
         ("error.log", error_log_path()),
+        ("mihomo.log", "/opt/var/log/mihomo/error.log".into()),
         ("csqtt.log", "/opt/etc/csqtt/csqtt.log".into()),
         ("wdtt-plus.log", "/opt/etc/wdtt-plus/wdtt-plus.log".into()),
         ("nfqws2.log", "/opt/etc/xkeen/nfqws2-stage/nfqws2.log".into()),

@@ -11,7 +11,7 @@ export function ConsoleManagement({ connected, onAction }: { connected: boolean;
     </div>
     <label className="text-muted-foreground text-xs">Компонент
       <select aria-label="Компонент для управления" className="mt-1 h-8 w-full rounded-md border border-border bg-input-background px-2 text-sm text-foreground" value={component} disabled={!connected} onChange={event => setComponent(event.target.value)}>
-        <option value="panel">Панель</option><option value="xray">Xray</option><option value="csqtt">CSQTT</option><option value="wdtt-plus">WDTT Plus</option><option value="nfqws2">nfqws2</option>
+        <option value="panel">Панель</option><option value="xray">Xray</option><option value="mihomo">Mihomo</option><option value="csqtt">CSQTT</option><option value="wdtt-plus">WDTT Plus</option><option value="nfqws2">nfqws2</option>
       </select>
     </label>
     <div className="grid grid-cols-2 gap-2">

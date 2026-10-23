@@ -1,0 +1,23 @@
+mixed-port: 0
+redir-port: 5000
+tproxy-port: 5001
+allow-lan: true
+mode: rule
+log-level: warning
+ipv6: false
+routing-mark: 255
+external-controller-unix: /opt/etc/mihomo/mihomo-api.sock
+profile:
+  store-selected: true
+proxies: []
+proxy-providers:
+proxy-groups:
+  - name: VPN
+    type: select
+    proxies: [DIRECT]
+rules:
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - MATCH,VPN

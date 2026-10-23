@@ -245,6 +245,12 @@ pub async fn get_control(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 pub(crate) async fn check_core_config(core: &str) -> Result<(), String> {
+    if core == "mihomo" {
+        let path = format!("{MIHOMO_CONF_DIR}/config.yaml");
+        let content = fs::read_to_string(&path).await
+            .map_err(|_| "Не найдена конфигурация Mihomo. Установите ядро через управление версиями".to_string())?;
+        return crate::configs::validate_core("mihomo", &[crate::configs::ConfigReq { file: path, content }]).await;
+    }
     if core == "xray" {
         fs::create_dir_all(XRAY_CONF_DIR).await.map_err(|e| e.to_string())?;
         let has_json = std::fs::read_dir(XRAY_CONF_DIR)

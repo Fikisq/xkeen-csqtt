@@ -26,7 +26,7 @@ pub async fn control(Json(request): Json<Action>) -> Json<Value> {
     let action = request.action.as_str();
     let component = request.component.as_deref().unwrap_or("panel");
     if !matches!(action, "status" | "start" | "stop" | "restart" | "log" | "update")
-        || !matches!(component, "panel" | "xray" | "csqtt" | "wdtt-plus" | "nfqws2") {
+        || !matches!(component, "panel" | "xray" | "mihomo" | "csqtt" | "wdtt-plus" | "nfqws2") {
         return Json(json!({"success":false,"error":"Неизвестное действие или компонент"}));
     }
     // Let the HTTP response arrive before an action stops its own web server.

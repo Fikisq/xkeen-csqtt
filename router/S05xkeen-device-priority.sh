@@ -1723,7 +1723,8 @@ else
         ;;
         mihomo)
             export CLASH_HOME_DIR="$directory_configs_app"
-            "$name_client" >/dev/null 2>&1 &
+            mkdir -p "$log_dir/mihomo"
+            "$name_client" >>"$log_error" 2>&1 &
         ;;
     esac
     _probe=0
@@ -2126,12 +2127,13 @@ proxy_start() {
                     ;;
                     mihomo)
                         export CLASH_HOME_DIR="$directory_configs_app"
+                        mkdir -p "$log_dir/mihomo"
                         apply_fd_limit
                         if [ -n "$fd_out" ]; then
-                            nohup "$name_client" >/dev/null 2>&1 &
+                            nohup "$name_client" >>"$log_error" 2>&1 &
                             unset fd_out
                         else
-                            "$name_client" &
+                            "$name_client" >>"$log_error" 2>&1 &
                         fi
                         ;;
                     *) log_error_terminal "Неизвестный прокси-клиент: ${yellow}$name_client${reset}" ;;

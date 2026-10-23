@@ -1,0 +1,15 @@
+--filter-tcp=443
+--filter-l7=tls
+--payload=tls_client_hello
+--lua-desync=hostfakesplit:host=www.google.com:tcp_ts=-600000:ip_id=zero
+--new
+--filter-tcp=80
+--filter-l7=http
+--payload=http_req
+--lua-desync=fake:blob=fs_tls_max:tcp_ts=-600000:repeats=8
+--lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=fs_tls_max
+--new
+--filter-udp=443
+--filter-l7=quic
+--payload=quic_initial
+--lua-desync=fake:blob=fs_quic_google:repeats=11

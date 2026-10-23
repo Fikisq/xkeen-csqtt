@@ -1,7 +1,10 @@
 [
+  {"type":"field","ruleTag":"custom:Discord|selector","network":"tcp,udp","domain":["domain:discord.com","domain:discord.gg","domain:discordapp.com"]},
+  {"type":"field","ruleTag":"custom:%D0%98%D0%B3%D1%80%D1%8B|selector","network":"tcp,udp","domain":["domain:steampowered.com","domain:steamcommunity.com","domain:epicgames.com","domain:riotgames.com"]},
+  {"type":"field","ruleTag":"custom:GitHub|selector","network":"tcp,udp","domain":["domain:github.com","domain:githubusercontent.com"]},
   {"type":"field","ruleTag":"custom:Реклама VK","network":"tcp,udp","domain":["ext:roscomvpn-geosite.dat:category-ads"],"outboundTag":"block"},
+  {"type":"field","ruleTag":"Youtube|selector","network":"tcp,udp","domain":["ext:roscomvpn-geosite.dat:youtube"]},
   {"type":"field","ruleTag":"AI|selector","network":"tcp,udp","domain":["geosite:openai","geosite:anthropic","geosite:perplexity","domain:gemini.google.com","domain:aistudio.google.com"]},
-  {"type":"field","ruleTag":"Youtube|selector","network":"tcp","domain":["ext:roscomvpn-geosite.dat:youtube"]},
   {"type":"field","ruleTag":"RU","network":"tcp,udp","domain":["ext:roscomvpn-geosite.dat:category-ru","ext:roscomvpn-geosite.dat:whitelist"],"outboundTag":"direct","xkeenRouteGroup":"roscomvpn-ru"},
   {"type":"field","ruleTag":"RU_IP","network":"tcp,udp","ip":["ext:roscomvpn-geoip.dat:direct"],"outboundTag":"direct","xkeenRouteGroup":"roscomvpn-ru"},
   {"type":"field","ruleTag":"VPN","network":"tcp,udp"}

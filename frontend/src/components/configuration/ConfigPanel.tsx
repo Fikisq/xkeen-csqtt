@@ -19,7 +19,6 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   IconBox,
-  IconBolt,
   IconCheck,
   IconChevronDown,
   IconChevronUp,
@@ -931,7 +930,7 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
                   >
                     <TabsList variant="line" className="mb-2 w-max shrink-0 gap-3 p-0 whitespace-nowrap md:mb-0">
                       <TabsTrigger value="selectors" className="p-0 text-sm font-semibold md:text-lg" disabled={!isRunning}>
-                        {isMihomo ? 'Селекторы' : 'Маршрутизация'}
+                        Маршрутизация
                       </TabsTrigger>
                       {isMihomo && (
                         <TabsTrigger value="connections" className="p-0 text-sm font-semibold md:text-lg" disabled={!isRunning}>
@@ -969,7 +968,7 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
 
             {isMihomo && currentPanel === 'selectors' && (
               <div className="ml-auto flex items-center gap-1.5">
-                <Button variant="outline" className="text-[13px]" onClick={() => window.dispatchEvent(new Event('mihomo:test-all'))}><IconBolt data-icon="inline-start" /> Пинг</Button>
+                <Button variant="outline" className="text-[13px]" onClick={() => window.dispatchEvent(new Event('mihomo:open-subscriptions'))}>Подписки</Button>
                 <Button variant="outline" className="text-[13px]" onClick={() => openProvidersModal('rules')}>
                   <IconListDetails data-icon="inline-start" />
                   Рулсеты
@@ -1067,6 +1066,7 @@ export function ConfigPanel({ onOpenImport, onOpenTemplate, onOpenGeoScan, onOpe
                         onRenameRoute={renameMihomoRoute}
                         onReorderRoute={reorderMihomoRoute}
                       />
+                      <section className="m-3"><LogPanel initialFile="mihomo.log" /></section>
                     </LazyBoundary>
                     </div>
                   </div>

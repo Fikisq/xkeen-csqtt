@@ -16,12 +16,13 @@ import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, A
 interface Props {
   onSwitchCore: (core: string) => void
   onOpenUpdate: (core: string) => void
-  onOpenSubscriptions: () => void
+  onOpenSubscriptions: (core: string) => void
   onRefreshStatus: () => void
 }
 
 const CORES = [
   { id: 'xray', label: 'Xray' },
+  { id: 'mihomo', label: 'Mihomo · экспериментально (AWG 3.1)' },
 ]
 
 interface CsqttStatus {
@@ -480,7 +481,7 @@ export function CoreManageModal({ onSwitchCore, onOpenUpdate, onOpenSubscription
                     {isInstalled && <p className="text-muted-foreground mt-0.5 text-xs">{version || 'Установлено'}</p>}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    {isInstalled && <Button variant="outline" size="sm" onClick={() => { close(); onOpenSubscriptions() }}>Подписки</Button>}
+                    {isInstalled && <Button variant="outline" size="sm" onClick={() => { close(); onOpenSubscriptions(core.id) }}>Подписки</Button>}
                     {!isActive && isInstalled && (
                       <Button
                         size="sm"

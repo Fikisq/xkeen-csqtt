@@ -11,7 +11,7 @@ service_action() {
     target=$1 action=$2
     case "$target" in
         panel) init=/opt/etc/init.d/S99xkeen-ui ;;
-        xray) init=/opt/etc/init.d/S05xkeen ;;
+        xray|mihomo) init=/opt/etc/init.d/S05xkeen ;;
         csqtt) init=/opt/etc/init.d/S99csqtt ;;
         wdtt-plus) init=/opt/etc/init.d/S99wdtt-plus ;;
         nfqws2) init=/opt/etc/init.d/S98nfqws2-xkeen ;;
@@ -19,13 +19,20 @@ service_action() {
     esac
     [ -x "$init" ] || { echo "$target: не установлен"; return 1; }
     case "$action" in start|stop|restart|status) ;; *) return 2 ;; esac
+    case "$target" in xray|mihomo)
+        if ! grep -q "^name_client=\"$target\"" "$init"; then
+            echo "$target: не выбрано; переключите ядро в панели"
+            [ "$action" = status ] && return 0
+            return 1
+        fi
+    ;; esac
     if [ "$target" = panel ] && [ "$action" != status ]; then
         # The web terminal closes when its panel stops; finish this action detached.
         nohup "$init" "$action" </dev/null >>/opt/var/log/xkeen-manager.log 2>&1 &
         echo "Панель: $action запущен. Журнал: /opt/var/log/xkeen-manager.log"
         return 0
     fi
-    if [ "$target" = xray ] && [ "$action" != status ]; then
+    if { [ "$target" = xray ] || [ "$target" = mihomo ]; } && [ "$action" != status ]; then
         "$init" "$action" on
     elif [ "$target" = nfqws2 ] && [ "$action" != status ]; then
         marker=/opt/etc/xkeen/nfqws2-stage/manual-stopped
@@ -41,7 +48,7 @@ service_action() {
 }
 
 show_status() {
-    for component in panel xray csqtt wdtt-plus nfqws2; do
+    for component in panel xray mihomo csqtt wdtt-plus nfqws2; do
         printf '\n'
         heading "--- $component ---"
         service_action "$component" status
@@ -53,6 +60,7 @@ show_log() {
     case "$1" in
         panel) file=/opt/var/log/xkeen-ui.log ;;
         xray) file=/opt/var/log/xray/error.log ;;
+        mihomo) file=/opt/var/log/mihomo/error.log ;;
         csqtt) file=/opt/etc/csqtt/csqtt.log ;;
         wdtt-plus) file=/opt/etc/wdtt-plus/wdtt-plus.log ;;
         nfqws2) file=/opt/etc/xkeen/nfqws2-stage/nfqws2.log ;;
@@ -78,7 +86,7 @@ update_panel() {
 
 usage() {
     echo 'xkeen-manager [status [COMPONENT] | {start|stop|restart} COMPONENT | update | log COMPONENT]'
-    echo 'COMPONENT: panel, xray, csqtt, wdtt-plus, nfqws2'
+    echo 'COMPONENT: panel, xray, mihomo, csqtt, wdtt-plus, nfqws2'
 }
 
 if [ "$#" -gt 0 ]; then
@@ -111,9 +119,9 @@ while :; do
         1) show_status ;;
         5) /opt/bin/sh /opt/sbin/xkeen-manager update ;;
         2|3|4|6)
-            printf 'Компонент: 1. Панель  2. Xray  3. CSQTT  4. WDTT Plus  5. nfqws2\n> '
+            printf 'Компонент: 1. Панель  2. Xray  3. CSQTT  4. WDTT Plus  5. nfqws2  6. Mihomo\n> '
             IFS= read -r component || exit 0
-            case "$component" in 1) component=panel ;; 2) component=xray ;; 3) component=csqtt ;; 4) component=wdtt-plus ;; 5) component=nfqws2 ;; *) continue ;; esac
+            case "$component" in 1) component=panel ;; 2) component=xray ;; 3) component=csqtt ;; 4) component=wdtt-plus ;; 5) component=nfqws2 ;; 6) component=mihomo ;; *) continue ;; esac
             case "$choice" in 2) service_action "$component" start ;; 3) service_action "$component" stop ;; 4) service_action "$component" restart ;; 6) show_log "$component" ;; esac
             ;;
         *) echo 'Выберите пункт меню' ;;

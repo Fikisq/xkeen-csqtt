@@ -61,11 +61,14 @@ check_existing_core() {
   if [ -f /opt/etc/init.d/S05xkeen ]; then
     local active_client
     active_client=$(sed -n 's/^name_client=//p' /opt/etc/init.d/S05xkeen | head -n 1 | tr -d "\"'[:space:]")
-    if [ "$active_client" = mihomo ]; then
-      echo 'Обнаружен XKeen с активным Mihomo. Удалять XKeen и Mihomo не нужно.' >&2
-      echo 'Этой сборке панели нужен активный Xray. Переключите ядро в XKeen на Xray и повторите команду; настройки Mihomo будут сохранены.' >&2
-      exit 1
-    fi
+    case "$active_client" in
+      xray) ;;
+      mihomo)
+        [ -x /opt/sbin/mihomo ] && [ -s /opt/etc/mihomo/config.yaml ] || {
+          echo 'Неполная установка Mihomo; восстановите ядро и config.yaml.' >&2; exit 1;
+        } ;;
+      *) echo 'Неизвестное активное ядро XKeen.' >&2; exit 1 ;;
+    esac
     if [ ! -x /opt/sbin/xray ] || [ ! -f /opt/etc/xray/configs/00_config.json ] || ! grep -q device_capture_xray /opt/etc/init.d/S05xkeen; then
       echo 'Обнаружена старая установка XKeen с другой структурой конфигурации или скриптом запуска.' >&2
       echo 'Не удаляйте её: необходим перенос конфигурации с резервной копией. Установка остановлена, действующие маршруты сохранены.' >&2

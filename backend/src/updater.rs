@@ -459,6 +459,27 @@ pub async fn post_update(State(state): State<AppState>, headers: HeaderMap, Json
         }
     }
 
+    if req.core == "mihomo" {
+        let result = async {
+            fs::create_dir_all(MIHOMO_CONF_DIR).await?;
+            let path = Path::new(MIHOMO_CONF_DIR).join("config.yaml");
+            match fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path).await {
+                Ok(mut file) => {
+                    if let Err(error) = file.write_all(include_str!("mihomo-starter.yaml").as_bytes()).await {
+                        let _ = fs::remove_file(&path).await;
+                        return Err(error);
+                    }
+                    file.sync_all().await
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+                Err(error) => Err(error),
+            }
+        }.await;
+        if let Err(error) = result {
+            return response(false, Some(format!("Создание конфигурации Mihomo: {}", error)));
+        }
+    }
+
     let target = format!("/opt/sbin/{}", req.core);
     if req.backup_core && Path::new(&target).exists() {
         let bk = format!(

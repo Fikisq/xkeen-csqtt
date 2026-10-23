@@ -131,7 +131,7 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
     ? parsed.outbounds.filter((out: any) => typeof out?.tag === 'string' && (!out.tag.startsWith('proxy-') || rules.some(rule => rule.outboundTag === out.tag))).map((out: any) => ({ tag: out.tag, protocol: out.protocol ?? '', label: out.tag === 'direct' ? 'direct' : out.tag === 'block' ? 'blocked' : outboundTitle(out) })) : []
   const balancers: string[] = Array.isArray(parsed?.routing?.balancers)
     ? parsed.routing.balancers.map((item: any) => item?.tag).filter((tag: unknown): tag is string => typeof tag === 'string') : []
-  const destinations = [...outbounds, ...balancers.map(tag => ({ tag: `@balancer:${tag}`, protocol: 'balancer', label: `Автовыбор: ${tag}` })), { tag: '@bypass', protocol: 'freedom', label: '🔓 Полный обход без VPN' }]
+  const destinations = [...outbounds, ...balancers.filter(tag => tag !== 'auto-vless').map(tag => ({ tag: `@balancer:${tag}`, protocol: 'balancer', label: `Автовыбор: ${tag}` })), { tag: '@bypass', protocol: 'freedom', label: '🔓 Полный обход без VPN' }]
   const protocolCards = outbounds.filter(out => ['vless', 'hysteria', 'hysteria2', 'tuic', 'freedom', 'socks'].includes(out.protocol.toLowerCase()) && out.tag !== 'block' && !out.tag.startsWith('proxy-'))
     .sort((a, b) => {
       const rank = (tag: string) => tag === 'direct' ? 0 : tag === 'nfqws-direct' ? 1 : tag === 'csqtt' ? 3 : tag === 'wdtt-plus' ? 4 : 2
