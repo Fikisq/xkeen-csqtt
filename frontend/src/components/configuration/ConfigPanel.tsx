@@ -42,7 +42,7 @@ import { fetchClashProxies, getAppState, useProxiesStore, syncClashApiPort, useA
 import type { Config } from '../../lib/types'
 import { cn } from '../../lib/utils'
 import { normalizeDevicePriority, baseRuleTag, type RouteTag, type RoutingRule } from '../../lib/xrayDeviceRouting'
-import { addMihomoCustomRoute, defaultMihomoChoices, prepareMihomoRouteGroups, readMihomoFullBypass, withMihomoFullBypass, isMihomoFullRoute, mihomoRouteTags, readMihomoDevices, removeMihomoRoute as removeMihomoRouteDefinition, editMihomoRouteResources, renameMihomoCustomRoute, reorderMihomoRoutes, updateMihomoDevice, withMihomoRouteEnabled } from '../../lib/mihomoDeviceRouting'
+import { addMihomoCustomRoute, defaultMihomoChoices, prepareMihomoRouteGroups, readMihomoFullBypass, withMihomoFullBypass, isMihomoFullRoute, mihomoRouteTags, readMihomoDevices, removeMihomoRoute as removeMihomoRouteDefinition, editMihomoRouteResources, renameMihomoCustomRoute, reorderMihomoRoutes, updateMihomoDevice, withMihomoRouteEnabled, type MihomoRouteNetwork } from '../../lib/mihomoDeviceRouting'
 import { enableXrayRoutingCards } from '../../lib/xraySubscription'
 import { createXrayRoutingQueue, rebaseXrayRouting } from '../../lib/xrayRoutingQueue'
 import { applyEdits, modify, parse as parseJsonc } from 'jsonc-parser'
@@ -297,6 +297,7 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
   const [mode, setMode] = useState<ClashMode>('rule')
   const [routingDraft, setRoutingDraft] = useState<{ file: string; base: string; content: string; preserveOrder?: boolean } | null>(null)
   const [routingSaving, setRoutingSaving] = useState(false)
+  const mihomoRoutingLockRef = useRef(false)
   const [routingAutoSaving, setRoutingAutoSaving] = useState(false)
   const [routingAutoPreview, setRoutingAutoPreview] = useState<{ file: string; content: string } | null>(null)
   const routingQueueRef = useRef<{ file: string; confirmed: string; queue: ReturnType<typeof createXrayRoutingQueue> } | null>(null)
@@ -727,15 +728,18 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
   const mihomoConfig = configs.find((item) => item.file.endsWith('/config.yaml') || item.file === 'config.yaml')
   const liveMihomoSelections = () => Object.fromEntries(Object.values(useProxiesStore.getState().proxies).filter((p: any) => p.now && p.name !== 'GLOBAL').map((p: any) => [p.name, p.now])) as Record<string, string>
 
-  async function editMihomoCustomRoute(transform: (content: string) => string, _message: string): Promise<boolean> {
-    if (!mihomoConfig || routingSaving) return false
+  async function editMihomoCustomRoute(transform: (content: string) => string, message: string): Promise<boolean> {
+    if (!mihomoConfig) return false
+    if (mihomoRoutingLockRef.current) { showToast('Дождитесь применения предыдущего изменения', 'error'); return false }
     if (configs.some(config => config.isDirty)) { showToast('Сначала сохраните изменения в редакторе', 'error'); return false }
     try {
       if (routingDraft && (routingDraft.file !== mihomoConfig.file || routingDraft.base !== mihomoConfig.savedContent)) throw new Error('Конфигурация изменилась. Скачайте черновик и отмените его перед повторным применением')
       const base = prepareMihomoRouteGroups(routingDraft?.content ?? withSelections(mihomoConfig.savedContent, liveMihomoSelections()))
       const content = transform(base)
-      setRoutingDraft({ file: mihomoConfig.file, base: mihomoConfig.savedContent, content })
-      return true
+      if (content === mihomoConfig.savedContent) return true
+      const draft = { file: mihomoConfig.file, base: mihomoConfig.savedContent, content }
+      setRoutingDraft(draft)
+      return await commitMihomoRouting(draft, message)
     } catch (error) { showToast(error instanceof Error ? error.message : 'Не удалось изменить маршрут', 'error'); return false }
   }
   async function selectMihomoDevice(ip: string, route: RouteTag | null, target?: string): Promise<boolean> {
@@ -752,8 +756,9 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
       return withSelections(name === defaults.VPN ? withMihomoFullBypass(content, target === '@bypass') : content, selections)
     }, '')
   }
-  async function commitMihomoRouting() {
-    if (!mihomoConfig || !routingDraft || routingSaving || routingDraft.file !== mihomoConfig.file) return
+  async function commitMihomoRouting(draft: { file: string; base: string; content: string }, message: string): Promise<boolean> {
+    if (!mihomoConfig || mihomoRoutingLockRef.current || draft.file !== mihomoConfig.file) return false
+    mihomoRoutingLockRef.current = true
     setRoutingSaving(true)
     const previousChoices = liveMihomoSelections()
     let saved = false
@@ -794,32 +799,36 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
     }
     try {
       const fresh = await apiCall<{configs: Array<{file: string; content: string}>}>('GET', 'configs?core=mihomo')
-      if (fresh.configs.find(c => c.file === mihomoConfig.file)?.content !== routingDraft.base) throw new Error('Конфигурация уже изменилась. Сохраните черновик в файл и загрузите актуальные настройки')
-      const put = await apiCall<{success: boolean; error?: string}>('PUT', 'configs?core=mihomo&validate=mihomo', {file: mihomoConfig.file, content: routingDraft.content})
+      if (fresh.configs.find(c => c.file === mihomoConfig.file)?.content !== draft.base) throw new Error('Конфигурация уже изменилась. Загрузите актуальные настройки и повторите действие')
+      const put = await apiCall<{success: boolean; error?: string}>('PUT', 'configs?core=mihomo&validate=mihomo', {file: mihomoConfig.file, content: draft.content})
       if (!put.success) throw new Error(put.error || 'Проверка Mihomo не пройдена')
       saved = true
-      const warning = await applyRuntime(routingDraft.content, readSelections(routingDraft.content))
-      await onRefreshConfigs()
+      const warning = await applyRuntime(draft.content, readSelections(draft.content))
       setRoutingDraft(null)
-      showToast(warning || 'Маршрутизация Mihomo сохранена и применена')
+      await onRefreshConfigs().catch(() => showToast('Маршрут применён, но список конфигураций не обновился. Обновите страницу', 'error'))
+      showToast(warning || message || 'Маршрутизация Mihomo применена')
+      return true
     } catch (error) {
       if (saved) {
         const rollback = await apiCall<{success: boolean}>('PUT', 'configs?core=mihomo&validate=mihomo', {file: mihomoConfig.file, content: mihomoConfig.savedContent}).catch(() => null)
         if (rollback?.success) await applyRuntime(mihomoConfig.savedContent, previousChoices).catch(() => showToast('Не удалось полностью восстановить настройки после ошибки', 'error'))
       }
       showToast(error instanceof Error ? error.message : 'Ошибка применения Mihomo', 'error')
-    } finally { setRoutingSaving(false) }
+      setRoutingDraft(null)
+      await onRefreshConfigs().catch(() => {})
+      return false
+    } finally { mihomoRoutingLockRef.current = false; setRoutingSaving(false) }
   }
 
-  async function saveMihomoRoute(tag: RouteTag | null, name: string, resources: string[], target: string, deviceIp?: string): Promise<boolean> {
+  async function saveMihomoRoute(tag: RouteTag | null, name: string, resources: string[], target: string, deviceIp?: string, network: MihomoRouteNetwork = 'tcp,udp'): Promise<boolean> {
     return editMihomoCustomRoute(content => {
       let updated = content
       let routeTag = tag
       if (!routeTag) {
-        updated = addMihomoCustomRoute(updated, name, resources)
+        updated = addMihomoCustomRoute(updated, name, resources, network)
         routeTag = `custom:${encodeURIComponent(name.trim())}`
       } else {
-        if (routeTag !== 'VPN' && !deviceIp) updated = editMihomoRouteResources(updated, routeTag, resources)
+        if (routeTag !== 'VPN' && !deviceIp) updated = editMihomoRouteResources(updated, routeTag, resources, false, network)
         if (routeTag.startsWith('custom:') && name.trim() !== decodeURIComponent(routeTag.slice(7))) {
           updated = renameMihomoCustomRoute(updated, routeTag, name)
           routeTag = `custom:${encodeURIComponent(name.trim())}`
@@ -832,18 +841,18 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
     }, 'Маршрут обновлён')
   }
 
-  async function importMihomoRoutes(rules: Array<{ tag: string; name: string; resources: string[]; outbound: string }>): Promise<boolean> {
+  async function importMihomoRoutes(rules: Array<{ tag: string; name: string; resources: string[]; outbound: string; network?: MihomoRouteNetwork }>): Promise<boolean> {
     return editMihomoCustomRoute(content => {
       let updated = content
       for (const rule of rules) {
         if (rule.tag === 'VPN') continue
         let tag = rule.tag
         if (tag.startsWith('custom:') && !mihomoRouteTags(updated).includes(tag)) {
-          updated = addMihomoCustomRoute(updated, rule.name, rule.resources)
+          updated = addMihomoCustomRoute(updated, rule.name, rule.resources, rule.network ?? 'tcp,udp')
           tag = `custom:${encodeURIComponent(rule.name.trim())}`
         } else {
           if (!mihomoRouteTags(updated).includes(tag)) throw new Error(`Неизвестное правило: ${tag}`)
-          updated = editMihomoRouteResources(updated, tag, rule.resources)
+          updated = editMihomoRouteResources(updated, tag, rule.resources, false, rule.network)
         }
         const group = defaultMihomoChoices(updated)[tag]
         if (group) updated = withSelections(updated, { ...readSelections(updated), [group]: rule.outbound })
@@ -884,9 +893,9 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
     </DropdownMenuContent>
   </DropdownMenu></>)
   const routingToolbar = (<div className="border-border bg-input-background m-3 flex shrink-0 flex-wrap items-center gap-2 rounded-xl border p-3">
-                  <Button size="sm" disabled={!activeRoutingDraft || routingSaving} onClick={() => { if (isMihomo) void commitMihomoRouting(); else if (xraySelectorsConfig) void applyXrayRoutingEdit(xraySelectorsConfig.file, content => content, 'Маршрутизация сохранена и применена', true) }}>{routingSaving ? 'Применение…' : 'Сохранить и применить'}</Button>
-                  <Button size="sm" variant="outline" disabled={!activeRoutingDraft || routingSaving} onClick={() => setRoutingDraft(null)}>Отменить изменения</Button>
-                  <span className="text-muted-foreground mr-auto text-xs" role="status">{activeRoutingDraft ? 'Есть неприменённые изменения' : 'Все изменения сохранены'}</span>
+                  {!isMihomo && <><Button size="sm" disabled={!activeRoutingDraft || routingSaving} onClick={() => { if (xraySelectorsConfig) void applyXrayRoutingEdit(xraySelectorsConfig.file, content => content, 'Маршрутизация сохранена и применена', true) }}>{routingSaving ? 'Применение…' : 'Сохранить и применить'}</Button>
+                  <Button size="sm" variant="outline" disabled={!activeRoutingDraft || routingSaving} onClick={() => setRoutingDraft(null)}>Отменить изменения</Button></>}
+                  <span className="text-muted-foreground mr-auto text-xs" role="status">{isMihomo ? routingSaving ? 'Проверка и применение маршрута…' : 'Изменения применяются автоматически' : activeRoutingDraft ? 'Есть неприменённые изменения' : 'Все изменения сохранены'}</span>
                   {routingUtilities}
                 </div>
   )

@@ -28,7 +28,7 @@ import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
 import { apiCall, clashFetch } from '../../../lib/api'
 import { fetchClashProxies, useProxiesStore, useAppContext } from '../../../lib/store'
-import { defaultMihomoChoices, isMihomoRouteEnabled, readMihomoFullBypass, isMihomoFullRoute, orderedMihomoRouteTags, readMihomoDevices, readMihomoRouteResources } from '../../../lib/mihomoDeviceRouting'
+import { defaultMihomoChoices, isMihomoRouteEnabled, readMihomoFullBypass, isMihomoFullRoute, orderedMihomoRouteTags, readMihomoDevices, readMihomoRouteResources, readMihomoRouteNetwork, type MihomoRouteNetwork } from '../../../lib/mihomoDeviceRouting'
 import { findRoutePresets } from '../../../lib/routePresets'
 import { validDeviceIp, type RouteTag } from '../../../lib/xrayDeviceRouting'
 import { RouteIcon, routeLabel } from '../RouteIcon'
@@ -68,8 +68,8 @@ interface Props {
   configContent: string
   onSelectDraft: (name: string, target: string) => Promise<boolean>
   onDeviceSelect: (ip: string, route: RouteTag | null, target?: string) => Promise<boolean>
-  onSaveRoute: (tag: RouteTag | null, name: string, resources: string[], target: string, deviceIp?: string) => Promise<boolean>
-  onImportRoutes: (rules: Array<{ tag: string; name: string; resources: string[]; outbound: string }>) => Promise<boolean>
+  onSaveRoute: (tag: RouteTag | null, name: string, resources: string[], target: string, deviceIp?: string, network?: MihomoRouteNetwork) => Promise<boolean>
+  onImportRoutes: (rules: Array<{ tag: string; name: string; resources: string[]; outbound: string; network?: MihomoRouteNetwork }>) => Promise<boolean>
   onRemoveRoute: (tag: string) => Promise<boolean>
   onReorderRoute: (source: RouteTag, target: RouteTag) => Promise<boolean>
   onToggleRoute: (tag: RouteTag, enabled: boolean) => Promise<boolean>
@@ -910,6 +910,7 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
   const [routeDomains, setRouteDomains] = useState('')
   const [routeResourcesValid, setRouteResourcesValid] = useState(true)
   const [routeTarget, setRouteTarget] = useState('DIRECT')
+  const [routeNetwork, setRouteNetwork] = useState<MihomoRouteNetwork>('tcp,udp')
   const [routePending, setRoutePending] = useState(false)
   const importInput = useRef<HTMLInputElement>(null)
   const [draggedRoute, setDraggedRoute] = useState<RouteTag | null>(null)
@@ -917,6 +918,7 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
   const [editingTag, setEditingTag] = useState<RouteTag | null>(null)
   const [editingName, setEditingName] = useState('')
   const [editingTarget, setEditingTarget] = useState('DIRECT')
+  const [editingNetwork, setEditingNetwork] = useState<MihomoRouteNetwork | 'mixed'>('tcp,udp')
   const [resources, setResources] = useState<string[]>([])
   const [editingResourcesValid, setEditingResourcesValid] = useState(true)
   const [resourceSearch, setResourceSearch] = useState('')
@@ -1119,7 +1121,7 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
     return <div className="max-h-24 overflow-auto break-words">{domains.length > 0 && <div><span className="font-medium text-foreground">Домены:</span> {domains.join(' · ')}</div>}{ips.length > 0 && <div><span className="font-medium text-foreground">IP:</span> {ips.join(' · ')}</div>}{!domains.length && !ips.length && '—'}</div>
   }
   function exportRoutes() {
-    const rules = orderedTags.map(tag => ({ tag, name: routeLabel(tag), resources: readMihomoRouteResources(configContent, tag), outbound: allProxyData[defaultChoices[tag]]?.now ?? 'DIRECT' }))
+    const rules = orderedTags.map(tag => ({ tag, name: routeLabel(tag), resources: readMihomoRouteResources(configContent, tag), network: readMihomoRouteNetwork(configContent, tag), outbound: allProxyData[defaultChoices[tag]]?.now ?? 'DIRECT' }))
     const blob = new Blob([JSON.stringify({ format: 'xkeen-mihomo-routes-v1', rules }, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
@@ -1130,9 +1132,9 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
     try {
       if (file.size > 1024 * 1024) throw new Error('Файл правил слишком большой')
       const data = JSON.parse(await file.text()) as { format?: string; rules?: unknown }
-      if (data.format !== 'xkeen-mihomo-routes-v1' || !Array.isArray(data.rules) || data.rules.length > 50 || data.rules.some((rule: any) => typeof rule?.tag !== 'string' || typeof rule?.name !== 'string' || !Array.isArray(rule?.resources) || rule.resources.some((value: unknown) => typeof value !== 'string') || typeof rule?.outbound !== 'string')) throw new Error('Неверный формат файла правил Mihomo')
+      if (data.format !== 'xkeen-mihomo-routes-v1' || !Array.isArray(data.rules) || data.rules.length > 50 || data.rules.some((rule: any) => typeof rule?.tag !== 'string' || typeof rule?.name !== 'string' || !Array.isArray(rule?.resources) || rule.resources.some((value: unknown) => typeof value !== 'string') || typeof rule?.outbound !== 'string' || rule?.network !== undefined && !['tcp,udp', 'tcp', 'udp'].includes(rule.network))) throw new Error('Неверный формат файла правил Mihomo')
       setRoutePending(true)
-      await onImportRoutes(data.rules as Array<{ tag: string; name: string; resources: string[]; outbound: string }>)
+      await onImportRoutes(data.rules as Array<{ tag: string; name: string; resources: string[]; outbound: string; network?: MihomoRouteNetwork }>)
     } catch (error) { showToast(error instanceof Error ? error.message : 'Не удалось импортировать правила', 'error') }
     finally { setRoutePending(false) }
   }
@@ -1144,6 +1146,7 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
     setResources(route === 'VPN' ? [] : readMihomoRouteResources(configContent, route))
     setEditingResourcesValid(true)
     setEditingTarget(choice === group ? '@inherit' : choice === '@direct' ? 'DIRECT' : choice ?? allProxyData[group]?.now ?? 'DIRECT')
+    setEditingNetwork(readMihomoRouteNetwork(configContent, route))
     setResourceSearch('')
   }
   function routeControls(route: RouteTag) {
@@ -1283,7 +1286,7 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
           </div>
         </section>
         {<div className="order-2 flex flex-wrap items-center gap-2">
-          <Button size="sm" onClick={() => { setRouteTarget(allProxyData[defaultChoices.VPN]?.now ?? 'DIRECT'); setRouteResourcesValid(true); setAddingRoute(true) }}>{activeDevice ? '+ Добавить общее правило' : '+ Добавить правило'}</Button>
+          <Button size="sm" onClick={() => { setRouteTarget(allProxyData[defaultChoices.VPN]?.now ?? 'DIRECT'); setRouteNetwork('tcp,udp'); setRouteResourcesValid(true); setAddingRoute(true) }}>{activeDevice ? '+ Добавить общее правило' : '+ Добавить правило'}</Button>
           <input ref={importInput} type="file" accept=".json,application/json" className="hidden" aria-label="Файл правил Mihomo" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importRoutes(file) }} />
           {!activeDevice && <><Button size="sm" variant="outline" disabled={routePending} onClick={() => importInput.current?.click()}>Импорт</Button><Button size="sm" variant="outline" onClick={exportRoutes}>Экспорт</Button></>}
           {!activeDevice && <Button size="sm" className="ml-auto" variant={globalDirect ? 'default' : 'outline'} disabled={routePending} onClick={() => void onSelectDraft(defaultChoices.VPN, globalDirect ? 'DIRECT' : '@bypass')}>🔓 Полный обход без VPN: {globalDirect ? 'включён' : 'выключен'}</Button>}
@@ -1296,13 +1299,14 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
             <MihomoResourceFields resources={routeDomains.split('\n').filter(Boolean)} onChange={values => setRouteDomains(values.join('\n'))} onValidChange={setRouteResourcesValid} providerBehaviors={providerBehaviors} />
           <div className="max-h-64 overflow-y-auto rounded border p-1">{resourceOptions.filter(value => value.toLowerCase().includes(routeSearch.toLowerCase())).map(value => { const selected = routeDomains.split('\n').includes(value); return <button type="button" key={value} aria-pressed={selected} className={cn('block w-full rounded px-2 py-2 text-left hover:bg-blue-500/10', selected && 'bg-blue-500/20')} onClick={() => { setRouteDomains(selected ? routeDomains.split('\n').filter(item => item !== value).join('\n') : [...routeDomains.split('\n').filter(Boolean), value].join('\n')); setRouteResourcesValid(true) }}>{selected ? '✓ ' : ''}{value}</button> })}</div>
 
+            <label className="space-y-2 text-sm font-medium">Сеть<select className="border-border bg-input-background w-full rounded-lg border px-3 py-2 text-sm" value={routeNetwork} onChange={event => setRouteNetwork(event.target.value as MihomoRouteNetwork)}><option value="tcp,udp">TCP, UDP</option><option value="tcp">TCP</option><option value="udp">UDP</option></select></label>
             <label className="space-y-2 text-sm font-medium">Исходящее<select className="border-border bg-input-background w-full rounded-lg border px-3 py-2 text-sm" value={routeTarget} onChange={event => setRouteTarget(event.target.value)}>{[...new Set([routeTarget, ...protocolCards])].map(name => <option key={name} value={name}>{displayName(name)}</option>)}</select></label>
-            <Button size="sm" disabled={routePending || !routeResourcesValid || !routeName.trim() || !routeDomains.trim()} onClick={async () => { setRoutePending(true); try { const saved = await onSaveRoute(null, routeName, routeDomains.split(/\r?\n/).map((domain) => domain.trim()).filter(Boolean), routeTarget, activeDevice?.ip); if (saved) { setRouteName(''); setRouteDomains(''); setRouteSearch(''); setRouteResourcesValid(true); setAddingRoute(false) } } finally { setRoutePending(false) } }}>Создать правило</Button>
+            <Button size="sm" disabled={routePending || !routeResourcesValid || !routeName.trim() || !routeDomains.trim()} onClick={async () => { setRoutePending(true); try { const saved = await onSaveRoute(null, routeName, routeDomains.split(/\r?\n/).map((domain) => domain.trim()).filter(Boolean), routeTarget, activeDevice?.ip, routeNetwork); if (saved) { setRouteName(''); setRouteDomains(''); setRouteSearch(''); setRouteResourcesValid(true); setAddingRoute(false) } } finally { setRoutePending(false) } }}>Создать правило</Button>
           </div></DialogContent></Dialog>
 
         </div>}
         <p className="text-muted-foreground order-1 text-xs">Карточки можно перетаскивать мышью. <button type="button" className="ml-2 underline" onClick={resetCards}>Стандартный порядок</button></p>
-        <Dialog open={!!deletingTag} onOpenChange={open => { if (!open && !routePending) setDeletingTag(null) }}><DialogContent><DialogHeader><DialogTitle>Удалить маршрут «{deletingTag ? routeLabel(deletingTag) : ''}»?</DialogTitle></DialogHeader><p className="text-muted-foreground">Маршрут будет удалён из общей маршрутизации и правил устройств. Изменения применяются после сохранения.</p><div className="flex justify-end gap-2"><Button variant="outline" disabled={routePending} onClick={() => setDeletingTag(null)}>Отмена</Button><Button variant="destructive" disabled={routePending} onClick={async () => { if (!deletingTag) return; setRoutePending(true); try { if (await onRemoveRoute(deletingTag)) setDeletingTag(null) } finally { setRoutePending(false) } }}>{routePending ? 'Удаление…' : 'Удалить'}</Button></div></DialogContent></Dialog>
+        <Dialog open={!!deletingTag} onOpenChange={open => { if (!open && !routePending) setDeletingTag(null) }}><DialogContent><DialogHeader><DialogTitle>Удалить маршрут «{deletingTag ? routeLabel(deletingTag) : ''}»?</DialogTitle></DialogHeader><p className="text-muted-foreground">Маршрут будет удалён из общей маршрутизации и правил устройств сразу после проверки конфигурации.</p><div className="flex justify-end gap-2"><Button variant="outline" disabled={routePending} onClick={() => setDeletingTag(null)}>Отмена</Button><Button variant="destructive" disabled={routePending} onClick={async () => { if (!deletingTag) return; setRoutePending(true); try { if (await onRemoveRoute(deletingTag)) setDeletingTag(null) } finally { setRoutePending(false) } }}>{routePending ? 'Удаление…' : 'Удалить'}</Button></div></DialogContent></Dialog>
         <Dialog open={!!editingTag} onOpenChange={open => { if (!open) setEditingTag(null) }}><DialogContent className="max-w-[min(94vw,680px)]! max-h-[85dvh] overflow-y-auto"><DialogHeader><DialogTitle>Правило: {editingTag ? routeLabel(editingTag) : ''}</DialogTitle></DialogHeader>
           {editingTag?.startsWith('custom:') && <label className="space-y-2 text-sm font-medium">Комментарий<Input value={editingName} maxLength={40} onChange={event => setEditingName(event.target.value)} /></label>}
           {editingTag !== 'VPN' && !activeDevice && <><p className="text-muted-foreground text-sm">Ресурсы правила общие для всех устройств.</p>
@@ -1310,9 +1314,10 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
           <MihomoResourceFields resources={resources} onChange={setResources} onValidChange={setEditingResourcesValid} providerBehaviors={providerBehaviors} />
           <Input value={resourceSearch} onChange={event => setResourceSearch(event.target.value)} placeholder="Поиск ресурса…" />
           <div className="max-h-64 overflow-y-auto rounded border p-1">{resourceOptions.filter(value => value.toLowerCase().includes(resourceSearch.toLowerCase())).map(value => <button type="button" key={value} aria-pressed={resources.includes(value)} className={cn('block w-full rounded px-2 py-2 text-left hover:bg-blue-500/10', resources.includes(value) && 'bg-blue-500/20')} onClick={() => { setResources(resources.includes(value) ? resources.filter(item => item !== value) : [...resources, value]); setEditingResourcesValid(true) }}>{resources.includes(value) ? '✓ ' : ''}{value}</button>)}</div></>}
+          {editingTag !== 'VPN' && !activeDevice && <label className="space-y-2 text-sm font-medium">Сеть<select className="border-border bg-input-background w-full rounded-lg border px-3 py-2 text-sm" value={editingNetwork} onChange={event => setEditingNetwork(event.target.value as MihomoRouteNetwork)}>{editingNetwork === 'mixed' && <option value="mixed" disabled>Смешанная — выберите сеть</option>}<option value="tcp,udp">TCP, UDP</option><option value="tcp">TCP</option><option value="udp">UDP</option></select></label>}
           <label className="space-y-2 text-sm font-medium">Исходящее<select className="border-border bg-input-background w-full rounded-lg border px-3 py-2 text-sm" value={editingTarget} onChange={event => setEditingTarget(event.target.value)}>{activeDevice && <option value="@inherit">Общая настройка</option>}{[...new Set([editingTarget, ...protocolCards])].filter(name => name !== '@inherit').map(name => <option key={name} value={name}>{displayName(name)}</option>)}</select></label>
           {activeDevice && editingTag !== 'VPN' && <p className="text-muted-foreground text-sm">Для этого устройства меняется только исходящее. Домены и IP задаются в общей маршрутизации.</p>}
-          <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setEditingTag(null)}>Отмена</Button><Button disabled={routePending || !editingResourcesValid || (editingTag !== 'VPN' && !resources.length) || !editingName.trim()} onClick={async () => { if (!editingTag) return; setRoutePending(true); try { if (await onSaveRoute(editingTag, editingName, resources, editingTarget, activeDevice?.ip)) setEditingTag(null) } finally { setRoutePending(false) } }}>Сохранить</Button></div>
+          <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => setEditingTag(null)}>Отмена</Button><Button disabled={routePending || !editingResourcesValid || (editingTag !== 'VPN' && !resources.length) || (!activeDevice && editingTag !== 'VPN' && editingNetwork === 'mixed') || !editingName.trim()} onClick={async () => { if (!editingTag) return; setRoutePending(true); try { if (await onSaveRoute(editingTag, editingName, resources, editingTarget, activeDevice?.ip, editingNetwork === 'mixed' ? undefined : editingNetwork)) setEditingTag(null) } finally { setRoutePending(false) } }}>Применить</Button></div>
         </DialogContent></Dialog>
         {globalDirect && <p className="text-muted-foreground order-2 text-sm">Общий трафик идёт напрямую. Для отдельных правил и устройств можно выбрать VPN ниже.</p>}
         {<div className="border-border bg-card order-3 overflow-x-auto rounded-xl border">
@@ -1333,7 +1338,7 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, onCol
                 <td className="px-3 py-3"><div className="flex items-center gap-1">{route !== 'VPN' && <><span draggable={!routePending} onDragStart={event => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', route); setDraggedRoute(route) }} onDragEnd={() => setDraggedRoute(null)} className="text-muted-foreground cursor-grab p-1" title="Перетащить правило"><IconGripVertical size={17} /></span><Button size="icon-xs" title="Повысить приоритет" aria-label={`Повысить приоритет ${routeLabel(route)}`} variant="outline" disabled={routePending || orderedTags.indexOf(route) < 1} onClick={() => void moveRoute(route, orderedTags[orderedTags.indexOf(route) - 1])}><IconChevronUp size={14} /></Button><Button size="icon-xs" title="Понизить приоритет" aria-label={`Понизить приоритет ${routeLabel(route)}`} variant="outline" disabled={routePending || orderedTags.indexOf(route) >= orderedTags.length - 1} onClick={() => void moveRoute(route, orderedTags[orderedTags.indexOf(route) + 1])}><IconChevronDown size={14} /></Button></>}<Button size="icon-xs" title="Изменить правило" aria-label="Изменить правило" variant="outline" onClick={() => openRouteEditor(route)}>✎</Button>{route !== 'VPN' && <Button size="icon-xs" title="Удалить правило" aria-label="Удалить правило" variant="outline" onClick={() => setDeletingTag(route)}>×</Button>}</div></td>
                 <td className="px-3 py-3">{route === 'VPN' ? '—' : <Switch size="sm" checked={isMihomoRouteEnabled(configContent, route)} disabled={routePending || !!activeDevice} aria-label={`${isMihomoRouteEnabled(configContent, route) ? 'Выключить' : 'Включить'} ${routeLabel(route)}`} onCheckedChange={checked => { setRoutePending(true); void onToggleRoute(route, checked).finally(() => setRoutePending(false)) }} />}</td>
                 <td className="px-3 py-3 font-medium">{routeLabel(route)}</td>
-                <td className="text-muted-foreground px-3 py-3">Обе сети</td>
+                <td className="text-muted-foreground px-3 py-3">{route === 'VPN' ? 'TCP, UDP' : readMihomoRouteNetwork(configContent, route) === 'mixed' ? 'Смешанная' : readMihomoRouteNetwork(configContent, route).toUpperCase().replace(',', ', ')}</td>
                 <td className="px-3 py-3 text-sm">{route === 'VPN' ? 'Остальной трафик' : destinationSummary(values)}</td>
                 <td className="px-3 py-3"><div className="flex items-center gap-2"><button type="button" className="min-w-0 truncate text-left text-primary hover:underline" onClick={() => openRouteEditor(route)} title="Изменить исходящее в правиле">{displayName(target)}</button>{canProbe(proxy) && <button type="button" className={cn('shrink-0 text-xs tabular-nums', delay === null ? 'text-sky-400' : delayColor(delay))} title="HTTPS через выбранное подключение" onClick={() => void testSingle(target)}>{delay === null ? 'Пинг' : delay > 0 ? `${delay} мс` : '✕'}</button>}</div></td>
               </tr>
