@@ -167,6 +167,7 @@ export function ensureMihomoSidecars(content: string): string {
   if (!header || header.index === undefined) throw new Error('В Mihomo YAML нет раздела proxies')
   const names = inlineProxyNames(content)
   const additions = [
+    !names.has('nfqws2 · zapret2') ? '  - name: nfqws2 · zapret2\n    type: direct\n    routing-mark: 832\n    udp: true\n' : '',
     !names.has('CSQTT') ? '  - name: CSQTT\n    type: direct\n    interface-name: csqtt0\n    udp: true\n' : '',
     !names.has('WDTT Plus') ? '  - name: WDTT Plus\n    type: socks5\n    server: 127.0.0.1\n    port: 1088\n    udp: true\n' : '',
   ].join('')
@@ -230,7 +231,7 @@ export function prepareMihomoRouteGroups(content: string): string {
     group.type = 'select'
     group.hidden = false
     const options = Array.isArray(group.proxies) ? group.proxies as string[] : []
-    group.proxies = [...new Set(['DIRECT', ...(group.name !== defaults.VPN && defaults.VPN !== 'DIRECT' ? [defaults.VPN] : []), ...options, ...[...inline].filter(name => /^(?:CSQTT|WDTT Plus)$/.test(name) || name.endsWith(' · XKeen'))])]
+    group.proxies = [...new Set(['DIRECT', ...(group.name !== defaults.VPN && defaults.VPN !== 'DIRECT' ? [defaults.VPN] : []), ...options, ...[...inline].filter(name => /^(?:CSQTT|WDTT Plus|nfqws2 · zapret2)$/.test(name) || name.endsWith(' · XKeen'))])]
     if (providers.length) group.use = [...new Set([...(Array.isArray(group.use) ? group.use as string[] : []), ...providers])]
     updated += dumpYaml([group], { lineWidth: -1, noRefs: true, indent: 2 }).split('\n').filter(Boolean).map(line => `  ${line}`).join('\n') + '\n'
   }
@@ -244,7 +245,7 @@ export function withMihomoFullBypass(content: string, enabled: boolean): string 
   return `# xkeen-full-bypass ${enabled}\n` + content.replace(/^# xkeen-full-bypass (?:true|false)\r?\n/gm, '')
 }
 export function isMihomoFullRoute(target: string): boolean {
-  return target === 'DIRECT' || /^(?:CSQTT|WDTT[ -]Plus)$/i.test(target) || /без\s*(?:vpn|впн)/i.test(target)
+  return target === 'DIRECT' || /^(?:CSQTT|WDTT[ -]Plus|nfqws2 · zapret2)$/i.test(target) || /без\s*(?:vpn|впн)/i.test(target)
 }
 
 export function defaultMihomoChoices(content: string): DeviceChoices {
@@ -345,7 +346,7 @@ export function addMihomoCustomRoute(content: string, name: string, domains: str
   const providers = providerNames(content)
   const group = [
     `  - name: ${JSON.stringify(title)}`, '    type: select',
-    `    proxies: [${JSON.stringify(selector)}, DIRECT${inlineProxyNames(content).has('CSQTT') ? ', CSQTT' : ''}${inlineProxyNames(content).has('WDTT Plus') ? ', "WDTT Plus"' : ''}]`,
+    `    proxies: [${JSON.stringify(selector)}, DIRECT${inlineProxyNames(content).has('CSQTT') ? ', CSQTT' : ''}${inlineProxyNames(content).has('WDTT Plus') ? ', "WDTT Plus"' : ''}${inlineProxyNames(content).has('nfqws2 · zapret2') ? ', "nfqws2 · zapret2"' : ''}]`,
     ...(providers.length ? [`    use: [${providers.map((provider) => JSON.stringify(provider)).join(', ')}]`] : []),
     '',
   ].join('\n')

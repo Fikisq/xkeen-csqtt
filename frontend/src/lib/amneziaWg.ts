@@ -82,7 +82,7 @@ export function importAwg(input: string): { content: string; type: string } {
       if (!/^(on|off|true|false|0|1)$/i.test(value)) throw new Error(`Некорректный ${name}`)
       options[target] = /^(on|true|1)$/i.test(value)
     } else if (/^I[1-5]$/.test(name)) options[target] = value
-    else if (/^H[1-4]$/.test(name) || name === 'ContentPaddingAddition') {
+    else if (/^H[1-4]$/.test(name) || ['ContentPaddingAddition', 'RekeyAfterTime', 'RekeyTimeout', 'RejectAfterTime', 'KeepaliveTimeout', 'MaxHandshakeAttempts'].includes(name)) {
       if (!/^\d+(?:-\d+)?$/.test(value)) throw new Error(`Некорректный ${name}`)
       options[target] = value
     } else {

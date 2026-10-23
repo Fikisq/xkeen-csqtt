@@ -70,8 +70,11 @@ async fn find_proxy(name: &str) -> Option<Yaml> {
 }
 async fn probe_node(name: &str) -> Result<u32, &'static str> {
     if name == "DIRECT" { return crate::latency::curl_latency(&["--ipv4", "--noproxy", "*"]).await; }
-    let proxy = find_proxy(name).await.ok_or("Узел не найден в конфигурации или кеше подписки Mihomo")?;
+    let mut proxy = find_proxy(name).await.ok_or("Узел не найден в конфигурации или кеше подписки Mihomo")?;
     if proxy["dialer-proxy"].as_str().is_some() { return Err("Проверка узла с dialer-proxy требует проверки всей цепочки"); }
+    // Subscription labels can contain trailing whitespace or rule separators.
+    // The isolated rule must refer to an exact, controlled proxy identifier.
+    proxy["name"] = Yaml::String("probe-node".into());
     let available = std::fs::read_to_string("/proc/meminfo").ok().and_then(|s| s.lines().find_map(|l| l.strip_prefix("MemAvailable:")?.split_whitespace().next()?.parse::<usize>().ok())).unwrap_or(0);
     if available < 100_000 { return Err("Недостаточно свободной RAM для проверки Mihomo"); }
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.map_err(|_| "Не удалось выделить порт проверки")?;
@@ -82,9 +85,9 @@ async fn probe_node(name: &str) -> Result<u32, &'static str> {
     use std::os::unix::fs::PermissionsExt;
     let _ = tokio::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).await;
     let result = async {
-        let mut document = YamlLoader::load_from_str(&format!("mixed-port: {port}\nbind-address: 127.0.0.1\nallow-lan: false\nlog-level: silent\nmode: rule\nproxies: []\nrules: []\n")).map_err(|_| "Не удалось собрать конфигурацию проверки")?.remove(0);
+        let mut document = YamlLoader::load_from_str(&format!("mixed-port: {port}\nbind-address: 127.0.0.1\nallow-lan: false\nrouting-mark: 255\nlog-level: silent\nmode: rule\nproxies: []\nrules: []\n")).map_err(|_| "Не удалось собрать конфигурацию проверки")?.remove(0);
         document["proxies"] = Yaml::Array(vec![proxy]);
-        document["rules"] = Yaml::Array(vec![Yaml::String(format!("MATCH,{name}"))]);
+        document["rules"] = Yaml::Array(vec![Yaml::String("MATCH,probe-node".into())]);
         let mut text = String::new();
         YamlEmitter::new(&mut text).dump(&document).map_err(|_| "Не удалось записать конфигурацию проверки")?;
         let path = format!("{dir}/config.yaml");

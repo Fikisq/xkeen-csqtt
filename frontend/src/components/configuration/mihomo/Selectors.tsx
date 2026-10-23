@@ -77,6 +77,7 @@ interface Props {
 
 const NO_DELAY_TYPES = new Set(['reject', 'reject-drop', 'dns', 'pass', 'passrule', 'relay'])
 function specialPingTag(name: string): string | null {
+  if (/^nfqws2 · zapret2$/i.test(name)) return 'nfqws-direct'
   if (/^csqtt$/i.test(name)) return 'CSQTT'
   if (/^wdtt[ -]plus$/i.test(name)) return 'wdtt-plus'
   return null
@@ -185,7 +186,7 @@ function isRouteOption(name: string, general: boolean, proxies: Record<string, P
   if (name === 'DIRECT' && !general) return true
   const proxy = proxies[name]
   if (!proxy) return false
-  if (isProtocolProxy(proxy) || /csqtt|wdtt/i.test(name) || isNoVpn(name)) return true
+  if (isProtocolProxy(proxy) || /csqtt|wdtt|nfqws/i.test(name) || isNoVpn(name)) return true
   if (name === 'DIRECT') return !Object.keys(proxies).some((key) => isNoVpn(key))
   return !general && isGeneralSelector(name)
 }

@@ -10,6 +10,10 @@ external-controller-unix: /opt/etc/mihomo/mihomo-api.sock
 profile:
   store-selected: true
 proxies:
+  - name: nfqws2 · zapret2
+    type: direct
+    routing-mark: 832
+    udp: true
   - name: CSQTT
     type: direct
     interface-name: csqtt0
@@ -23,7 +27,7 @@ proxy-providers:
 proxy-groups:
   - name: VPN
     type: select
-    proxies: [DIRECT, CSQTT, WDTT Plus]
+    proxies: [DIRECT, CSQTT, WDTT Plus, nfqws2 · zapret2]
 rules:
   - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
   - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
