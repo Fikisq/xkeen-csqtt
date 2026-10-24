@@ -562,6 +562,7 @@ async fn main() {
         .route("/api/panel/update", post(panel_update::post))
         .route("/api/panel/update/status", get(panel_update::status))
         .route("/api/ruleset", get(ruleset_inspector::get_ruleset_content))
+        .route("/api/geo/mihomo", get(ruleset_inspector::get_ruleset_files))
         .route("/api/device-list", get(api_relay::get_device_list))
         .route("/api/update", post(updater::post_update))
         .route("/api/geo", get(geo::get_geo))

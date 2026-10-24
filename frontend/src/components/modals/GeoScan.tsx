@@ -2,6 +2,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { UtilityPanel } from '@/components/configuration/UtilityPanel'
+import { MihomoGeoFiles } from '@/components/configuration/MihomoGeoFiles'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -20,6 +21,14 @@ type FileStatus = {
 }
 
 export function GeoScanModal({ embedded = false }: { embedded?: boolean } = {}) {
+  const { modals, dispatch } = useModalContext()
+  const [core, setCore] = useState('xray')
+  const content = <><Tabs value={core} onValueChange={setCore}><TabsList><TabsTrigger value="xray">Xray</TabsTrigger><TabsTrigger value="mihomo">Mihomo</TabsTrigger></TabsList></Tabs>{core === 'xray' ? <XrayGeoFiles embedded /> : <section className="p-4"><MihomoGeoFiles /></section>}</>
+  if (embedded) return <div className="space-y-3 p-4">{content}</div>
+  return <UtilityPanel open={modals.showGeoScanModal} onOpenChange={open => dispatch({type:'SHOW_MODAL', modal:'showGeoScanModal',show:open})} title="Геофайлы" description="Базы доменов и IP для Xray и Mihomo.">{content}</UtilityPanel>
+}
+
+function XrayGeoFiles({ embedded = false }: { embedded?: boolean } = {}) {
   const { showToast } = useAppContext()
   const { modals, dispatch } = useModalContext()
   const [geoType, setGeoType] = useState<GeoType>('domain')

@@ -25,7 +25,7 @@ import { RoutingTable, type RoutingRule as TableRule } from '../xray/RoutingTabl
 import { resourceLabel } from '@/lib/geoLabels'
 import { validDeviceIp, type RouteTag } from '../../../lib/xrayDeviceRouting'
 import { routeLabel } from '../RouteIcon'
-import { GeoDatabasePicker } from '../GeoDatabasePicker'
+import { MihomoGeoFiles } from '../MihomoGeoFiles'
 
 interface ProxyHistory {
   time: string
@@ -141,7 +141,7 @@ function MihomoResourceFields({ resources, onChange, onValidChange, providerBeha
   return <>
     {(['domain', 'ip'] as const).map(kind => <div key={kind} className="space-y-1.5"><label className="text-muted-foreground text-sm">{kind === 'domain' ? 'Домен' : 'IP'}</label><div className="relative"><Input className="pr-10" value={kind === 'domain' ? domainText : ipText} onChange={event => update(kind, event.target.value)} placeholder={kind === 'domain' ? 'domain:example.com, geosite:youtube' : '203.0.113.0/24, geoip:ru'} /><button type="button" className="text-muted-foreground hover:text-primary absolute right-2 top-1/2 -translate-y-1/2" title="Выбрать из базы" onClick={() => setPicker(kind)}><IconFolder size={19} /></button></div></div>)}
     {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
-    <Dialog open={picker !== null} onOpenChange={open => { if (!open) setPicker(null) }}><DialogContent className="max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] overflow-y-auto sm:max-w-[1100px]"><DialogHeader><DialogTitle>{picker === 'ip' ? 'IP-адреса' : 'Домены'}</DialogTitle></DialogHeader>{picker && <GeoDatabasePicker nativeOnly kind={picker} resources={fieldResources(resources, picker, providerBehaviors)} onChange={values => update(picker, values.join(', '))} />}<div className="flex justify-end"><Button onClick={() => setPicker(null)}>Готово</Button></div></DialogContent></Dialog>
+    <Dialog open={picker !== null} onOpenChange={open => { if (!open) setPicker(null) }}><DialogContent className="max-h-[calc(100vh-2rem)] w-[calc(100vw-2rem)] overflow-y-auto sm:max-w-[1100px]"><DialogHeader><DialogTitle>{picker === 'ip' ? 'IP-адреса Mihomo' : 'Домены Mihomo'}</DialogTitle></DialogHeader>{picker && <MihomoGeoFiles key={picker} kind={picker} resources={fieldResources(resources, picker, providerBehaviors)} onChange={values => update(picker, values.join(', '))} />}<div className="flex justify-end"><Button onClick={() => setPicker(null)}>Готово</Button></div></DialogContent></Dialog>
   </>
 }
 const NO_SORT_TYPES = new Set(['Dns', 'Compatible', 'Direct', 'Reject', 'RejectDrop', 'Pass', 'Fallback', 'URLTest', 'LoadBalance', 'Selector'])
@@ -536,7 +536,7 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, confi
             onApplyOutbound={async target => { setRoutePending(true); try { const saved = await onBulkOutbound(selectedRules, target, activeDevice?.ip); if (saved) setSelectedRules([]); return saved } finally { setRoutePending(false) } }}
             toolbarAction={<Button size="sm" variant={(activeDevice ? activeDevice.choices.VPN === 'DIRECT' : globalDirect) ? 'default' : 'outline'} disabled={routePending} onClick={() => { if (activeDevice) void changeDevice(activeDevice.ip, 'VPN', activeDevice.choices.VPN === 'DIRECT' ? '@direct' : 'DIRECT'); else void onSelectDraft(defaultChoices.VPN, globalDirect ? 'DIRECT' : '@bypass') }}>🔓 Полный обход без VPN: {(activeDevice ? activeDevice.choices.VPN === 'DIRECT' : globalDirect) ? 'включён' : 'выключен'}</Button>}
             latencies={tableLatencies} onPing={name => void testSingle(name)} pingPending={Object.entries(testingSingle).find(([, pending]) => pending)?.[0] ?? null}
-            resourceLabeler={value => value.startsWith('RULE-SET,') ? `Rule-set · ${value.slice(9)}` : resourceLabel(value)}
+            resourceLabeler={resourceLabel}
             editorValid={routeResourcesValid}
             onEditorOpen={() => setRouteResourcesValid(true)}
             renderResources={(rule, update) => rule.id === 'VPN' ? null : activeDevice ? <p className="text-muted-foreground text-sm">Домены и IP задаются в общей маршрутизации.</p> : <MihomoResourceFields key={rule.id} resources={[...parseFieldResources(rule.domain.join('\n'), 'domain'), ...parseFieldResources(rule.ip.join('\n'), 'ip')]} providerBehaviors={providerBehaviors} onValidChange={setRouteResourcesValid} onChange={values => update({domain: fieldResources(values, 'domain', providerBehaviors), ip: fieldResources(values, 'ip', providerBehaviors)})} />}

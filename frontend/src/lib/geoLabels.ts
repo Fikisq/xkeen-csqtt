@@ -17,9 +17,17 @@ export function geoDatabaseLabel(file: string): string {
   return file.replace(/\.dat$/i, '')
 }
 export function resourceLabel(value: string): string {
+  if (value.startsWith('RULE-SET,')) return ruleSetLabel(value.slice(9))
   const external = /^ext:([^:]+):(.+)$/.exec(value)
   if (external) return `${geoDatabaseLabel(external[1]).split(' · ')[0]} · ${geoCategoryLabel(external[2])}`
   const standard = /^(geosite|geoip):(.+)$/.exec(value)
   if (standard) return `${standard[1] === 'geosite' ? 'GeoSite' : 'GeoIP'} · ${geoCategoryLabel(standard[2])}`
   return value.replace(/^(domain|full):/, '')
+}
+
+export function ruleSetLabel(name: string): string {
+  const match = /^(roscomvpn|metacubex)-(.+)$/i.exec(name)
+  if (!match) return `Rule-set · ${name}`
+  const category = match[2].replace(/-(domains|ips)$/, '')
+  return `${match[1].toLowerCase() === 'roscomvpn' ? 'RoscomVPN' : 'MetaCubeX'} · ${geoCategoryLabel(category)}`
 }

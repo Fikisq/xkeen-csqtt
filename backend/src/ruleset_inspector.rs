@@ -48,6 +48,35 @@ pub struct RuleContentQuery {
     pub vehicle_type: Option<String>,
 }
 
+// Read the saved configuration even while Xray is active. Listing and decoding
+// providers never starts Mihomo or changes routing.
+pub async fn get_ruleset_files() -> Response {
+    let result = async {
+        let docs = load_mihomo_yaml().await?;
+        let parsed = docs.first().ok_or("YAML пуст")?;
+        let mut files = Vec::new();
+        if let Some(providers) = parsed["rule-providers"].as_hash() {
+            for (name, provider) in providers {
+                let Some(name) = name.as_str() else { continue };
+                let path = provider["path"].as_str().map(resolve_provider_path)
+                    .or_else(|| provider["url"].as_str().map(|url| format!("{}/rules/{:x}", MIHOMO_CONF_DIR, md5::compute(url))));
+                let metadata = match path { Some(path) => tokio::fs::metadata(path).await.ok(), None => None };
+                let url = provider["url"].as_str().unwrap_or("");
+                let source = if url.contains("/hydraponique/roscomvpn-") { "RoscomVPN" }
+                    else if url.contains("/MetaCubeX/meta-rules-dat/") { "MetaCubeX" } else { "Пользовательский rule-set" };
+                files.push(serde_json::json!({"name": name, "behavior": provider["behavior"].as_str().unwrap_or("classical"),
+                    "format": provider["format"].as_str().unwrap_or("yaml"), "source": source,
+                    "installed": metadata.as_ref().is_some_and(|m| m.is_file()), "size": metadata.map(|m| m.len()).unwrap_or(0)}));
+            }
+        }
+        Ok::<_, String>(files)
+    }.await;
+    match result {
+        Ok(files) => (StatusCode::OK, axum::Json(serde_json::json!({"success": true, "files": files}))).into_response(),
+        Err(error) => error_response(error),
+    }
+}
+
 pub async fn get_ruleset_content(State(_state): State<AppState>, Query(params): Query<RuleContentQuery>) -> Response {
     let docs = match load_mihomo_yaml().await {
         Ok(d) => d,
@@ -89,13 +118,11 @@ pub async fn get_ruleset_content(State(_state): State<AppState>, Query(params): 
         },
     };
 
-    let is_mrs = params
-        .format
-        .as_deref()
+    let is_mrs = provider["format"].as_str().or(params.format.as_deref())
         .is_some_and(|f| f.eq_ignore_ascii_case("mrs") || f.eq_ignore_ascii_case("mrsrule"));
 
     let content = if is_mrs {
-        let behavior = params.behavior.as_deref().unwrap_or("domain");
+        let behavior = provider["behavior"].as_str().or(params.behavior.as_deref()).unwrap_or("domain");
         match convert_mrs(&final_path, behavior).await {
             Ok(c) => c,
             Err(e) => return error_response(e),
@@ -120,11 +147,16 @@ async fn convert_mrs(mrs_path: &str, behavior: &str) -> Result<String, String> {
     let behavior = behavior.to_ascii_lowercase();
     let tmp_path = format!("/opt/tmp/convert_{}", random_suffix());
 
-    let output = Command::new("/opt/sbin/mihomo")
+    let output = tokio::time::timeout(std::time::Duration::from_secs(20), Command::new("/opt/sbin/mihomo")
         .args(["convert-ruleset", behavior.as_str(), "mrs", mrs_path, &tmp_path])
-        .output()
-        .await
-        .map_err(|e| format!("Ошибка запуска mihomo: {e}"))?;
+        .kill_on_drop(true).output()).await;
+    let output = match output {
+        Ok(Ok(output)) => output,
+        error => {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            return Err(format!("Не удалось прочитать MRS: {error:?}"));
+        }
+    };
 
     if !output.status.success() {
         let _ = tokio::fs::remove_file(&tmp_path).await;
