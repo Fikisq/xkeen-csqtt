@@ -501,7 +501,7 @@ function SelectorsBody({ clashApiPort, mode, clashApiSecret, clashApiUnix, confi
           <Button size="sm" disabled={!validDeviceIp(newIp) || devices.some((device) => device.ip === newIp.trim()) || devicePending} onClick={async () => { const ip = newIp.trim(); if (await changeDevice(ip, 'VPN')) { setDeviceIp(ip); setNewIp('') } }}>Добавить IP</Button>
         </div>
         <div className="flex flex-col gap-4">
-        <section className="border-border bg-input-background/70 order-1 space-y-3 rounded-xl border p-3">
+        <section className="border-border bg-input-background order-1 space-y-3 rounded-xl border p-3">
           <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-base font-semibold">Маршрут по умолчанию</h3><div className="ml-auto flex items-center gap-2"><Button size="sm" variant="outline" onClick={() => window.dispatchEvent(new Event('mihomo:open-subscriptions'))}>Подписки</Button><Button size="sm" variant="outline" disabled={!!testingGroups[generalSelector ?? 'VPN']} onClick={() => void testAll(generalSelector ?? 'VPN', protocolCards.filter(name => canProbe(allProxyData[name])))}><IconBoltFilled size={16} />{testingGroups[generalSelector ?? 'VPN'] ? 'Проверка…' : 'Пинг'}</Button></div></div>
           <div className="grid grid-cols-2 auto-rows-[100px] gap-2 sm:grid-cols-3 lg:grid-cols-6 2xl:grid-cols-7">
             {orderedCards(protocolCards.filter(name => name !== 'DIRECT' || !!allProxyData.DIRECT), cardOrder).map((name, _, cards) => {

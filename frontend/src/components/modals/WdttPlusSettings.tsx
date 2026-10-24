@@ -126,7 +126,7 @@ export function WdttPlusSettings({ onBack, onRefresh }: { onBack: () => void; on
 
     </div>
     <Separator />
-    <div className="border-border space-y-3 rounded-xl border bg-background/40 p-3 text-sm">
+    <div className="border-border space-y-3 rounded-xl border bg-input-background p-3 text-sm">
       <Field orientation="horizontal" className="items-center! gap-4">
         <FieldContent>
           <FieldLabel htmlFor="wdtt-rt-network">TCP/TLS: без внешнего UDP и HTTP/3<SettingInfo label="Режим TCP/TLS">Отдельный режим без внешнего UDP и HTTP/3. Включает настройки TURN/TLS ниже. Изменения действуют после сохранения и «Применить».</SettingInfo></FieldLabel>

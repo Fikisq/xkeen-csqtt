@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 export function ConsoleManagement({ connected, onAction }: { connected: boolean; onAction: (action: string, component: string) => void }) {
   const [component, setComponent] = useState('panel')
   const run = (action: string) => onAction(action, component)
-  return <aside className="flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto rounded-lg border bg-background/30 p-3">
+  return <aside className="flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto rounded-lg border bg-input-background p-3">
     <div className="flex items-center justify-between gap-2">
       <h3 className="text-sm font-medium">Управление</h3>
     </div>

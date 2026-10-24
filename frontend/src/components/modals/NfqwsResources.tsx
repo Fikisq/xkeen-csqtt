@@ -80,7 +80,7 @@ export function NfqwsResources({ active, disabled, report, onSaved, onCheck }: {
   }
   if (!value) return <p className="text-muted-foreground text-sm">{error || 'Загрузка ресурсов…'}</p>
   return <div className="space-y-3">
-    <div className="overflow-x-auto rounded-lg border bg-background/30">
+    <div className="overflow-x-auto rounded-lg border bg-input-background">
       <table className="w-full min-w-[500px] text-left text-sm">
         <thead className="bg-input-background"><tr>
           <th className="px-3 py-2 font-medium">Ресурс<SettingInfo label="Выбор ресурсов">Переключатели задают сайты для проверки и подбора. TCP должен работать у всех выбранных сайтов; для TCP + QUIC нужен хотя бы один ответ HTTP/3. Сохранение выбора не меняет работающую стратегию.</SettingInfo></th>
@@ -120,7 +120,7 @@ export function NfqwsResources({ active, disabled, report, onSaved, onCheck }: {
       {stamp && <span className="text-muted-foreground text-xs">DNS: {new Date(stamp).toLocaleString('ru-RU')}</span>}
       {report?.checkedAt && <span className="text-muted-foreground text-xs">TCP/QUIC: {new Date(report.checkedAt).toLocaleString('ru-RU')}</span>}
     </div>
-    <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-background/30 p-3 text-sm">
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-input-background p-3 text-sm">
       <label className="flex items-center gap-2"><Switch aria-label="Автопроверка стратегии" checked={value.config.autoEnabled} disabled={disabled || busy} onCheckedChange={checked => update({ ...value.config,autoEnabled: checked })} />Автопроверка<SettingInfo label="Автопроверка">Проверяется текущая стратегия. После двух неудач запускается подбор по включённым спискам. Замена — только на подтверждённый результат лучше текущего, с сохранением транспорта и игровых правил. Работает при закрытой панели; остановленное ядро не запускается.</SettingInfo></label>
       <label className="flex items-center gap-2">Каждые <input aria-label="Интервал автопроверки в часах" type="number" min={1} max={168} className="h-8 w-20 rounded-md border bg-input-background px-2" disabled={disabled || busy} value={value.config.intervalHours} onChange={event => update({ ...value.config, intervalHours: Number(event.target.value) })} /> ч</label>
       {value.automatic?.message && <span className="text-muted-foreground text-xs">{value.automatic.message}</span>}

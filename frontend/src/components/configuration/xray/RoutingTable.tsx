@@ -208,7 +208,7 @@ export function RoutingTable({
                 <tr
                   key={rule.id}
                   className={cn(
-                    'border-border hover:bg-input-background/70 border-b transition-colors last:border-b-0',
+                    'border-border hover:bg-input-background border-b transition-colors last:border-b-0',
                     !rule.enabled && 'opacity-60',
                     draggedIndex === index && 'opacity-50',
                     selected.has(rule.id) && 'bg-primary/10'

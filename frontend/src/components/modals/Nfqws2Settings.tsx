@@ -97,7 +97,7 @@ function ResourceTable({ displayReport, title, busy = false, urls, names }: { na
     tcp: displayReport?.results?.find(item => item.url === url && item.protocol === 'tcp'),
     quic: displayReport?.results?.find(item => item.url === url && item.protocol === 'h3'),
   }))
-  return <div className="rounded-lg border border-border/70 bg-background/30 p-3 text-sm">
+  return <div className="rounded-lg border border-border/70 bg-input-background p-3 text-sm">
         <p className="font-medium">{title} {displayReport?.checkedAt ? `· ${new Date(displayReport.checkedAt).toLocaleString('ru-RU')}` : ''}</p>
         {!displayReport?.results && <p className="text-muted-foreground mt-1 text-xs">Сайты ещё не проверены. Нажмите «Проверить стратегию».</p>}
         {staleReport && <p className="mt-1 text-xs text-yellow-400">Результат устарел — повторите проверку.</p>}
@@ -284,7 +284,7 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
   }
 
   return <div className="flex min-h-0 flex-col gap-2">
-    <div role="tablist" aria-label="Разделы nfqws2" className="flex w-fit max-w-full shrink-0 flex-wrap justify-start gap-1 rounded-lg border border-border/70 bg-background/40 p-1">
+    <div role="tablist" aria-label="Разделы nfqws2" className="flex w-fit max-w-full shrink-0 flex-wrap justify-start gap-1 rounded-lg border border-border/70 bg-input-background p-1">
       <Button id="nfqws-main-tab" role="tab" aria-selected={section === 'main'} aria-controls="nfqws-main-panel" variant={section === 'main' ? 'default' : 'ghost'} size="sm" onClick={() => setSection('main')}>Главная</Button>
       <Button id="nfqws-resources-tab" role="tab" aria-selected={section === 'resources'} aria-controls="nfqws-resources-panel" variant={section === 'resources' ? 'default' : 'ghost'} size="sm" onClick={() => setSection('resources')}>Ресурсы</Button>
       <Button id="nfqws-lists-tab" role="tab" aria-selected={section === 'lists'} aria-controls="nfqws-lists-panel" variant={section === 'lists' ? 'default' : 'ghost'} size="sm" onClick={() => setSection('lists')}>Списки стратегий</Button>
@@ -299,18 +299,18 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
             <option value="custom">Своя</option>
           </select>
         </label>
-        <div className="rounded-lg border border-border/70 bg-background/30 px-2.5 py-2 text-sm">
+        <div className="rounded-lg border border-border/70 bg-input-background px-2.5 py-2 text-sm">
           <div className="font-medium">{draftMatchesActive ? 'Активная' : 'Не применена'}: {source === 'custom' ? customArgs.split('\n').some((line) => line.trim() === '--filter-udp=443') ? 'TCP + QUIC' : 'TCP' : mode === 'tcp' ? 'TCP' : 'TCP + QUIC'}</div>
           <div className="mt-1 flex gap-3 text-xs">{checkCount('TCP', displayReport?.tcpSites)}{checkCount('QUIC', displayReport?.http3Sites, displayReport?.mode === 'tcp-quic')}</div>
         </div>
-        <div className="flex items-center justify-between gap-2 rounded-lg border border-border/70 bg-background/30 px-2.5 py-2">
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-border/70 bg-input-background px-2.5 py-2">
           <label htmlFor="nfqws-games" className="cursor-pointer text-sm font-medium" title="Добавляет фиксированные TCP/UDP-правила после «Сохранить и применить». Проверьте вход в Roblox и подключение к голосовому каналу Discord: TCP всех выбранных сайтов не подтверждает их работу.">Roblox и голос Discord<SettingInfo label="Roblox и голос Discord">Добавляет TCP/UDP-правила после сохранения и применения. Успех сайта не подтверждает игру или голос: для этого нужен реальный сеанс на устройстве.</SettingInfo></label>
           <Switch id="nfqws-games" size="lg" checked={games} disabled={searching || checking || saving || !searchJob?.gamesArgs} onCheckedChange={checked => { setGames(checked); setReport(null) }} />
         </div>
       </div>
       <p className="px-1 text-sm"><span className="text-muted-foreground">{draftMatchesActive ? 'Активная стратегия: ' : 'Выбрана, не применена: '}</span>{selectedName}</p>
       {!settings?.globalReady && <p className="rounded-md border border-border px-3 py-2 text-xs text-muted-foreground">Выход nfqws2 ещё не доступен в Xray.</p>}
-      <div className="rounded-lg border border-border/70 bg-background/30 px-3 py-2.5">
+      <div className="rounded-lg border border-border/70 bg-input-background px-3 py-2.5">
         <div className="flex items-center gap-1">
           <button type="button" className="flex flex-1 cursor-pointer items-center gap-2 text-left text-sm font-medium" aria-expanded={parametersOpen} aria-controls="nfqws-strategy-parameters" onClick={() => setParametersOpen(value => !value)}><span aria-hidden="true">{parametersOpen ? '▾' : '▸'}</span>Параметры стратегии</button>
           <SettingInfo label="Параметры стратегии">Показан черновик. Ручные параметры можно редактировать в режиме «Своя». Применение — после сохранения.</SettingInfo>
@@ -332,7 +332,7 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
           </>}
         </div>}
       </div>
-      <div className="space-y-2 rounded-lg border border-border/70 bg-background/30 p-3">
+      <div className="space-y-2 rounded-lg border border-border/70 bg-input-background p-3">
         <div className="flex flex-wrap items-center gap-2">
           <select aria-label="Транспорт для подбора" className="bg-input-background border-border h-8 rounded-md border px-2 text-sm" value={searchMode} disabled={searching || checking || saving} onChange={event => { setSearchMode(event.target.value as 'tcp' | 'tcp-quic') }}><option value="tcp-quic">TCP + QUIC</option><option value="tcp">Только TCP</option></select>
           <Button size="sm" disabled={saving || checking || searching} onClick={() => void startSearch()}>{searching && <IconLoader2 className="size-4 animate-spin" />}{searching ? 'Подбор идёт…' : 'Подобрать стратегии'}</Button>
@@ -382,7 +382,7 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
           {pickerTab === 'working' && <>
             {!library.length && <p className="text-muted-foreground rounded-xl border border-dashed p-6 text-center">Стратегий с TCP {total}/{total} пока нет. Неполные результаты доступны в разделе «Все проверки». Запустите подбор или проверьте свой вариант.</p>}
-            {library.map(item => <div key={item.id} className={`rounded-xl border p-4 ${item.args === customArgs ? 'border-primary/40 bg-primary/10' : 'border-border/70 bg-background/30'}`}>
+            {library.map(item => <div key={item.id} className={`rounded-xl border p-4 ${item.args === customArgs ? 'border-primary/40 bg-primary/10' : 'border-border/70 bg-input-background'}`}>
               <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0 flex-1"><p className="break-words font-medium">{item.name || 'Своя стратегия'}{item.games ? ' · Roblox и голос Discord' : ''}</p>{item.description && <p className="mt-1 text-sm text-muted-foreground">{item.description}</p>}<div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">{checkCount('TCP', item.tcpSites)}{checkCount('QUIC', item.http3Sites, item.mode === 'tcp-quic')}<span className="text-muted-foreground">{new Date(item.checkedAt).toLocaleString('ru-RU')}</span></div></div>
                 <Button size="sm" disabled={searching || checking || saving} onClick={() => selectStrategy(item.args, item.mode, {success: true, mode: item.mode, args: item.args, checkedAt: item.checkedAt, tcpSites: item.tcpSites, http3Sites: item.http3Sites, results: item.results})}>Выбрать</Button>
               </div>
@@ -392,7 +392,7 @@ export function Nfqws2Settings({ onBack, onRefresh }: { onBack: () => void; onRe
           {pickerTab === 'attempts' && <>
             {!!searchJob?.historyLimit && (searchJob.completed || 0) > searchJob.historyLimit && <p className="text-muted-foreground text-xs">Показаны последние {searchJob.historyLimit} проверок из {searchJob.completed}.</p>}
             {!history.length && <p className="text-muted-foreground rounded-xl border border-dashed p-6 text-center">После запуска подбора здесь появятся результаты каждой попытки.</p>}
-            {history.map((item, index) => <div key={index} className="rounded-xl border border-border/70 bg-background/30 p-3">
+            {history.map((item, index) => <div key={index} className="rounded-xl border border-border/70 bg-input-background p-3">
               <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0 flex-1"><p className="break-words font-medium"><span className="text-muted-foreground mr-2 tabular-nums">{Math.max(0, (searchJob?.completed || history.length) - history.length) + index + 1}.</span>{item.name || 'Стратегия'}</p><div className="mt-2 flex flex-wrap gap-3 text-xs">{item.error ? <span className="text-destructive break-words">{item.error}</span> : <>{checkCount('TCP', item.tcpSites)}{checkCount('QUIC', item.http3Sites, item.mode === 'tcp-quic')}</>}</div>{failedTcpSites(item.results)}</div>
                 {item.args && !item.error && (item.tcpSites || 0) >= total && (item.mode === 'tcp' || (item.http3Sites || 0) >= 1) && <Button size="sm" disabled={searching || checking || saving} onClick={() => selectStrategy(item.args!, item.mode)}>Выбрать</Button>}
               </div>
