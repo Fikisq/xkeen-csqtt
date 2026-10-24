@@ -16,6 +16,7 @@ import { parseClashApiCredentials } from './lib/utils'
 import { parse as parseJsonc } from 'jsonc-parser'
 import { defaultMihomoChoices, mihomoRouteTags, readMihomoDevices, readMihomoFullBypass, isMihomoFullRoute } from './lib/mihomoDeviceRouting'
 import { readSelections } from './lib/mihomoRoutingBackup'
+import { transferXrayFullBypass } from './lib/fullBypassTransfer'
 
 const CommentsWarningModal = lazyLoad(() => import('./components/modals/CommentsWarning'), 'CommentsWarningModal')
 const CoreManageModal = lazyLoad(() => import('./components/modals/CoreManagement'), 'CoreManageModal')
@@ -281,13 +282,31 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
       const old = appState.currentCore
       const file = core === 'mihomo' ? '/opt/etc/mihomo/config.yaml' : '/opt/etc/xray/configs/00_config.json'
       let switched = false
+      let originalTarget: string | null = null
+      let transferredTarget: string | null = null
+      let transferredDevices = 0
       dispatch({ type: 'SET_SERVICE_STATUS', status: 'pending', pendingText: 'Переключение...' })
       try {
-        // Switching cores uses the destination's own saved routing configuration.
-        // Importing profiles here can silently reintroduce stale direct exceptions.
+        // Only explicitly requested whole-device bypasses cross the core boundary.
         const targetResponse = await apiCall<{success: boolean; configs: Array<{file: string; content: string}>}>('GET', `configs?core=${core}`)
-        const content = targetResponse.configs?.find(item => item.file === file)?.content
+        let content = targetResponse.configs?.find(item => item.file === file)?.content
         if (!targetResponse.success || !content) throw new Error('Не удалось прочитать настройки выбранного ядра')
+        if (old === 'xray' && core === 'mihomo') {
+          const source = await apiCall<{success: boolean; configs: Array<{file: string; content: string}>}>('GET', 'configs?core=xray')
+          const xray = source.configs?.find(item => item.file === '/opt/etc/xray/configs/00_config.json')?.content
+          if (!source.success || !xray) throw new Error('Не удалось прочитать полный обход Xray')
+          const transfer = transferXrayFullBypass(xray, content)
+          transferredDevices = transfer.devices.length
+          if (transfer.content !== content) {
+            const fresh = await apiCall<{configs: Array<{file: string; content: string}>}>('GET', 'configs?core=mihomo')
+            if (fresh.configs?.find(item => item.file === file)?.content !== content) throw new Error('Настройки Mihomo изменились. Повторите переключение')
+            originalTarget = content
+            const saved = await apiCall<{success: boolean; error?: string}>('PUT', 'configs?core=mihomo&validate=mihomo', {file, content: transfer.content})
+            if (!saved.success) throw new Error(saved.error || 'Mihomo не принял полный обход')
+            transferredTarget = transfer.content
+            content = transfer.content
+          }
+        }
         dispatch({ type: 'SET_SERVICE_STATUS', status: 'pending', pendingText: 'Переключение...' })
         const result = await apiCall<{success: boolean; error?: string}>('POST', 'control', { action: 'switchCore', core })
         if (!result.success) throw new Error(result.error || 'Не удалось переключить ядро')
@@ -314,7 +333,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
             return false
           }
           const profiles = readMihomoDevices(content)
-          const ips = profiles.filter(profile => isMihomoFullRoute(profile.choices.VPN) && direct(profile.choices.VPN)).map(profile => profile.ip)
+          const ips = profiles.filter(profile => profile.choices['__disabled:VPN'] !== 'true' && isMihomoFullRoute(profile.choices.VPN) && direct(profile.choices.VPN)).map(profile => profile.ip)
           const bypass = await apiCall<{success: boolean; error?: string}>('POST', 'mihomo/device-direct', {ips})
           if (!bypass.success) throw new Error(bypass.error || 'Не удалось перенести локальные исключения Mihomo')
           const selective = profiles.some(profile => !direct(profile.choices.VPN) || routes.some(route => !direct(profile.choices[route] === defaults[route] ? defaults[route] : profile.choices[route])))
@@ -325,7 +344,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           if (!bypass.success) throw new Error(bypass.error || 'Не удалось перенести локальные исключения Xray')
         }
         dispatch({ type: 'SHOW_MODAL', modal: 'showCoreManageModal', show: false })
-        showToast(`Ядро изменено на ${capitalize(core)}. Используются его сохранённые настройки`)
+        showToast(`Ядро изменено на ${capitalize(core)}.${transferredDevices ? ` Перенесён полный обход устройств: ${transferredDevices}` : ' Используются его сохранённые настройки'}`)
         const data = await apiCall<any>('GET', 'control')
         if (data.success) {
           dispatch({ type: 'SET_CONFIGS_LOADING', loading: true })
@@ -339,6 +358,13 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         if (switched) {
           const reverted = await apiCall<{success: boolean}>('POST', 'control', {action: 'switchCore', core: old}).catch(() => null)
           if (!reverted?.success) showToast('Не удалось вернуть прежнее ядро. Проверьте статус XKeen', 'error')
+        }
+        if (originalTarget && transferredTarget) {
+          const fresh = await apiCall<{configs: Array<{file: string; content: string}>}>('GET', `configs?core=${core}`).catch(() => null)
+          if (fresh?.configs?.find(item => item.file === file)?.content === transferredTarget) {
+            const restored = await apiCall<{success: boolean}>('PUT', `configs?core=${core}&validate=${core}`, {file, content: originalTarget}).catch(() => null)
+            if (!restored?.success) showToast('Не удалось восстановить конфигурацию выбранного ядра', 'error')
+          }
         }
         showToast(error instanceof Error ? error.message : 'Не удалось переключить ядро', 'error')
         const data = await apiCall<any>('GET', 'control').catch(() => null)
