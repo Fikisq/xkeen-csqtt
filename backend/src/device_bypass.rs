@@ -123,7 +123,7 @@ pub async fn mihomo_devices(State(state): State<AppState>, Json(request): Json<M
     let saved = read_ip_macs(&previous);
     let mut entries = BTreeMap::new();
     for ip in request.ips {
-        let mac = match resolve_mac(ip).await.or_else(|error| saved.get(&ip).cloned().ok_or(error)) {
+        let mac = match resolve_mac(ip, &saved).await {
             Ok(mac) => mac,
             Err(error) => return Json(json!({"success": false, "error": error})),
         };
@@ -261,15 +261,22 @@ async fn clear_device_connections(ips: BTreeSet<Ipv4Addr>) -> Option<String> {
     None
 }
 
-async fn resolve_mac(ip: Ipv4Addr) -> Result<String, String> {
-    let arp = fs::read_to_string("/proc/net/arp").await.map_err(|e| e.to_string())?;
+async fn resolve_mac(ip: Ipv4Addr, saved: &BTreeMap<Ipv4Addr, String>) -> Result<String, String> {
+    let arp = fs::read_to_string("/proc/net/arp").await.unwrap_or_default();
     for line in arp.lines().skip(1) {
         let columns: Vec<_> = line.split_whitespace().collect();
         if columns.len() >= 6 && columns[0] == ip.to_string() && columns[2] == "0x2" {
             if let Some(mac) = read_macs(columns[3]).into_iter().next() { return Ok(mac) }
         }
     }
-    Err(format!("Устройство {ip} не найдено в сети. Подключите его к роутеру и повторите выбор «Без VPN»"))
+    // Offline devices retain their known identity when switching cores. Prefer
+    // the active core's saved mapping before consulting the other core's list.
+    if let Some(mac) = saved.get(&ip) { return Ok(mac.clone()) }
+    for file in [BYPASS_FILE, MIHOMO_BYPASS_FILE] {
+        let content = fs::read_to_string(file).await.unwrap_or_default();
+        if let Some(mac) = read_ip_macs(&content).remove(&ip) { return Ok(mac) }
+    }
+    Err(format!("MAC-адрес устройства {ip} ещё не известен. Подключите его к роутеру один раз для настройки полного обхода"))
 }
 
 async fn iptables(binary: &str, table: &str, operation: &str, mac: &str, comment: &str) -> Result<bool, String> {
@@ -347,7 +354,7 @@ async fn apply_config(config: &Value, incremental: bool) -> Result<PreviousBypas
     let saved = read_ip_macs(&previous);
     let mut entries = BTreeMap::new();
     for ip in direct_device_ips(config)? {
-        entries.insert(ip, resolve_mac(ip).await.or_else(|error| saved.get(&ip).cloned().ok_or(error))?);
+        entries.insert(ip, resolve_mac(ip, &saved).await?);
     }
     let new: BTreeSet<String> = entries.values().cloned().collect();
     if let Err(error) = sync_firewall_mode(&old, &new, incremental).await {
