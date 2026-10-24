@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button'
 import { ButtonGroup } from '@/components/ui/button-group'
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { UtilityPanel } from '@/components/configuration/UtilityPanel'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Empty, EmptyContent, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty'
 import { Label } from '@/components/ui/label'
@@ -52,6 +52,7 @@ interface BackupActionResponse {
 }
 
 interface Props {
+  embedded?: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
   onRefreshConfigs: () => Promise<unknown>
@@ -84,7 +85,7 @@ const CONTENT_ORDER: BackupContent[] = ['xkeen', 'xkeen-ui', 'xray', 'mihomo']
 const MAX_BACKUPS_TO_KEEP = 5
 const KEEP_LATEST_BACKUPS_KEY = 'backups:keepLatest'
 
-export function BackupsModal({ open, onOpenChange, onRefreshConfigs }: Props) {
+export function BackupsModal({ open, onOpenChange, onRefreshConfigs, embedded = false }: Props) {
   const { showToast } = useAppContext()
   const uploadRef = useRef<HTMLInputElement>(null)
 
@@ -262,16 +263,8 @@ export function BackupsModal({ open, onOpenChange, onRefreshConfigs }: Props) {
 
   return (
     <TooltipProvider>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="flex h-[70dvh]! max-w-2xl! flex-col overflow-hidden p-4 sm:p-5 md:h-128!">
-          <DialogHeader className="pr-10">
-            <DialogTitle className="flex items-center gap-2">
-              <IconBox size={27} className="text-chart-2" /> Бэкапы конфигураций
-            </DialogTitle>
-            <DialogDescription>
-              «Создать бэкап» сохранит настройки панели, файлы XKeen и конфигурацию Xray с правилами и подписками в архив на роутере. Геобазы .dat и исполняемые файлы в архив не входят. Восстановление перезапишет выбранные конфигурации.
-            </DialogDescription>
-          </DialogHeader>
+      <UtilityPanel embedded={embedded} open={open} onOpenChange={onOpenChange} title={<><IconBox size={24} className="text-chart-2" /> Резервные копии</>} description="Сохранение и восстановление настроек панели, XKeen, Xray и Mihomo. Геобазы и исполняемые файлы в архив не входят.">
+
 
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" variant="outline" disabled={pendingAction !== null} onClick={() => uploadRef.current?.click()}>Загрузить архив с компьютера</Button>
@@ -452,8 +445,7 @@ export function BackupsModal({ open, onOpenChange, onRefreshConfigs }: Props) {
               </Button>
             </div>
           )}
-        </DialogContent>
-      </Dialog>
+      </UtilityPanel>
 
       <AlertDialog open={!!confirmAction} onOpenChange={(next) => !next}>
         <AlertDialogContent

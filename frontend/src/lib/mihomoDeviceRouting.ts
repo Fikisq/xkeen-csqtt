@@ -82,7 +82,6 @@ function uniqueRouteBlock(content: string, tag: RouteTag): OrderedRouteBlock | u
   if (mihomoRouteTags(content).some(other => other !== tag && other !== 'VPN' && choices[other] === target)) return undefined
   const blocks = orderedRouteBlocks(content).filter(block => block.tag === tag)
   if (blocks.length !== 1) return undefined
-  if (tag.startsWith('custom:') && !blocks[0].text.startsWith('  # xkeen-custom-route ')) return undefined
   return blocks[0]
 }
 
@@ -317,7 +316,10 @@ export function updateMihomoDevice(content: string, ip: string, route: RouteTag 
   for (const match of base.matchAll(/^  - ([^\r\n]+)$/gm)) {
     const rule = match[1]
     if (/^IP-CIDR,(?:127\.0\.0\.0\/8|10\.0\.0\.0\/8|172\.16\.0\.0\/12|192\.168\.0\.0\/16),DIRECT(?:,no-resolve)?$/.test(rule)) continue
-    categoryOffset = match.index
+    // Keep a custom route's metadata adjacent to its first matcher. Device
+    // blocks inserted between them used to hide resources from the table.
+    const metadata = /  # xkeen-custom-route \S+\r?\n$/.exec(base.slice(0, match.index))
+    categoryOffset = metadata ? metadata.index : match.index
     break
   }
   if (categoryOffset < 0) categoryOffset = base.length
@@ -383,7 +385,8 @@ export function removeMihomoCustomRoute(content: string, tag: string): string {
   const rules = rulesSection(content)
   const block = uniqueRouteBlock(content, tag)
   if (!block) throw new Error('У маршрута нет отдельного непрерывного блока правил')
-  const withoutRules = content.slice(0, rules.start + block.start) + content.slice(rules.start + block.end)
+  const withoutRules = (content.slice(0, rules.start + block.start) + content.slice(rules.start + block.end))
+    .replace(`  # ${CUSTOM} ${encodeURIComponent(JSON.stringify(route))}\n`, '')
   const groupsHeader = /^proxy-groups:\s*\r?\n/m.exec(content)
   if (!groupsHeader || groupsHeader.index === undefined) throw new Error('Группы Mihomo не найдены')
   const start = groupsHeader.index + groupsHeader[0].length

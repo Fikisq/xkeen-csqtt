@@ -15,6 +15,7 @@ export interface RoutingRule {
   enabled: boolean
   description: string
   network: 'tcp' | 'udp' | 'tcp,udp' | ''
+  networkMixed?: boolean
   inboundTag: string[]
   outboundTag: string
   domain: string[]
@@ -28,8 +29,8 @@ interface RoutingTableProps {
   rules: RoutingRule[]
   outbounds: Array<{ tag: string; protocol: string; label?: string }>
   inbounds: Array<{ tag: string }>
-  onAddRule: (rule: RoutingRule) => void
-  onEditRule: (id: string, rule: RoutingRule) => void
+  onAddRule: (rule: RoutingRule) => void | Promise<boolean>
+  onEditRule: (id: string, rule: RoutingRule) => void | Promise<boolean>
   onDeleteRule: (id: string) => void
   onReorder: (fromIndex: number, toIndex: number) => void
   onToggleEnabled: (id: string) => void
@@ -48,6 +49,12 @@ interface RoutingTableProps {
   selectedRuleIds?: string[]
   onSelectionChange?: (ids: string[]) => void
   onApplyOutbound?: (tag: string) => Promise<boolean>
+  renderResources?: (rule: RoutingRule, onChange: (updates: Partial<RoutingRule>) => void) => ReactNode
+  canEditResources?: (rule: RoutingRule) => boolean
+  canEditDescription?: (rule: RoutingRule) => boolean
+  resourceLabeler?: (value: string) => string
+  editorValid?: boolean
+  onEditorOpen?: () => void
 }
 
 export function RoutingTable({
@@ -73,6 +80,12 @@ export function RoutingTable({
   selectedRuleIds = [],
   onSelectionChange,
   onApplyOutbound,
+  renderResources,
+  canEditResources = () => true,
+  canEditDescription = () => true,
+  resourceLabeler = resourceLabel,
+  editorValid = true,
+  onEditorOpen,
 }: RoutingTableProps) {
   const [editingRule, setEditingRule] = useState<RoutingRule | null>(null)
   const [isAddingNew, setIsAddingNew] = useState(false)
@@ -101,11 +114,13 @@ export function RoutingTable({
   }
 
   const openAddDialog = () => {
+    onEditorOpen?.()
     setEditingRule({ ...emptyRule, id: `new-${Date.now()}` })
     setIsAddingNew(true)
   }
 
   const openEditDialog = (rule: RoutingRule) => {
+    onEditorOpen?.()
     setEditingRule({ ...rule })
     setIsAddingNew(false)
   }
@@ -115,14 +130,14 @@ export function RoutingTable({
     setIsAddingNew(false)
   }
 
-  const saveRule = () => {
-    if (!editingRule || disabled) return
+  const saveRule = async () => {
+    if (!editingRule || disabled || !editorValid || editingRule.networkMixed) return
     if (isAddingNew && (!editingRule.description.trim() || (!editingRule.domain.length && !editingRule.ip.length) || !editingRule.outboundTag)) return
 
     if (isAddingNew) {
-      onAddRule(editingRule)
+      if (await onAddRule(editingRule) === false) return
     } else {
-      onEditRule(editingRule.id, editingRule)
+      if (await onEditRule(editingRule.id, editingRule) === false) return
     }
     closeDialog()
   }
@@ -246,7 +261,7 @@ export function RoutingTable({
                   </td>
                   <td className="px-3 py-3">
                     <span className="text-muted-foreground text-sm uppercase">
-                      {rule.network || 'tcp,udp'}
+                      {rule.networkMixed ? 'Смешанная' : rule.network || 'tcp,udp'}
                     </span>
                   </td>
                   <td className="px-3 py-3">
@@ -254,14 +269,14 @@ export function RoutingTable({
                       {rule.domain.length > 0 && (
                         <div>
                           <span className="text-foreground font-medium">Домены:</span>{' '}
-                          {rule.domain.slice(0, 2).map(value => <span key={value} title={value} className="mr-2">{resourceLabel(value)}</span>)}
+                          {rule.domain.slice(0, 2).map(value => <span key={value} title={value} className="mr-2">{resourceLabeler(value)}</span>)}
                           {rule.domain.length > 2 && ` +${rule.domain.length - 2}`}
                         </div>
                       )}
                       {rule.ip.length > 0 && (
                         <div>
                           <span className="text-foreground font-medium">IP:</span>{' '}
-                          {rule.ip.slice(0, 2).map(value => <span key={value} title={value} className="mr-2">{resourceLabel(value)}</span>)}
+                          {rule.ip.slice(0, 2).map(value => <span key={value} title={value} className="mr-2">{resourceLabeler(value)}</span>)}
                           {rule.ip.length > 2 && ` +${rule.ip.length - 2}`}
                         </div>
                       )}
@@ -310,7 +325,7 @@ export function RoutingTable({
                   className="text-base"
                   value={editingRule.description}
                   onChange={(e) => updateEditingRule({ description: e.target.value })}
-                  disabled={deviceMode && !isAddingNew}
+                  disabled={deviceMode && !isAddingNew || !isAddingNew && !canEditDescription(editingRule)}
                   placeholder="Описание правила"
                 />
               </div>
@@ -319,19 +334,21 @@ export function RoutingTable({
               <div>
                 <label className="text-muted-foreground mb-1.5 block text-base">Сеть</label>
                 <select
-                  value={editingRule.network}
-                  onChange={(e) => updateEditingRule({ network: e.target.value as any })}
+                  value={editingRule.networkMixed ? 'mixed' : editingRule.network}
+                  disabled={!isAddingNew && !canEditResources(editingRule)}
+                  onChange={(e) => updateEditingRule({ network: e.target.value as any, networkMixed: false })}
                   className="bg-input-background hover:bg-input-background-hover border-input h-10 w-full rounded-md border px-2.5 text-base shadow-xs outline-none"
                 >
                   <option value="">tcp,udp</option>
+                  {editingRule.networkMixed && <option value="mixed" disabled>Смешанная — выберите сеть</option>}
                   <option value="tcp">tcp</option>
                   <option value="udp">udp</option>
                   <option value="tcp,udp">tcp,udp</option>
                 </select>
               </div>
 
-              {/* Домены */}
-              <div>
+              {/* Домены и IP: одна форма с адаптером ресурсов ядра. */}
+              {renderResources ? renderResources(editingRule, updateEditingRule) : <><div>
                 <label className="text-muted-foreground mb-1.5 block text-base">Домен</label>
                 <div className="relative">
                   <Input
@@ -386,6 +403,7 @@ export function RoutingTable({
                 </div>
               </div>
 
+              </>}
               {/* Тег исходящего */}
               <div>
                 <label className="text-muted-foreground mb-1.5 block text-base">
@@ -414,7 +432,7 @@ export function RoutingTable({
             <Button variant="outline" onClick={closeDialog}>
               Закрыть
             </Button>
-            <Button onClick={saveRule} disabled={disabled || isAddingNew && (!editingRule?.description.trim() || (!editingRule?.domain.length && !editingRule?.ip.length) || !editingRule?.outboundTag)}>
+            <Button onClick={saveRule} disabled={disabled || !editorValid || editingRule?.networkMixed || isAddingNew && (!editingRule?.description.trim() || (!editingRule?.domain.length && !editingRule?.ip.length) || !editingRule?.outboundTag)}>
               {isAddingNew ? 'Создать' : 'Сохранить'}
             </Button>
           </DialogFooter>

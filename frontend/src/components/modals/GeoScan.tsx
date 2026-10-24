@@ -1,7 +1,7 @@
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { UtilityPanel } from '@/components/configuration/UtilityPanel'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -19,7 +19,7 @@ type FileStatus = {
   status: 'idle' | 'scanning' | 'found' | 'not-found' | 'error'
 }
 
-export function GeoScanModal() {
+export function GeoScanModal({ embedded = false }: { embedded?: boolean } = {}) {
   const { showToast } = useAppContext()
   const { modals, dispatch } = useModalContext()
   const [geoType, setGeoType] = useState<GeoType>('domain')
@@ -136,22 +136,8 @@ export function GeoScanModal() {
   const allSelected = currentFiles.length > 0 && currentFiles.every((f) => selectedFiles.includes(f))
 
   return (
-    <Dialog open={modals.showGeoScanModal} onOpenChange={(open) => !open && close()}>
-      <DialogContent
-        className="flex! flex-col overflow-hidden"
-        style={{
-          maxHeight: '95dvh',
-          maxWidth: '36rem',
-          width: 'calc(100vw - 2rem)',
-        }}
-      >
-        <DialogHeader className="shrink-0">
-          <DialogTitle className="flex items-center gap-2 pb-3">
-            <IconSearch size={24} className="text-chart-2" />
-            Скан геофайлов
-          </DialogTitle>
-          <DialogDescription>Найдите категории, в которые входит домен или IP. Скан не изменяет правила маршрутизации.</DialogDescription>
-        </DialogHeader>
+    <UtilityPanel embedded={embedded} open={modals.showGeoScanModal} onOpenChange={open => { if (!open) close() }} title={<><IconSearch size={24} className="text-chart-2" /> Геофайлы</>} description="Базы доменов и IP для маршрутизации. Найдите категории, в которые входит адрес; проверка не изменяет правила.">
+
 
         <div className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-2"><Tabs value={geoType} onValueChange={(value) => switchType(value as GeoType)} className="shrink-0">
           <TabsList className="border-border h-full! w-full! overflow-hidden rounded-lg border bg-transparent p-0">
@@ -291,12 +277,11 @@ export function GeoScanModal() {
           </InputGroupAddon>
         </InputGroup>
 
-        </div><DialogFooter className="shrink-0">
+        </div><div className="shrink-0">
           <Button onClick={scan} disabled={uploading || scanning || !input.trim() || selectedFiles.length === 0} className="h-9 w-full">
             {scanning ? 'Сканирование...' : 'Сканировать'}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </div>
+    </UtilityPanel>
   )
 }

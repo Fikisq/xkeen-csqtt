@@ -18,10 +18,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import {
-  IconBox,
   IconCheck,
-  IconChevronDown,
-  IconChevronUp,
   IconCode,
   IconDeviceFloppy,
   IconDotsFilled,
@@ -30,7 +27,6 @@ import {
   IconFileText,
   IconPencil,
   IconRefresh,
-  IconSearch,
   IconTrash,
   IconX,
 } from '@tabler/icons-react'
@@ -52,6 +48,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover'
 import type { CodeMirrorRef } from './CodeMirror'
 
 const ConnectionsPanel = lazyLoad(() => import('./mihomo/Connections'), 'ConnectionsPanel')
+const GeoFilesPanel = lazyLoad(() => import('../modals/GeoScan'), 'GeoScanModal')
 const BackupsModal = lazyLoad(() => import('../modals/Backups'), 'BackupsModal')
 const SelectorsPanel = lazyLoad(() => import('./mihomo/Selectors'), 'SelectorsPanel')
 const XrayGlobalRoutingTable = lazyLoad(() => import('./xray/XrayGlobalRoutingTable'), 'XrayGlobalRoutingTable')
@@ -78,7 +75,6 @@ const BackupsModalContainer = memo(function BackupsModalContainer({
 
 type ClashMode = 'rule' | 'global' | 'direct'
 
-const TOGGLE_ALL_SELECTORS_EVENT = 'mihomo:toggle-all-selectors'
 
 interface Props {
   onOpenTemplate: () => void
@@ -159,7 +155,7 @@ function ConfigTab({ config, currentCore, showToast, onRefreshConfigs, withConte
   const isProtected = config.file.endsWith('/config.yaml') || config.file === 'config.yaml'
 
   const fileName = config.file.split('/').pop() ?? config.file
-  const fileLabel = ({ '00_config.json': 'Конфигурация Xray', 'client_bypass_macs.lst': 'Без VPN', 'device_capture_xray.lst': 'Устройства Xray' } as Record<string, string>)[fileName] ?? fileName.replace(/\.[^.]+$/, '')
+  const fileLabel = ({ '00_config.json': 'Конфигурация Xray', 'config.yaml': 'Конфигурация Mihomo', 'client_bypass_macs.lst': 'Без VPN · Xray', 'client_bypass_mihomo_macs.lst': 'Без VPN · Mihomo', 'device_capture_xray.lst': 'Устройства Xray' } as Record<string, string>)[fileName] ?? fileName.replace(/\.[^.]+$/, '')
   const tabsTrigger = (
     <TabsTrigger value={config.file} className="dark:data-[state=active]:bg-input-background! relative data-[state=active]:bg-white!">
       {fileLabel}
@@ -271,7 +267,7 @@ function ConfigTab({ config, currentCore, showToast, onRefreshConfigs, withConte
   )
 }
 
-export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRefreshConfigs, editorRef, configActionsRef }: Props) {
+export function ConfigPanel({ onOpenTemplate, onRefreshConfigs, editorRef, configActionsRef }: Props) {
   const { state, dispatch, showToast } = useAppContext({ includeConfigs: true })
   const { configs, isConfigsLoading, currentCore, serviceStatus, clashApiPort, clashApiSecret, clashApiUnix } = state
 
@@ -292,7 +288,7 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
 
   const [, setIsEditorMounted] = useState(false)
 
-  const [activePanel, setActivePanel] = useState<'selectors' | 'connections' | 'config'>('selectors')
+  const [activePanel, setActivePanel] = useState<'selectors' | 'connections' | 'config' | 'backups' | 'geofiles'>('selectors')
   const [mountedPanels, setMountedPanels] = useState<Set<string>>(() => new Set(['selectors']))
   const [mode, setMode] = useState<ClashMode>('rule')
   const [routingDraft, setRoutingDraft] = useState<{ file: string; base: string; content: string; preserveOrder?: boolean } | null>(null)
@@ -308,13 +304,11 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
   }, [routingDraft, routingAutoSaving])
-  const [allSelectorsCollapsed, setAllSelectorsCollapsed] = useState(false)
-  const currentPanel = isRunning ? currentCore === 'xray' && activePanel === 'connections' ? 'selectors' : activePanel : 'config'
+  const currentPanel = activePanel === 'backups' || activePanel === 'geofiles' ? activePanel : isRunning ? currentCore === 'xray' && activePanel === 'connections' ? 'selectors' : activePanel : 'config'
 
   useEffect(() => {
     setActivePanel('selectors')
     setMountedPanels(new Set(['selectors']))
-    setAllSelectorsCollapsed(false)
   }, [currentCore])
 
   const configsRef = useRef(configs)
@@ -831,7 +825,7 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
     } finally { mihomoRoutingLockRef.current = false; setRoutingSaving(false) }
   }
 
-  async function saveMihomoRoute(tag: RouteTag | null, name: string, resources: string[], target: string, deviceIp?: string, network: MihomoRouteNetwork = 'tcp,udp'): Promise<boolean> {
+  async function saveMihomoRoute(tag: RouteTag | null, name: string, resources: string[], target: string, deviceIp?: string, network: MihomoRouteNetwork = 'tcp,udp', enabled = true): Promise<boolean> {
     return editMihomoCustomRoute(content => {
       let updated = content
       let routeTag = tag
@@ -847,9 +841,25 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
       }
       const group = defaultMihomoChoices(updated)[routeTag]
       if (!group) throw new Error('Группа маршрута не найдена')
-      if (deviceIp) return updateMihomoDevice(updated, deviceIp, routeTag, target === '@inherit' ? group : target === 'DIRECT' && routeTag === 'VPN' ? '@direct' : target)
-      return withSelections(updated, { ...readSelections(updated), [group]: target })
+      updated = deviceIp ? updateMihomoDevice(updated, deviceIp, routeTag, target === '@inherit' ? group : target === 'DIRECT' && routeTag === 'VPN' ? '@direct' : target)
+        : withSelections(updated, { ...readSelections(updated), [group]: target })
+      return withMihomoRouteEnabled(updated, routeTag, enabled, deviceIp)
     }, 'Маршрут обновлён')
+  }
+
+  async function bulkMihomoOutbound(tags: string[], target: string, deviceIp?: string): Promise<boolean> {
+    return editMihomoCustomRoute(content => {
+      let updated = content
+      const defaults = defaultMihomoChoices(content)
+      const selections = readSelections(content)
+      for (const tag of tags) {
+        const group = defaults[tag]
+        if (!group) throw new Error('Правило больше не существует')
+        if (deviceIp) updated = updateMihomoDevice(updated, deviceIp, tag, target === '@inherit' ? group : target === 'DIRECT' && tag === 'VPN' ? '@direct' : target)
+        else selections[group] = target
+      }
+      return deviceIp ? updated : withSelections(updated, selections)
+    }, 'Исходящее выбранных правил обновлено')
   }
 
   async function importMihomoRoutes(rules: Array<{ tag: string; name: string; resources: string[]; outbound: string; network?: MihomoRouteNetwork }>): Promise<boolean> {
@@ -892,17 +902,7 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
   ]
 
   const activeRoutingDraft = routingDraft?.file === (isMihomo ? mihomoConfig?.file : xraySelectorsConfig?.file) ? routingDraft : null
-  const routingUtilities = (<>
-    {routingAutoSaving && <span className="text-muted-foreground text-xs" role="status" aria-live="polite">Применяется…</span>}
-    <DropdownMenu>
-    <DropdownMenuTrigger render={<Button size="sm" variant="outline" aria-label="Утилиты маршрутизации"><IconDotsFilled /></Button>} />
-    <DropdownMenuContent align="end" className="min-w-60">
-      <DropdownMenuGroup>
-        <DropdownMenuItem onClick={onOpenBackups}><IconBox /> Резервные копии</DropdownMenuItem>
-        <DropdownMenuItem onClick={onOpenGeoScan}><IconSearch /> Скан геофайлов</DropdownMenuItem>
-      </DropdownMenuGroup>
-    </DropdownMenuContent>
-  </DropdownMenu></>)
+  const routingUtilities = routingAutoSaving && <span className="text-muted-foreground text-xs" role="status" aria-live="polite">Применяется…</span>
   const routingToolbar = (<div className="border-border bg-input-background m-3 flex shrink-0 flex-wrap items-center gap-2 rounded-xl border p-3">
                   {!isMihomo && <><Button size="sm" disabled={!activeRoutingDraft || routingSaving} onClick={() => { if (xraySelectorsConfig) void applyXrayRoutingEdit(xraySelectorsConfig.file, content => content, 'Маршрутизация сохранена и применена', true) }}>{routingSaving ? 'Применение…' : 'Сохранить и применить'}</Button>
                   <Button size="sm" variant="outline" disabled={!activeRoutingDraft || routingSaving} onClick={() => setRoutingDraft(null)}>Отменить изменения</Button></>}
@@ -922,12 +922,12 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
         <div className="border-border bg-card flex flex-col overflow-hidden rounded-xl border md:min-h-0 md:flex-1">
           <div className={cn('flex shrink-0 flex-col gap-2 px-3 pt-3 sm:px-4 sm:pt-4 md:flex-row md:items-start')}>
             <div className="flex min-w-0 shrink-0 items-center gap-2">
-              {isMihomo || hasXraySelectors ? (
+              {(
                 <div className="min-w-0 scrollbar-none overflow-x-auto md:overflow-x-visible [&::-webkit-scrollbar]:hidden">
                   <Tabs
                     value={currentPanel}
                     onValueChange={(value) => {
-                      const panel = value as 'config' | 'selectors' | 'connections'
+                      const panel = value as typeof activePanel
                       setActivePanel(panel)
                       setMountedPanels((prev) => (prev.has(panel) ? prev : new Set([...prev, panel])))
                     }}
@@ -945,11 +945,11 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
                       <TabsTrigger value="config" className="p-0 text-sm font-semibold md:text-lg" disabled={routingAutoSaving}>
                         Конфигурация
                       </TabsTrigger>
+                      <TabsTrigger value="backups" className="p-0 text-sm font-semibold md:text-lg">Резервные копии</TabsTrigger>
+                      <TabsTrigger value="geofiles" className="p-0 text-sm font-semibold md:text-lg">Геофайлы</TabsTrigger>
                     </TabsList>
                   </Tabs>
                 </div>
-              ) : (
-                <h2 className="shrink-0 text-lg font-semibold select-none">Конфигурация</h2>
               )}
             </div>
 
@@ -974,25 +974,11 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
             {isMihomo && currentPanel === 'selectors' && (
               <div className="ml-auto flex items-center gap-1.5">
                 <Button variant="outline" className="text-[13px]" onClick={() => window.dispatchEvent(new Event('mihomo:open-subscriptions'))}>Подписки</Button>
-                <Tooltip>
-                  <TooltipTrigger render={
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      aria-label={allSelectorsCollapsed ? 'Развернуть все селекторы' : 'Свернуть все селекторы'}
-                      onClick={() =>
-                        window.dispatchEvent(new CustomEvent(TOGGLE_ALL_SELECTORS_EVENT, { detail: { collapsed: !allSelectorsCollapsed } }))
-                      }
-                    >
-                      {allSelectorsCollapsed ? <IconChevronDown /> : <IconChevronUp />}
-                    </Button>
-                  } />
-                  <TooltipContent>{allSelectorsCollapsed ? 'Развернуть все' : 'Свернуть все'}</TooltipContent>
-                </Tooltip>
+
               </div>
             )}
 
-            {(!(isMihomo || hasXraySelectors) || currentPanel === 'config') && (
+            {(currentPanel === 'config') && (
               <div className="scrollbar-none overflow-x-auto overflow-y-hidden [-ms-overflow-style:none] md:ml-auto [&::-webkit-scrollbar]:hidden">
                 {isConfigsLoading ? (
                   <div className="flex gap-2">
@@ -1043,7 +1029,9 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
             {xrayMigrationConfig && <Button variant="outline" className="text-[13px]" onClick={() => void applyXrayRoutingEdit(xrayMigrationConfig.file, enableXrayRoutingCards, 'Карточки Xray и маршрутизация для IP включены', true)}>Включить карточки Xray</Button>}
           </div>
 
-          <div className={cn('relative', currentPanel === 'selectors' && (isMihomo || hasXraySelectors) ? '' : 'min-h-175! md:min-h-0 md:flex-1')}>
+          {currentPanel === 'backups' && <LazyBoundary><BackupsModal embedded open onOpenChange={() => {}} onRefreshConfigs={refreshConfigsAndEditor} /></LazyBoundary>}
+          {currentPanel === 'geofiles' && <LazyBoundary><GeoFilesPanel embedded /></LazyBoundary>}
+          <div className={cn('relative', currentPanel !== 'config' ? '' : 'min-h-175! md:min-h-0 md:flex-1')}>
             {isMihomo && (
               <>
                 {mountedPanels.has('selectors') && (
@@ -1056,12 +1044,12 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
                         mode={mode}
                         clashApiSecret={clashApiSecret ?? null}
                         clashApiUnix={activeClashApiUnix ?? null}
-                        onCollapsedStateChange={setAllSelectorsCollapsed}
                         configContent={(routingDraft?.file === mihomoConfig?.file ? routingDraft?.content : mihomoConfig?.savedContent) ?? ''}
                         isDraft={!!activeRoutingDraft}
                         onSelectDraft={selectMihomoDraft}
                         onDeviceSelect={selectMihomoDevice}
                         onSaveRoute={saveMihomoRoute}
+                        onBulkOutbound={bulkMihomoOutbound}
                         onImportRoutes={importMihomoRoutes}
                         onRemoveRoute={removeMihomoRoute}
                         onReorderRoute={reorderMihomoRoute}
@@ -1098,11 +1086,11 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
               </div>
             )}
 
-            {!isConfigsLoading && (!(isMihomo || hasXraySelectors) || mountedPanels.has('config')) && (
+            {!isConfigsLoading && (currentPanel === 'config' || mountedPanels.has('config')) && (
               <div
                 className={cn(
                   'absolute inset-0',
-                  (isMihomo || hasXraySelectors) && currentPanel !== 'config' && 'hidden'
+                  currentPanel !== 'config' && 'hidden'
                 )}
               >
                 <CodeMirrorEditorLazy
@@ -1116,7 +1104,7 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
             )}
           </div>
 
-          {(!(isMihomo || hasXraySelectors) || currentPanel === 'config') && (
+          {(currentPanel === 'config') && (
             <div className="flex shrink-0 flex-wrap items-center justify-between gap-1.5 px-3 pb-3 sm:px-4 sm:pb-4">
               <div className="min-w-0 text-xs">
                 {isConfigsLoading ? (
@@ -1175,12 +1163,6 @@ export function ConfigPanel({ onOpenTemplate, onOpenGeoScan, onOpenBackups, onRe
                           <DropdownMenuLabel>Утилиты</DropdownMenuLabel>
                           <DropdownMenuItem onClick={onOpenTemplate}>
                             <IconFileText /> Шаблоны конфигураций
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={onOpenBackups}>
-                            <IconBox /> Бэкапы конфигураций
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={onOpenGeoScan}>
-                            <IconSearch /> Скан геофайлов
                           </DropdownMenuItem>
 
                         </DropdownMenuGroup>
