@@ -18,13 +18,15 @@ function resourceValue(kind: 'domain' | 'ip', item: Category): string {
   return `ext:${item.file}:${name}`
 }
 
-export function GeoDatabasePicker({ kind, resources, onChange, onPick, nativeOnly = false }: {
+export function GeoDatabasePicker({ kind, resources, onChange, onPick, nativeOnly = false, core = 'xray' }: {
   kind: 'domain' | 'ip'
   resources: string[]
   onChange: (resources: string[]) => void
   onPick?: (name: string) => void
+  core?: 'xray' | 'mihomo'
   nativeOnly?: boolean
 }) {
+  const [datAllowed, setDatAllowed] = useState(core === 'xray' || kind === 'domain')
   const [files, setFiles] = useState<string[]>([])
   const [fileFilter, setFileFilter] = useState('')
   const [search, setSearch] = useState('')
@@ -43,12 +45,12 @@ export function GeoDatabasePicker({ kind, resources, onChange, onPick, nativeOnl
 
   useEffect(() => {
     let alive = true
-    void apiCall<Result<{ site_files?: string[]; ip_files?: string[] }>>('GET', 'geo').then(result => {
+    void apiCall<Result<{ site_files?: string[]; ip_files?: string[] }>>('GET', `geo?core=${core}`).then(result => {
       if (!result.success) throw new Error(result.error || 'Не удалось загрузить базы')
       if (alive) setFiles(((kind === 'ip' ? result.ip_files : result.site_files) ?? []).filter(file => !nativeOnly || file === (kind === 'ip' ? 'geoip.dat' : 'geosite.dat')))
     }).catch(e => { if (alive) setError(String(e)) })
     return () => { alive = false }
-  }, [kind, nativeOnly])
+  }, [kind, nativeOnly, core])
 
   useEffect(() => {
     let alive = true
@@ -56,14 +58,14 @@ export function GeoDatabasePicker({ kind, resources, onChange, onPick, nativeOnl
     setCategories([])
     if (!files.length) { setLoading(false); return }
     void Promise.all(files.map(async file => {
-      const result = await apiCall<Result<{ categories?: Array<{ name: string; count: number }> }>>('GET', `geo/categories?file=${encodeURIComponent(file)}&kind=${kind}`)
+      const result = await apiCall<Result<{ categories?: Array<{ name: string; count: number }> }>>('GET', `geo/categories?file=${encodeURIComponent(file)}&kind=${kind}&core=${core}`)
       if (!result.success) throw new Error(`${file}: ${result.error || 'Не удалось прочитать базу'}`)
       return (result.categories ?? []).map(item => ({ ...item, file }))
     })).then(groups => {
       if (alive) { setCategories(groups.flat().sort((a, b) => a.name.localeCompare(b.name) || a.file.localeCompare(b.file))); setError('') }
     }).catch(e => { if (alive) setError(String(e)) }).finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
-  }, [files, kind])
+  }, [files, kind, core])
 
   useEffect(() => {
     let alive = true
@@ -71,20 +73,27 @@ export function GeoDatabasePicker({ kind, resources, onChange, onPick, nativeOnl
     setRecordLoading(true)
     setRecordError('')
     const timer = setTimeout(() => {
-      const query = new URLSearchParams({ file: active.file, kind, category: active.name, filter: recordFilter, offset: String(page * 100) })
+      const query = new URLSearchParams({ file: active.file, kind, core, category: active.name, filter: recordFilter, offset: String(page * 100) })
       void apiCall<Result<{ total?: number; entries?: RecordEntry[] }>>('GET', `geo/records?${query}`).then(result => {
         if (!result.success) throw new Error(result.error || 'Не удалось прочитать записи')
         if (alive) { setRecords(result.entries ?? []); setRecordTotal(result.total ?? 0) }
       }).catch(e => { if (alive) setRecordError(String(e)) }).finally(() => { if (alive) setRecordLoading(false) })
     }, recordFilter ? 250 : 0)
     return () => { alive = false; clearTimeout(timer) }
-  }, [active, kind, page, recordFilter])
+  }, [active, kind, core, page, recordFilter])
+
+  useEffect(() => {
+    if (core !== 'mihomo' || kind !== 'ip') return
+    let active = true
+    void apiCall<{success: boolean; geodataMode?: boolean}>('GET', 'geo/mihomo').then(result => { if (active) setDatAllowed(result.success && result.geodataMode === true) }).catch(() => {})
+    return () => { active = false }
+  }, [core, kind])
 
   async function upload(database: File) {
-    if (!database.name.endsWith('.dat') || !database.size || database.size > 32 * 1024 * 1024) { setError('Нужна база Xray .dat размером до 32 МБ'); return }
+    if (!database.name.endsWith('.dat') || !database.size || database.size > 32 * 1024 * 1024) { setError('Нужна база .dat размером до 32 МБ'); return }
     setUploading(true); setError('')
     try {
-      const response = await fetch(`/api/geo/upload?file=${encodeURIComponent(database.name)}&kind=${kind}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: database })
+      const response = await fetch(`/api/geo/upload?file=${encodeURIComponent(database.name)}&kind=${kind}&core=${core}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: database })
       if (response.status === 413) throw new Error('База превышает ограничение 32 МБ')
       const result = await response.json()
       if (!response.ok || !result.success) throw new Error(result.error || 'Не удалось загрузить базу')
@@ -103,6 +112,8 @@ export function GeoDatabasePicker({ kind, resources, onChange, onPick, nativeOnl
   const visible = useMemo(() => categories.filter(item =>
     (!fileFilter || item.file === fileFilter) && `${item.name} ${geoCategoryLabel(item.name)} ${geoDatabaseLabel(item.file)}`.toLowerCase().includes(search.trim().toLowerCase())
   ), [categories, fileFilter, search])
+
+  if (!datAllowed) return <p className="text-muted-foreground text-sm">Для выбора категорий из geoip.dat включите geodata-mode: true в конфигурации Mihomo. Сейчас GEOIP использует MMDB. IP-наборы доступны во вкладке «Rule-set’ы».</p>
 
   return <div className="space-y-3">
     <div className="flex flex-wrap gap-2">
@@ -126,7 +137,7 @@ export function GeoDatabasePicker({ kind, resources, onChange, onPick, nativeOnl
     </div>
     <div className="border-border grid h-[min(55vh,540px)] min-h-80 overflow-hidden rounded-md border md:grid-cols-2">
       <div className="border-border min-h-0 overflow-y-auto border-b p-1 md:border-r md:border-b-0">
-        {kind === 'domain' && (!fileFilter || fileFilter === 'geosite.dat') && (!search.trim() || 'нейронки ai artificial intelligence'.includes(search.trim().toLowerCase())) && <button type="button" className="flex w-full justify-between rounded px-2 py-2 text-left text-sm hover:bg-blue-500/10" aria-pressed={aiDomains.every(value => resources.includes(value))} onClick={() => {
+        {kind === 'domain' && (core !== 'mihomo' || aiDomains.filter(value => value.startsWith('geosite:')).every(value => categories.some(item => resourceValue(kind,item) === value))) && (!fileFilter || fileFilter === 'geosite.dat') && (!search.trim() || 'нейронки ai artificial intelligence'.includes(search.trim().toLowerCase())) && <button type="button" className="flex w-full justify-between rounded px-2 py-2 text-left text-sm hover:bg-blue-500/10" aria-pressed={aiDomains.every(value => resources.includes(value))} onClick={() => {
           const selected = aiDomains.every(value => resources.includes(value))
           onChange(selected ? resources.filter(value => !aiDomains.includes(value)) : [...new Set([...resources, ...aiDomains])])
           if (!selected) onPick?.('Нейронки')

@@ -132,11 +132,19 @@ pub async fn dns() -> Json<Value> {
 }
 
 async fn write_auto(message: &str, running: bool) {
-    let state = json!({"checkedAt":chrono::Utc::now().to_rfc3339(),"message":message,"running":running});
+    let stamp = chrono::Utc::now().to_rfc3339();
+    let last_attempt = if running { json!(stamp) } else { auto_state()["lastAttemptAt"].clone() };
+    let state = json!({"checkedAt":stamp,"lastAttemptAt":last_attempt,"message":message,"running":running});
     if let Ok(bytes) = serde_json::to_vec(&state) {
         let next = format!("{AUTO_STATE}.new");
         if tokio::fs::write(&next,bytes).await.is_ok() { let _ = tokio::fs::rename(next,AUTO_STATE).await; }
     }
+}
+
+fn verification_due(now: i64, checked: Option<i64>, attempted: Option<i64>, interval_seconds: i64) -> bool {
+    let age = |stamp: i64| if stamp <= now { now.saturating_sub(stamp) } else { i64::MAX };
+    checked.is_none_or(|stamp| age(stamp) >= interval_seconds)
+        && attempted.is_none_or(|stamp| age(stamp) >= 300)
 }
 
 pub fn start_scheduler() {
@@ -145,34 +153,53 @@ pub fn start_scheduler() {
             tokio::time::sleep(Duration::from_secs(60)).await;
             let settings = config();
             if !settings.auto_enabled || Path::new(MANUAL_STOPPED).exists() { continue; }
-            let last = auto_state()["checkedAt"].as_str().and_then(|stamp| chrono::DateTime::parse_from_rfc3339(stamp).ok());
-            if last.is_none() { write_auto("Ожидание первой проверки",false).await; continue; }
-            if last.is_some_and(|stamp| chrono::Utc::now().signed_duration_since(stamp).num_seconds() < (settings.interval_hours * 3600) as i64) { continue; }
-            let Ok(_guard) = SETTINGS_LOCK.get_or_init(|| Mutex::new(())).try_lock() else { continue; };
+            // The reconciler ticks every 15 seconds and can collide with every
+            // 60-second poll. Queue briefly instead of starving on try_lock.
+            let Ok(_guard) = tokio::time::timeout(Duration::from_secs(5),
+                SETTINGS_LOCK.get_or_init(|| Mutex::new(())).lock()).await else { continue; };
+            let settings = config();
+            if !settings.auto_enabled || Path::new(MANUAL_STOPPED).exists() { continue; }
+            let timestamp = |value: &Value| value.as_str().and_then(|stamp| chrono::DateTime::parse_from_rfc3339(stamp).ok()).map(|stamp| stamp.timestamp());
+            let checked = matching_check().as_ref().and_then(|report| timestamp(&report["checkedAt"]));
+            let attempted = timestamp(&auto_state()["lastAttemptAt"]);
+            if !verification_due(chrono::Utc::now().timestamp(), checked, attempted, (settings.interval_hours * 3600) as i64) { continue; }
             if search::is_running().await || status_json().await["running"] != true { continue; }
             search::reset_cancel();
             search::begin_automatic().await;
             write_auto("Проверка текущей стратегии",true).await;
             let result = automatic_check().await;
-            let message = result.unwrap_or_else(|error| format!("Прежняя стратегия сохранена: {error}"));
+            let message = result.unwrap_or_else(|error| format!("Автопроверка: {error}"));
             search::end_automatic(&message).await;
             write_auto(&message,false).await;
+
         }
     });
+}
+
+fn coverage(report: &Value) -> (u64,u64) {
+    (report["tcpSites"].as_u64().unwrap_or(0),report["http3Sites"].as_u64().unwrap_or(0))
+}
+
+fn full_coverage(report: &Value, mode: &str) -> bool {
+    full_counts(coverage(report),required_tcp_sites(),mode)
+}
+
+fn full_counts((tcp,quic): (u64,u64), required: u64, mode: &str) -> bool {
+    required > 0 && tcp == required && (mode == "tcp" || quic == required)
 }
 
 async fn automatic_check() -> Result<String,String> {
     let mode = profile();
     let args = tokio::fs::read_to_string(CUSTOM).await.unwrap_or_default();
-    let first = search::probe(active_source(&args),&mode,&args,5).await?;
+    let first = run_active_probe(active_source(&args),&mode,&args).await?;
     persist_check(&first).await?;
     if first["results"].as_array().into_iter().flatten().any(|row| row["protocol"] == "tcp" && row["errorStage"] == "dns" && row["ok"] == false) {
         return Err("Не удалось разрешить имя ресурса; проверьте DNS во вкладке «Ресурсы»".into());
     }
-    if healthy_report(&first,&mode) { return Ok("Текущая стратегия работает".into()); }
-    let baseline = search::probe(active_source(&args),&mode,&args,5).await?;
+    if full_coverage(&first,&mode) { return Ok("Все выбранные ресурсы работают в выбранном режиме; замена не требуется".into()); }
+    let baseline = run_active_probe(active_source(&args),&mode,&args).await?;
     persist_check(&baseline).await?;
-    if healthy_report(&baseline,&mode) { return Ok("Работа подтверждена повторной проверкой".into()); }
+    if full_coverage(&baseline,&mode) { return Ok("Полный результат подтверждён повторной проверкой".into()); }
     let result = if mode == "tcp-quic" { search::expanded_scan(args.contains("--filter-udp=1024-65535")).await? }
         else { search::scan(false,&mode).await? };
     let (_, next_mode, mut next_args) = result;
@@ -181,10 +208,52 @@ async fn automatic_check() -> Result<String,String> {
     let candidate = search::probe("preset",&next_mode,&next_args,5).await?;
     // Compare against the current strategy again: temporary network recovery must
     // not be mistaken for an improvement caused by the candidate.
-    let current = search::probe(active_source(&args),&mode,&args,5).await?;
-    let score = |report: &Value| (report["tcpSites"].as_u64().unwrap_or(0),report["http3Sites"].as_u64().unwrap_or(0));
-    if !healthy_report(&candidate,&next_mode) || score(&candidate) <= score(&current) { persist_check(&current).await?; return Ok("Текущая стратегия не хуже; замена не требуется".into()); }
+    let current = run_active_probe(active_source(&args),&mode,&args).await?;
+    if !full_coverage(&candidate,&next_mode) { persist_check(&current).await?; return Ok("Стратегия с полным результатом TCP и QUIC не найдена; прежняя сохранена".into()); }
+    if coverage(&candidate) <= coverage(&current) { persist_check(&current).await?; return Ok("Текущая стратегия не хуже; замена не требуется".into()); }
     if search::cancelled() { return Err("Автоподбор остановлен".into()); }
+    let old_automatic = Path::new(AUTO_SELECTION).exists();
     apply_checked(&next_mode,&next_args,true,&candidate).await?;
-    Ok("Применена подтверждённая стратегия с лучшим результатом".into())
+    // Complete this verification even after cancellation: a failed candidate
+    // must not remain installed merely because the user stopped the search.
+    let verified = run_active_probe("preset",&next_mode,&next_args).await;
+    match verified {
+        Ok(report) if full_coverage(&report,&next_mode) && coverage(&report) > coverage(&current) => {
+            persist_check(&report).await?;
+            search::remember(&next_mode,&next_args,&report).await?;
+            Ok("Лучшая стратегия применена и повторно проверена".into())
+        }
+        _ => {
+            apply_checked(&mode,&args,old_automatic,&current).await
+                .map_err(|error| format!("Повторная проверка не прошла; ошибка отката: {error}"))?;
+            if status_json().await["running"] != true { run_canary("start").await?; }
+            if status_json().await["running"] != true { return Err("Прежние параметры восстановлены, но nfqws2 не запустился".into()); }
+            Err("Повторная проверка не подтвердила улучшение; прежняя стратегия восстановлена".into())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn verification_tracks_measurement_not_settings_save_or_search_completion() {
+        assert!(verification_due(7200, Some(0), None, 3600));
+        assert!(!verification_due(7200, Some(7000), Some(7000), 3600));
+        assert!(verification_due(7200, Some(3000), Some(6000), 3600));
+        assert!(!verification_due(7200, Some(3000), Some(7100), 3600));
+        assert!(verification_due(7200, None, None, 3600));
+        assert!(verification_due(7200, Some(8000), None, 3600));
+    }
+    #[test]
+    fn improvement_requires_more_coverage_without_sacrificing_tcp() {
+        let current = json!({"tcpSites":3,"http3Sites":1});
+        assert!(!full_counts((3,2),3,"tcp-quic"));
+        assert!(full_counts((3,3),3,"tcp-quic"));
+        assert!(!full_counts((2,3),3,"tcp-quic"));
+        assert!(full_counts((3,0),3,"tcp"));
+        assert!(!full_counts((0,0),0,"tcp-quic"));
+        assert!(coverage(&json!({"tcpSites":2,"http3Sites":3})) < coverage(&current));
+        assert_eq!(coverage(&current),coverage(&json!({"tcpSites":3,"http3Sites":1})));
+    }
 }

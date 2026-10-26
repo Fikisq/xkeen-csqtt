@@ -4,7 +4,7 @@ import { load } from 'js-yaml'
 import { importAwg, addAwgProxy } from '../src/lib/amneziaWg.ts'
 
 // Public, synthetic key material; never a live tunnel.
-const key = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY='
+const key = Buffer.alloc(32, 1).toString('base64')
 const conf = `[Interface]
 PrivateKey = ${key}
 Address = 10.0.0.2/32

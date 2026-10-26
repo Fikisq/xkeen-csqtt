@@ -106,6 +106,13 @@ jobs:
         working-directory: backend
         run: cargo test --bin xkeen-ui nfqws2::search::timeout_tests::games_switch_adds_removes_and_does_not_duplicate_rules
 
+      - name: Check routing preservation and backup validation
+        working-directory: backend
+        run: |
+          cargo test --bin xkeen-ui autoswitch
+          cargo test --bin xkeen-ui backuper::
+          cargo test --bin xkeen-ui nfqws2::resources::
+
       - name: Inject frontend dist for cross
         working-directory: backend
         run: |

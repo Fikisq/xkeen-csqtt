@@ -1,8 +1,17 @@
 import { type ClassValue, clsx } from 'clsx'
-import { twMerge } from 'tailwind-merge'
+import { extendTailwindMerge } from 'tailwind-merge'
+
+const mergeClasses = extendTailwindMerge({
+  extend: {
+    classGroups: {
+      'font-size': ['text-ui', 'text-ui-section', 'text-ui-title'],
+      h: ['h-ui-control'],
+    },
+  },
+})
 
 export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs))
+  return mergeClasses(clsx(inputs))
 }
 
 export async function copyText(text: string): Promise<boolean> {

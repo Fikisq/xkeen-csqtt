@@ -170,7 +170,7 @@
   --secondary: oklch(0.274 0.006 286.033);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.278 0.033 256.848);
-  --muted-foreground: oklch(0.707 0.022 261.325);
+  --muted-foreground: oklch(0.75 0.022 261.325);
   --accent: rgba(59, 130, 246, 0.15);
   --accent-foreground: oklch(0.985 0.002 247.839);
   --menu-active-bg: rgba(59, 130, 246, 0.15);
@@ -227,6 +227,13 @@
 }
 
 @theme inline {
+  --text-ui: .875rem;
+  --text-ui--line-height: 1.25rem;
+  --text-ui-section: 1rem;
+  --text-ui-section--line-height: 1.5rem;
+  --text-ui-title: 1.125rem;
+  --text-ui-title--line-height: 1.5rem;
+  --spacing-ui-control: 2.375rem;
   --font-sans: 'Inter Variable', sans-serif, 'TwemojiMozilla';
   --font-mono: ui-monospace, 'JetBrains Mono Variable', monospace, 'TwemojiMozilla';
   --color-sidebar-ring: var(--sidebar-ring);
@@ -302,6 +309,9 @@
   body {
     @apply bg-muted dark:bg-background text-foreground font-sans;
   }
+  input, select, textarea {
+    font-weight: 400;
+  }
   html {
     @apply font-sans;
     scrollbar-color: #334155 transparent;
@@ -357,8 +367,9 @@
   align-items: center;
   gap: 8px;
   font-weight: 500;
-  font-size: 11px;
-  letter-spacing: 0.3px;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: normal;
   background: var(--status-badge-bg);
   color: var(--status-badge-color);
   padding: 0px 12px;
@@ -443,3 +454,29 @@
     -webkit-overflow-scrolling: touch;
   }
 }
+
+/* Protocol cards respond to their content area, including the device sidebar. */
+.protocol-container { container-type: inline-size; }
+.protocol-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; grid-auto-rows: 80px; }
+.protocol-grid span[title] { font-size: .875rem; }
+@container (min-width: 560px) { .protocol-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@container (min-width: 800px) { .protocol-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@container (min-width: 1000px) { .protocol-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+@container (min-width: 1200px) { .protocol-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+@container (min-width: 1400px) { .protocol-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); } }
+.routing-table { table-layout: fixed; width: 100%; }
+.routing-table { font-size: 1rem; }
+.routing-table .text-ui { font-size: .875rem; }
+.routing-table td[data-label="Исходящие"] .text-ui { font-weight: 500; }
+.routing-table th, .routing-table td { overflow-wrap: anywhere; }
+@media (min-width: 900px) { .backup-master { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 1rem; } }
+@media (max-width: 767px) {
+  .routing-table thead { display: none; }
+  .routing-table, .routing-table tbody { display: block; }
+  .routing-table tr { display: block; padding: .75rem; }
+  .routing-table td { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: .5rem; padding: .375rem 0; border: 0; }
+  .routing-table td::before { content: attr(data-label); color: var(--muted-foreground); }
+}
+
+/* Keep textual accents readable independently of the primary button fill. */
+.dark .text-primary { color: oklch(0.79 0.11 260); }

@@ -15,6 +15,8 @@ const badgeVariants = cva(
         sky: 'bg-sky-500/12 text-sky-700 dark:bg-sky-500/18 dark:text-sky-300',
         emerald: 'bg-emerald-500/12 text-emerald-700 dark:bg-emerald-500/18 dark:text-emerald-300',
         amber: 'bg-amber-500/14 text-amber-700 dark:bg-amber-500/18 dark:text-amber-300',
+        orange: 'bg-orange-500/12 text-orange-700 dark:bg-orange-500/18 dark:text-orange-300',
+        violet: 'bg-violet-500/12 text-violet-700 dark:bg-violet-500/18 dark:text-violet-300',
         rose: 'bg-rose-500/12 text-rose-700 dark:bg-rose-500/18 dark:text-rose-300',
         destructive:
           'bg-destructive/10 [a]:hover:bg-destructive/20 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 text-destructive dark:bg-destructive/20',

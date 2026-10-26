@@ -114,7 +114,9 @@ fn matching_check() -> Option<Value> {
         .and_then(|stamp| chrono::DateTime::parse_from_rfc3339(stamp).ok())
         .is_some_and(|stamp| {
             let age = chrono::Utc::now().signed_duration_since(stamp);
-            age.num_seconds() >= 0 && age.num_minutes() < 30
+            let schedule = resources::config();
+            let max_age = if schedule.auto_enabled { schedule.interval_hours * 3600 + 120 } else { 30 * 60 };
+            age.num_seconds() >= 0 && age.num_seconds() < max_age as i64
         });
     if value.get("strategyKey").and_then(Value::as_str) != Some(key.as_str()) { return None; }
     normalise_report(&mut value);
@@ -366,6 +368,27 @@ async fn run_probe_timeout_inner(source: &str, mode: &str, custom: &str, seconds
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
         .filter(|item| item.get("protocol").and_then(Value::as_str).is_some_and(|protocol| matches!(protocol, "tcp" | "h3")))
         .collect();
+    probe_report(source,mode,custom,results)
+}
+
+// Probe the installed service (mark 832), rather than starting another engine.
+async fn run_active_probe(source: &str, mode: &str, custom: &str) -> Result<Value,String> {
+    let status = status_json().await;
+    if status["mode"] != "global" || status["running"] != true { return Err("Рабочая очередь nfqws2 не запущена".into()); }
+    probe_ready().await?;
+    let output = tokio::time::timeout(Duration::from_secs(20), Command::new(PROBE_SCRIPT)
+        .args(["check-active","preset",mode,"/dev/null","6"])
+        .env("NFQWS_TEST_SITES",resources::urls().join(" "))
+        .process_group(0).kill_on_drop(true).output()).await
+        .map_err(|_| "Рабочая стратегия не ответила за 20 секунд")?.map_err(|error|error.to_string())?;
+    if !output.status.success() { return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned()); }
+    let results = String::from_utf8_lossy(&output.stdout).lines().filter_map(|line|serde_json::from_str::<Value>(line).ok()).collect();
+    let mut report = probe_report(source,mode,custom,results)?;
+    report["live"] = json!(true);
+    Ok(report)
+}
+
+fn probe_report(source: &str, mode: &str, custom: &str, results: Vec<Value>) -> Result<Value,String> {
     validate_probe_results(&results, mode)?;
     let interfaces: Vec<_> = results.iter().filter_map(|result| result["interface"].as_str()).collect();
     let tcp_sites = results.iter().filter(|item| item["protocol"] == "tcp" && item["ok"] == true).count();

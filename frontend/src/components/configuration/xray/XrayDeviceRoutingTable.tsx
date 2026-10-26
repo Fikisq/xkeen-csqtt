@@ -173,6 +173,12 @@ export function XrayDeviceRoutingTable({ deviceIp, content, onChange, onError, u
       outbounds={destinations} inbounds={[]}
       onAddRule={row => edit('', row, true)}
       onEditRule={(id, row) => edit(id, row, false)}
+      onDeleteSelected={async ids => {
+        try{return await onChange(current=>{
+          const selected=current.filter(rule=>ids.includes(ownName(rule))&&ownName(rule)!==FALLBACK&&isOwn(rule,DEVICE_IP))
+          return current.filter(rule=>!isOwn(rule,DEVICE_IP)||!selected.some(item=>ownName(item)===ownName(rule)||sameRuGroup(rule,item)))
+        })}catch(error){onError(error instanceof Error?error.message:'Не удалось удалить правила');return false}
+      }}
       onDeleteRule={id => run(current => {
         const selected = current.find(rule => ownName(rule) === id)
         if (!selected) throw new Error('Правило уже удалено')

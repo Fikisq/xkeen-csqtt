@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import { IconPencil, IconTrash, IconPlus, IconGripVertical, IconFolder } from '@tabler/icons-react'
 import { useRef, useState, type ReactNode } from 'react'
 import { GeoDatabasePicker } from '@/components/configuration/GeoDatabasePicker'
+import { ProtocolName, latencyTone } from '@/components/configuration/ProtocolName'
 import { resourceLabel } from '@/lib/geoLabels'
 
 // Типы для правила маршрутизации в стиле 3x-ui
@@ -32,6 +33,7 @@ interface RoutingTableProps {
   onAddRule: (rule: RoutingRule) => void | Promise<boolean>
   onEditRule: (id: string, rule: RoutingRule) => void | Promise<boolean>
   onDeleteRule: (id: string) => void
+  onDeleteSelected?: (ids: string[]) => Promise<boolean>
   onReorder: (fromIndex: number, toIndex: number) => void
   onToggleEnabled: (id: string) => void
   deviceMode?: boolean
@@ -63,6 +65,7 @@ export function RoutingTable({
   onAddRule,
   onEditRule,
   onDeleteRule,
+  onDeleteSelected,
   onReorder,
   onToggleEnabled,
   deviceMode = false,
@@ -94,6 +97,8 @@ export function RoutingTable({
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
   const importInput = useRef<HTMLInputElement>(null)
   const [bulkOutbound, setBulkOutbound] = useState('')
+  const [deleting, setDeleting] = useState(false)
+  disabled = disabled || deleting
   const selectable = !!onSelectionChange && !!onApplyOutbound
   const selected = new Set(selectedRuleIds.filter(id => rules.some(rule => rule.id === id)))
   const allSelected = rules.length > 0 && selected.size === rules.length
@@ -156,7 +161,7 @@ export function RoutingTable({
     <div className="space-y-4 text-foreground">
       {/* Заголовок и кнопка добавления */}
       <div className="flex flex-wrap items-center gap-2">
-        {!deviceMode && showTitle && <h3 className="text-lg font-semibold">Маршрутизация</h3>}
+        {!deviceMode && showTitle && <h3 className="text-ui-section font-semibold">Маршрутизация</h3>}
         {!disabled && addRuleButton}
         {onImportFile && <>
           <input ref={importInput} type="file" accept=".json,application/json" className="hidden" aria-label="Файл правил для импорта" onChange={event => {
@@ -177,23 +182,25 @@ export function RoutingTable({
           {bulkOutbounds.map(out => <option key={out.tag} value={out.tag}>{out.label || out.tag}</option>)}
         </select>
         <Button size="sm" disabled={disabled || !bulkOutbounds.some(out => out.tag === bulkOutbound)} onClick={() => void onApplyOutbound?.(bulkOutbound)}>Применить к выбранным</Button>
-        <Button size="sm" variant="ghost" disabled={disabled} onClick={() => onSelectionChange?.([])}>Снять выбор</Button>
+        {onDeleteSelected && <Button size="sm" variant="destructive" disabled={disabled||deleting||!rules.some(rule=>selected.has(rule.id)&&canDelete(rule))} onClick={async()=>{if(deleting)return;setDeleting(true);try{const ids=rules.filter(rule=>selected.has(rule.id)&&canDelete(rule)).map(rule=>rule.id);if(await onDeleteSelected(ids))onSelectionChange?.([])}finally{setDeleting(false)}}}>{deleting?'Удаляем…':'Удалить выбранные'}</Button>}
+        <Button size="sm" variant="ghost" disabled={disabled||deleting} onClick={() => onSelectionChange?.([])}>Снять выбор</Button>
         <span className="text-muted-foreground text-xs">Можно также нажать карточку протокола.</span>
       </div>}
 
       {/* Таблица правил */}
-      <div className={cn('border-border bg-card overflow-x-auto rounded-xl border', disabled && 'opacity-45')} aria-disabled={disabled}>
-        <table className="w-full min-w-[980px] table-fixed text-base">
+      <div className={cn('border-border bg-card overflow-hidden rounded-xl border', disabled && 'opacity-45')} aria-disabled={disabled}>
+        <table className="routing-table text-ui">
+          <colgroup>{selectable&&<col style={{width:40}}/>}<col style={{width:56}}/><col style={{width:112}}/><col style={{width:100}}/><col style={{width:'14%'}}/><col style={{width:100}}/><col/><col style={{width:'22%'}}/></colgroup>
           <thead className="bg-input-background border-border border-b">
             <tr>
-              {selectable && <th className="w-10 px-3 py-3"><Checkbox className="border-ring/50 bg-input-background transition-colors hover:border-primary data-indeterminate:border-primary data-disabled:cursor-not-allowed data-disabled:opacity-40" aria-label="Выбрать все правила" disabled={disabled || !rules.length} checked={allSelected} indeterminate={selected.size > 0 && !allSelected} onCheckedChange={checked => onSelectionChange?.(checked ? rules.map(rule => rule.id) : [])} /></th>}
-              <th className="w-14 px-3 py-3 text-left font-medium">#</th>
-              <th className="w-22 px-3 py-3 text-left font-medium">Действия</th>
-              <th className="w-24 px-3 py-3 text-left font-medium">Включить</th>
-              <th className="w-40 px-3 py-3 text-left font-medium">Комментарий</th>
-              <th className="w-24 px-3 py-3 text-left font-medium">Сеть</th>
+              {selectable && <th className="px-3 py-3"><Checkbox className="border-ring/50 bg-input-background transition-colors hover:border-primary data-indeterminate:border-primary data-disabled:cursor-not-allowed data-disabled:opacity-40" aria-label="Выбрать все правила" disabled={disabled || !rules.length} checked={allSelected} indeterminate={selected.size > 0 && !allSelected} onCheckedChange={checked => onSelectionChange?.(checked ? rules.map(rule => rule.id) : [])} /></th>}
+              <th className="px-3 py-3 text-left font-medium">#</th>
+              <th className="px-3 py-3 text-left font-medium">Действия</th>
+              <th className="whitespace-nowrap px-2 py-3 text-left font-medium">Включить</th>
+              <th className="px-3 py-3 text-left font-medium">Комментарий</th>
+              <th className="px-3 py-3 text-left font-medium">Сеть</th>
               <th className="px-3 py-3 text-left font-medium">Пункт назначения</th>
-              <th className="w-52 px-3 py-3 text-left font-medium">Исходящие</th>
+              <th className="px-3 py-3 text-left font-medium">Исходящие</th>
             </tr>
           </thead>
           <tbody>
@@ -224,14 +231,14 @@ export function RoutingTable({
                     setDraggedIndex(null)
                   }}
                 >
-                  {selectable && <td className="px-3 py-3"><Checkbox className="border-ring/50 bg-input-background transition-colors hover:border-primary data-disabled:cursor-not-allowed data-disabled:opacity-40" aria-label={`Выбрать ${rule.description || rule.id}`} disabled={disabled} checked={selected.has(rule.id)} onCheckedChange={checked => onSelectionChange?.(checked ? [...selected, rule.id] : [...selected].filter(id => id !== rule.id))} /></td>}
-                  <td className="px-3 py-3">
+                  {selectable && <td data-label="Выбрать" className="px-3 py-3"><Checkbox className="border-ring/50 bg-input-background transition-colors hover:border-primary data-disabled:cursor-not-allowed data-disabled:opacity-40" aria-label={`Выбрать ${rule.description || rule.id}`} disabled={disabled} checked={selected.has(rule.id)} onCheckedChange={checked => onSelectionChange?.(checked ? [...selected, rule.id] : [...selected].filter(id => id !== rule.id))} /></td>}
+                  <td data-label="#" className="px-3 py-3">
                     <div className="flex items-center gap-1.5">
                       <IconGripVertical className={cn('text-muted-foreground size-4', canReorder(rule) ? 'cursor-grab' : 'opacity-30')} />
-                      <span className="text-muted-foreground text-sm">{index + 1}</span>
+                      <span className="text-muted-foreground text-ui">{index + 1}</span>
                     </div>
                   </td>
-                  <td className="px-3 py-3">
+                  <td data-label="Действия" className="px-3 py-3">
                     <div className="flex items-center gap-1">
                       <Button
                         size="icon-xs"
@@ -253,19 +260,19 @@ export function RoutingTable({
                       </Button>}
                     </div>
                   </td>
-                  <td className="px-3 py-3">
+                  <td data-label="Включить" className="px-3 py-3">
                     <Switch size="sm" checked={rule.enabled} disabled={disabled || !canToggle(rule)} onCheckedChange={() => onToggleEnabled(rule.id)} aria-label={`${rule.enabled ? 'Выключить' : 'Включить'} ${rule.description}`} />
                   </td>
-                  <td className="px-3 py-3">
+                  <td data-label="Комментарий" className="px-3 py-3">
                     <span className="text-foreground">{rule.description || '—'}</span>
                   </td>
-                  <td className="px-3 py-3">
-                    <span className="text-muted-foreground text-sm uppercase">
+                  <td data-label="Сеть" className="px-3 py-3">
+                    <span className="text-muted-foreground text-ui uppercase">
                       {rule.networkMixed ? 'Смешанная' : rule.network || 'tcp,udp'}
                     </span>
                   </td>
-                  <td className="px-3 py-3">
-                    <div className="text-muted-foreground flex flex-col gap-0.5 break-words text-sm">
+                  <td data-label="Пункт назначения" className="px-3 py-3">
+                    <div className="text-muted-foreground flex flex-col gap-0.5 break-words text-ui">
                       {rule.domain.length > 0 && (
                         <div>
                           <span className="text-foreground font-medium">Домены:</span>{' '}
@@ -283,10 +290,10 @@ export function RoutingTable({
                       {!rule.domain.length && !rule.ip.length && '—'}
                     </div>
                   </td>
-                  <td className="px-3 py-3">
+                  <td data-label="Исходящие" className="px-3 py-3">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-primary break-words text-sm font-medium">{outbounds.find(out => out.tag === rule.outboundTag)?.label || rule.outboundTag}</span>
-                      {onPing && outbounds.some(out => out.tag === rule.outboundTag) && <button type="button" className={cn('rounded px-1 text-[11px] tabular-nums hover:bg-primary/10', latencies[rule.outboundTag]?.ms !== undefined ? 'text-green-400' : latencies[rule.outboundTag]?.error ? 'text-red-400' : 'text-muted-foreground')} disabled={pingPending !== null} onClick={() => onPing(rule.outboundTag)} title={latencies[rule.outboundTag]?.error || 'Проверить задержку'} aria-label={`Пинг ${rule.outboundTag}`}>{pingPending === rule.outboundTag ? '…' : latencies[rule.outboundTag]?.ms !== undefined ? `${latencies[rule.outboundTag].ms} мс` : latencies[rule.outboundTag]?.error ? '✕' : 'Пинг'}</button>}
+                      <span className="text-foreground break-words text-ui font-medium"><ProtocolName name={outbounds.find(out => out.tag === rule.outboundTag)?.label || rule.outboundTag} tag={rule.outboundTag}/></span>
+                      {onPing && outbounds.some(out => out.tag === rule.outboundTag) && <button type="button" className={cn('rounded px-1 text-[11px] tabular-nums hover:bg-primary/10', latencyTone(latencies[rule.outboundTag]?.ms,latencies[rule.outboundTag]?.error))} disabled={pingPending !== null} onClick={() => onPing(rule.outboundTag)} title={latencies[rule.outboundTag]?.error || 'Проверить задержку'} aria-label={`Пинг ${rule.outboundTag}`}>{pingPending === rule.outboundTag ? '…' : latencies[rule.outboundTag]?.ms !== undefined ? `${latencies[rule.outboundTag].ms} мс` : latencies[rule.outboundTag]?.error ? '✕' : 'Пинг'}</button>}
                     </div>
                   </td>
                 </tr>
@@ -304,7 +311,7 @@ export function RoutingTable({
           </DialogHeader>
 
           {editingRule && (
-            <div className="space-y-4 text-base">
+            <div className="space-y-4 text-ui">
               {/* Включить */}
               {!deviceMode && <div className="flex items-center gap-2">
                 <label className="flex cursor-pointer items-center gap-2">
@@ -314,15 +321,15 @@ export function RoutingTable({
                     onCheckedChange={checked => updateEditingRule({ enabled: checked })}
                     className="border-ring/50 bg-input-background"
                   />
-                  <span className="text-base font-medium">Включить</span>
+                  <span className="text-ui font-medium">Включить</span>
                 </label>
               </div>}
 
               {/* Комментарий */}
               <div>
-                <label className="text-muted-foreground mb-1.5 block text-base">Комментарий</label>
+                <label className="text-muted-foreground mb-1.5 block text-ui">Комментарий</label>
                 <Input
-                  className="text-base"
+                  className="text-ui"
                   value={editingRule.description}
                   onChange={(e) => updateEditingRule({ description: e.target.value })}
                   disabled={deviceMode && !isAddingNew || !isAddingNew && !canEditDescription(editingRule)}
@@ -332,12 +339,12 @@ export function RoutingTable({
 
               {/* Сеть */}
               <div>
-                <label className="text-muted-foreground mb-1.5 block text-base">Сеть</label>
+                <label className="text-muted-foreground mb-1.5 block text-ui">Сеть</label>
                 <select
                   value={editingRule.networkMixed ? 'mixed' : editingRule.network}
                   disabled={!isAddingNew && !canEditResources(editingRule)}
                   onChange={(e) => updateEditingRule({ network: e.target.value as any, networkMixed: false })}
-                  className="bg-input-background hover:bg-input-background-hover border-input h-10 w-full rounded-md border px-2.5 text-base shadow-xs outline-none"
+                  className="bg-input-background hover:bg-input-background-hover border-input h-ui-control w-full rounded-md border px-2.5 text-ui shadow-xs outline-none"
                 >
                   <option value="">tcp,udp</option>
                   {editingRule.networkMixed && <option value="mixed" disabled>Смешанная — выберите сеть</option>}
@@ -349,7 +356,7 @@ export function RoutingTable({
 
               {/* Домены и IP: одна форма с адаптером ресурсов ядра. */}
               {renderResources ? renderResources(editingRule, updateEditingRule) : <><div>
-                <label className="text-muted-foreground mb-1.5 block text-base">Домен</label>
+                <label className="text-muted-foreground mb-1.5 block text-ui">Домен</label>
                 <div className="relative">
                   <Input
                     value={editingRule.domain.join(', ')}
@@ -362,7 +369,7 @@ export function RoutingTable({
                       })
                     }
                     placeholder="google.com, geosite:youtube"
-                    className="pr-10 text-base"
+                    className="pr-10 text-ui"
                   />
                   <button
                     type="button"
@@ -377,7 +384,7 @@ export function RoutingTable({
 
               {/* IP */}
               <div>
-                <label className="text-muted-foreground mb-1.5 block text-base">IP</label>
+                <label className="text-muted-foreground mb-1.5 block text-ui">IP</label>
                 <div className="relative">
                   <Input
                     value={editingRule.ip.join(', ')}
@@ -390,7 +397,7 @@ export function RoutingTable({
                       })
                     }
                     placeholder="0.0.0.0/8, geoip:cloudflare"
-                    className="pr-10 text-base"
+                    className="pr-10 text-ui"
                   />
                   <button
                     type="button"
@@ -406,14 +413,14 @@ export function RoutingTable({
               </>}
               {/* Тег исходящего */}
               <div>
-                <label className="text-muted-foreground mb-1.5 block text-base">
+                <label className="text-muted-foreground mb-1.5 block text-ui">
                   Исходящее подключение
                 </label>
                 <div className="flex items-center gap-2">
                 <select
                   value={editingRule.outboundTag}
                   onChange={(e) => updateEditingRule({ outboundTag: e.target.value })}
-                  className="bg-input-background hover:bg-input-background-hover border-input h-10 min-w-0 flex-1 rounded-md border px-2.5 text-base shadow-xs outline-none"
+                  className="bg-input-background hover:bg-input-background-hover border-input h-ui-control min-w-0 flex-1 rounded-md border px-2.5 text-ui shadow-xs outline-none"
                 >
                   <option value="" disabled>Выберите исходящее</option>
                   {outbounds.map((out) => (

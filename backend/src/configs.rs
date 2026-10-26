@@ -37,6 +37,12 @@ pub struct ConfigReq {
     pub(crate) content: String,
 }
 #[derive(Deserialize)]
+pub struct SaveConfigReq {
+    #[serde(flatten)]
+    config: ConfigReq,
+    previous_content: Option<String>,
+}
+#[derive(Deserialize)]
 pub struct XraySetupReq {
     content: String,
     subscription_url: Option<String>,
@@ -414,8 +420,10 @@ fn check_access(file: &str, state: &AppState) -> Result<bool, &'static str> {
 }
 
 pub async fn put_config(
-    State(state): State<AppState>, Query(params): Query<HashMap<String, String>>, Json(req): Json<ConfigReq>,
+    State(state): State<AppState>, Query(params): Query<HashMap<String, String>>, Json(save): Json<SaveConfigReq>,
 ) -> impl IntoResponse {
+    let _config_guard = state.app_config_lock.lock().await;
+    let req = save.config;
     let inactive_mihomo_config = params.get("core").is_some_and(|core| core == "mihomo")
         && params.get("validate").is_some_and(|core| core == "mihomo")
         && req.file == "/opt/etc/mihomo/config.yaml";
@@ -437,6 +445,12 @@ pub async fn put_config(
     } else {
         req.content
     };
+
+    if let Some(previous) = save.previous_content {
+        if tokio::fs::read_to_string(&req.file).await.ok().as_deref() != Some(previous.as_str()) {
+            return Json(ApiResponse::<()> { success: false, error: Some("Конфигурация уже изменилась. Обновите её перед сохранением".into()), data: None });
+        }
+    }
 
     if let Some(core_type) = params.get("validate") {
         let mut validate_files = Vec::new();
@@ -604,9 +618,11 @@ pub(crate) async fn validate_core(core: &str, files: &[ConfigReq]) -> Result<(),
         }
     };
 
-    let output = command.output().await;
+    command.kill_on_drop(true);
+    let output = tokio::time::timeout(std::time::Duration::from_secs(45), command.output()).await;
     _ = tokio::fs::remove_dir_all(&temp_dir).await;
 
+    let output = output.map_err(|_| format!("Проверка конфигурации {core} превысила 45 секунд. Проверьте доступность баз и подписок"))?;
     let output = output.map_err(|e| e.to_string())?;
     if output.status.success() {
         return Ok(());

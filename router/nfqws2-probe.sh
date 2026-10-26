@@ -92,12 +92,27 @@ build_args() {
 if [ "${1:-}" = cleanup ]; then cleanup; exit 0; fi
 HTTP_ONLY=0
 [ "${1:-}" != check-http ] || HTTP_ONLY=1
-[ "${1:-}" = check ] || [ "${1:-}" = check-http ] || { echo 'usage: nfqws2-probe.sh check preset|custom tcp|tcp-quic candidate-file' >&2; exit 2; }
+[ "${1:-}" = check ] || [ "${1:-}" = check-http ] || [ "${1:-}" = check-active ] || { echo 'usage: nfqws2-probe.sh check preset|custom tcp|tcp-quic candidate-file' >&2; exit 2; }
 case "${2:-}" in preset|custom) ;; *) exit 2 ;; esac
 case "${3:-}" in tcp|tcp-quic) ;; *) exit 2 ;; esac
 [ -x "$ENGINE" ] && [ -x "$PROBE" ] || { echo 'probe tools missing' >&2; exit 1; }
 ip route show default | grep -q "dev $WAN " || { echo 'WAN interface changed' >&2; exit 1; }
 "$IPT" -j NFQUEUE -h 2>&1 | grep -q -- --queue-bypass || exit 1
+
+# Live verification must never clean up or replace the running engine/rules.
+if [ "${1:-}" = check-active ]; then
+    MARK=832
+    "$ROOT/canary.sh" status | grep -q 'tcp global queue active' || { echo 'active queue missing' >&2; exit 1; }
+    if [ "$3" = tcp-quic ]; then
+        "$ROOT/canary.sh" status | grep -q 'udp global queue active' || { echo 'active QUIC queue missing' >&2; exit 1; }
+        protocol=both
+    else protocol=tcp; fi
+    timeout_seconds=${5:-6}
+    case "$timeout_seconds" in 2|3|4|5|6|7|8|9|10|11|12|13|14|15) ;; *) exit 2 ;; esac
+    trap 'rm -rf "$RESULTS"' EXIT HUP INT TERM
+    probe_sites "$protocol" "$timeout_seconds"
+    exit 0
+fi
 
 trap cleanup EXIT HUP INT TERM
 cleanup

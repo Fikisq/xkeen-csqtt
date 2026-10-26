@@ -34,6 +34,7 @@ NFQWS_STAGED_OWNED=false
 NFQWS_ROOT="/opt/etc/xkeen/nfqws2-stage"
 BOOTSTRAP_STAGED=
 FRESH_CORE=false
+FIRST_PANEL=false
 CORE_API_RESTART=false
 CORE_API_BACKUP=
 cleanup_download() {
@@ -127,6 +128,12 @@ prepare_core() {
     [ ! -f "$fragment" ] || mv "$fragment" "$initial_backup/" || exit 1
   done
   cp "$work/panel/00_config.json" /opt/etc/xray/configs/00_config.json || exit 1
+  # Seed the inactive core only when it has no configuration. Installing the
+  # panel must not import this router owner's routes or select another core.
+  if [ ! -e /opt/etc/mihomo/config.yaml ] && [ -s "$work/panel/mihomo-config.yaml" ]; then
+    mkdir -p /opt/etc/mihomo || exit 1
+    (umask 077; cp "$work/panel/mihomo-config.yaml" /opt/etc/mihomo/config.yaml) || exit 1
+  fi
   cp "$work/panel/S05xkeen" /opt/etc/init.d/S05xkeen || exit 1
   # Also repair older bootstrap bundles downloaded by a newer setup.sh.
   # Subscription nodes must be addable through the local API on first launch.
@@ -382,13 +389,84 @@ install_geodata() {
   fi
 }
 
+initialize_panel_storage() {
+  mkdir -p /opt/backups /opt/var/log/xray /opt/var/log/mihomo || exit 1
+  # Empty on first installation; updates preserve every existing log and archive.
+  local logfile
+  for logfile in /opt/var/log/xray/access.log /opt/var/log/xray/error.log /opt/var/log/mihomo/error.log \
+    /opt/var/log/xkeen-ui.log "$NFQWS_ROOT/nfqws2.log"; do
+    [ -d "$(dirname "$logfile")" ] || continue
+    if [ ! -e "$logfile" ]; then
+      (umask 077; set -C; : > "$logfile") || exit 1
+    fi
+  done
+}
+
+seed_mihomo_rulesets() {
+  [ "$FRESH_CORE" = true ] || return 0
+  local directory=/opt/etc/mihomo/ruleset name url temporary size signature
+  mkdir -p "$directory" || {
+    printf '\n Не удалось создать каталог дополнительных rule-set Mihomo; геобазы и основные правила доступны.\n' >&2
+    return 0
+  }
+  for name in metacubex-discord metacubex-telegram-ips; do
+    # Existing provider files are user data, even on a partial first install.
+    [ ! -e "$directory/$name.mrs" ] && [ ! -L "$directory/$name.mrs" ] || continue
+    case "$name" in
+      metacubex-discord) url=https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/discord.mrs ;;
+      metacubex-telegram-ips) url=https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/telegram.mrs ;;
+    esac
+    temporary=$(mktemp "$directory/.initial-mrs.XXXXXX") || continue
+    if curl -fLsS --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 60 \
+      --max-filesize 1048576 --retry 2 "$url" -o "$temporary"; then
+      size=$(wc -c < "$temporary" | tr -d '[:space:]')
+      # MRS is a Zstandard stream. Reject empty downloads and HTML/error pages;
+      # the core fully decodes the provider before using its rules.
+      signature=$(head -c 4 "$temporary" | od -b | awk 'NR == 1 { print $2 $3 $4 $5 }')
+      if [ "$size" -ge 16 ] && [ "$size" -le 1048576 ] && [ "$signature" = 050265057375 ]; then
+        chmod 644 "$temporary"
+        # Atomic same-filesystem publication with no replacement, including races.
+        ln "$temporary" "$directory/$name.mrs" && rm -f "$temporary" && continue
+      fi
+    fi
+    rm -f "$temporary"
+    printf '\n Дополнительный rule-set %s не загружен; Mihomo повторит загрузку при запуске. Основные правила используют геобазы.\n' "$name" >&2
+  done
+}
+
+create_initial_backup() {
+  [ "$FIRST_PANEL" = true ] || return 0
+  local archive="/opt/backups/initial-$(date +%Y%m%d-%H%M%S)_xkeen-ui.tar" file
+  set --
+  for file in /opt/etc/xray/configs/*.json /opt/etc/mihomo/*.yaml /opt/etc/mihomo/*.yml \
+    /opt/etc/mihomo/proxy_providers/*.yaml /opt/etc/mihomo/proxy_providers/*.yml \
+    /opt/etc/xkeen/*.json /opt/etc/xkeen/*.lst /opt/etc/xkeen/xray-subscription-url \
+    /opt/etc/xkeen/global_direct_xray.flag /opt/etc/xkeen/global_direct_mihomo.flag \
+    /opt/etc/csqtt/csqtt.conf /opt/etc/csqtt/vk_token \
+    /opt/etc/wdtt-plus/wdtt-plus.conf /opt/etc/wdtt-plus/password /opt/etc/wdtt-plus/device_id \
+    /opt/etc/wdtt-plus/vk_token /opt/etc/wdtt-plus/rt-masque-v1.json; do
+    [ ! -f "$file" ] || set -- "$@" "${file#/}"
+  done
+  [ "$#" -gt 0 ] || return 1
+  # Same configuration-only archive format as the panel. Preserve this router's
+  # own settings securely; never ship another router's backups in the release.
+  (umask 077; tar -hcf "$archive.new" -C / "$@") || exit 1
+  mv "$archive.new" "$archive" || exit 1
+}
+
 install_xkeenui() {
+  # Capture before replacing the executable: an existing XKeen core can still
+  # receive its first panel and needs an initial snapshot of its own settings.
+  if [ ! -e "$XKEENUI_BIN" ] && [ ! -e "$STATIC_DIR" ] && [ ! -e "$LIGHTTPD_CONF" ]; then
+    FIRST_PANEL=true
+  fi
   check_existing_core
   ensure_conntrack
   [ -f "/opt/tmp/xkeen-ui-$ARCH" ] && LOCAL=true
   download_files
   install_geodata
   prepare_core
+  seed_mihomo_rulesets
   install_nfqws2
   if [[ -d $STATIC_DIR || -f $XKEENUI_BIN || -f $XKEENUI_INIT || -f $LIGHTTPD_CONF ]]; then
     printf "${YELLOW}\n Обнаружены файлы XKeen UI, запуск переустановки...\n${NC}"
@@ -399,6 +477,8 @@ install_xkeenui() {
 
   install_prepared; create_xkeenui_init
   repair_existing_core
+  initialize_panel_storage
+  create_initial_backup
   "$XKEENUI_BIN" install-clients || {
     echo 'Панель установлена, но загрузка дополнительных клиентов не завершилась. Повторите команду или установите их кнопкой в панели.' >&2
     exit 1
@@ -448,6 +528,7 @@ update_xkeenui() {
 
   legacy_installation_check; install_prepared
   repair_existing_core
+  initialize_panel_storage
   "$XKEENUI_BIN" install-clients || exit 1
   start_required_core
 

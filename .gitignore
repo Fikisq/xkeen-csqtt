@@ -41,3 +41,21 @@ backend/assets/xray-api/*.gz
 *.njsproj
 *.sln
 *.sw?
+
+# Local build, audit and preview artifacts (keep outside this repository)
+*.tar
+*.tar.gz
+*.tar.xz
+*.zip
+*.exe
+*.pcap
+*.pcapng
+*.pem
+*.key
+*.dat
+*.mrs
+.env
+.env.*
+artifacts/
+router-assets/
+*-preview.html

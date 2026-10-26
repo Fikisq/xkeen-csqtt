@@ -11,7 +11,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ButtonGroup } from '@/components/ui/button-group'
-import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { UtilityPanel } from '@/components/configuration/UtilityPanel'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
@@ -22,10 +22,10 @@ import { Spinner } from '@/components/ui/spinner'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { apiCall } from '@/lib/api'
 import { useAppContext } from '@/lib/store'
-import { IconAlertTriangle, IconBox, IconBoxOff, IconChevronDown, IconPencil, IconPlus, IconRestore, IconTrash } from '@tabler/icons-react'
+import { IconAlertTriangle, IconInfoCircle, IconBox, IconBoxOff, IconChevronDown, IconPencil, IconPlus, IconRestore, IconTrash } from '@tabler/icons-react'
 import { useCallback, useEffect, useState, useRef } from 'react'
 
-type BackupContent = 'xkeen' | 'xkeen-ui' | 'xray' | 'mihomo'
+type BackupContent = 'xkeen' | 'xkeen-ui' | 'xray' | 'mihomo' | 'csqtt' | 'wdtt-plus'
 
 interface BackupItem {
   name: string
@@ -65,13 +65,17 @@ const CONTENT_LABELS: Record<BackupContent, string> = {
   'xkeen-ui': 'XKeen UI',
   xray: 'Xray',
   mihomo: 'Mihomo',
+  csqtt: 'CSQTT',
+  'wdtt-plus': 'WDTT Plus',
 }
 
-const CONTENT_VARIANTS: Record<BackupContent, 'sky' | 'emerald' | 'amber' | 'rose'> = {
+const CONTENT_VARIANTS: Record<BackupContent, 'sky' | 'emerald' | 'amber' | 'rose' | 'violet' | 'orange'> = {
   xkeen: 'sky',
   'xkeen-ui': 'rose',
   xray: 'emerald',
   mihomo: 'amber',
+  csqtt: 'violet',
+  'wdtt-plus': 'orange',
 }
 
 const BACKUP_SUFFIX = 'xkeen-ui.tar'
@@ -81,7 +85,13 @@ function stripBackupSuffix(name: string) {
   return name.endsWith(suffix) ? name.slice(0, -suffix.length) : name
 }
 
-const CONTENT_ORDER: BackupContent[] = ['xkeen', 'xkeen-ui', 'xray', 'mihomo']
+function backupDate(value: string) {
+  return value.replace(/^(\d{4})-(\d{2})-(\d{2})[ T_](\d{2})[:-](\d{2})[:-](\d{2})$/, '$3.$2.$1 $4:$5:$6')
+}
+
+function backupTitle(name: string) { return backupDate(stripBackupSuffix(name)) }
+
+const CONTENT_ORDER: BackupContent[] = ['xkeen', 'xkeen-ui', 'xray', 'mihomo', 'csqtt', 'wdtt-plus']
 const MAX_BACKUPS_TO_KEEP = 5
 const KEEP_LATEST_BACKUPS_KEY = 'backups:keepLatest'
 
@@ -90,6 +100,7 @@ export function BackupsModal({ open, onOpenChange, onRefreshConfigs, embedded = 
   const uploadRef = useRef<HTMLInputElement>(null)
 
   const [backups, setBackups] = useState<BackupItem[]>([])
+  const [selectedName, setSelectedName] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [pendingAction, setPendingAction] = useState<string | null>(null)
   const [keepLatestBackups, setKeepLatestBackups] = useState(() => localStorage.getItem(KEEP_LATEST_BACKUPS_KEY) === 'true')
@@ -260,15 +271,18 @@ export function BackupsModal({ open, onOpenChange, onRefreshConfigs, embedded = 
   }, [confirmAction, deleteBackup, restoreBackup])
 
   const activeDialogAction = dialogAction ?? confirmAction
+  const selectedBackup = backups.find(backup => backup.name === selectedName) ?? backups[0]
 
   return (
     <TooltipProvider>
-      <UtilityPanel embedded={embedded} open={open} onOpenChange={onOpenChange} title={<><IconBox size={24} className="text-chart-2" /> Резервные копии</>} description="Сохранение и восстановление настроек панели, XKeen, Xray и Mihomo. Геобазы и исполняемые файлы в архив не входят.">
+      <UtilityPanel embedded={embedded} open={open} onOpenChange={onOpenChange} title={<><IconBox size={24} className="text-chart-2" /> Резервные копии</>} description="Настройки панели, XKeen, Xray, Mihomo, CSQTT и WDTT Plus. Геобазы, логи и исполняемые файлы в архив не входят.">
 
 
+          <p className="text-muted-foreground flex items-center gap-2 text-xs"><IconInfoCircle size={16} />Архив содержит секреты подключений</p>
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" variant="outline" disabled={pendingAction !== null} onClick={() => uploadRef.current?.click()}>Загрузить архив с компьютера</Button>
-            <span className="text-muted-foreground text-xs">Архив содержит настройки и секреты подключений. Храните его в надёжном месте.</span>
+            <KeepLatestBackupsToggle id="keep-latest-backups" checked={keepLatestBackups} disabled={pendingAction !== null} onCheckedChange={setKeepLatestBackups} />
+            <Button className="ml-auto" size="sm" disabled={pendingAction !== null} onClick={() => void createBackup()}><IconPlus size={15} />Создать копию</Button>
             <input ref={uploadRef} type="file" accept=".tar" className="hidden" onChange={async (event) => {
               const file = event.target.files?.[0]; event.target.value = ''; if (!file) return
               setPendingAction('upload')
@@ -313,8 +327,13 @@ export function BackupsModal({ open, onOpenChange, onRefreshConfigs, embedded = 
                   </EmptyContent>
                 </Empty>
               ) : (
-                <div className="grid gap-3">
-                  {backups.map((backup) => {
+                <div className="backup-master space-y-3 md:space-y-0">
+                  <div className="space-y-2">{backups.map(backup => <button key={backup.name} type="button" aria-pressed={selectedBackup?.name === backup.name} onClick={() => setSelectedName(backup.name)} className={`w-full min-w-0 rounded-xl border px-5 py-5 text-left text-ui transition-colors ${selectedBackup?.name === backup.name ? 'border-primary bg-primary/10' : 'border-border bg-input-background hover:border-primary/50'}`}>
+                    <span className="flex items-start justify-between gap-3"><span className="text-lg font-medium tabular-nums">{backupTitle(backup.name)}</span><span className="text-muted-foreground shrink-0 text-xs">{formatBytes(backup.size)}</span></span>
+                    <span className="mt-3 flex flex-wrap gap-1.5 [&_[data-slot=badge]]:text-sm">{getBackupContents(backup).map(content => <Badge key={content} variant={CONTENT_VARIANTS[content]}>{CONTENT_LABELS[content]}</Badge>)}</span>
+                  </button>)}</div>
+                  <aside className="min-w-0">
+                  {backups.filter(backup => backup.name === selectedBackup?.name).map((backup) => {
                     const contents = getBackupContents(backup)
                     const isRestoring = pendingAction?.startsWith(`restore:${backup.name}:`) ?? false
                     const isDeleting = pendingAction === `delete:${backup.name}`
@@ -322,8 +341,9 @@ export function BackupsModal({ open, onOpenChange, onRefreshConfigs, embedded = 
                     const isRestoreDisabled = isBusy || isDeleting || contents.length === 0
 
                     return (
-                      <Card key={backup.name} size="sm">
-                        <CardHeader className="border-b">
+                      <Card key={backup.name} size="sm" className="bg-input-background border-border border ring-0 data-[size=sm]:gap-2">
+                        <div className="space-y-3 px-5 pt-5">
+                          <div className="text-muted-foreground flex items-center justify-between gap-2 text-xs"><span>Выбранная копия</span><Badge variant="outline">{formatBytes(backup.size)}</Badge></div>
                           {renamingName === backup.name ? (
                             <div className="flex items-center gap-2">
                               <input
@@ -340,8 +360,8 @@ export function BackupsModal({ open, onOpenChange, onRefreshConfigs, embedded = 
                               />
                             </div>
                           ) : (
-                            <div className="flex items-center gap-1">
-                              <CardTitle className="text-sm break-all sm:text-base">{stripBackupSuffix(backup.name)}</CardTitle>
+                            <div className="flex min-w-0 items-center gap-1">
+                              <span className="min-w-0 break-words text-lg font-medium tabular-nums">{backupTitle(backup.name)}</span>
                               {renamingName !== backup.name && (
                                 <TooltipProvider delayDuration={400}>
                                   <Tooltip>
@@ -363,13 +383,11 @@ export function BackupsModal({ open, onOpenChange, onRefreshConfigs, embedded = 
                               )}
                             </div>
                           )}
-                          <CardAction>
-                            <Badge variant="outline">{formatBytes(backup.size)}</Badge>
-                          </CardAction>
-                          <CardDescription className="text-xs">Создан: {backup.mtime} · время панели</CardDescription>
-                        </CardHeader>
+                          <p className="text-muted-foreground text-sm">Создан: {backupDate(backup.mtime)} · время панели</p>
+                        </div>
 
-                        <CardContent className="flex flex-wrap gap-1">
+                        <CardContent className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap gap-1">
                           {contents.length > 0 ? (
                             contents.map((content) => (
                               <ContentBadge key={content} content={content} files={backup.content?.[content] ?? []} />
@@ -377,9 +395,8 @@ export function BackupsModal({ open, onOpenChange, onRefreshConfigs, embedded = 
                           ) : (
                             <Badge variant="outline">Контент не найден</Badge>
                           )}
-                        </CardContent>
-
-                        <CardFooter className="justify-end gap-1">
+                          </div>
+                          <div className="flex flex-wrap justify-end gap-1">
                           <Button size="sm" variant="outline" disabled={pendingAction !== null} onClick={async () => {
                             setPendingAction('download')
                             try {
@@ -422,29 +439,17 @@ export function BackupsModal({ open, onOpenChange, onRefreshConfigs, embedded = 
                             {isDeleting ? <Spinner data-icon="inline-start" /> : <IconTrash data-icon="inline-start" />}
                             Удалить
                           </Button>
-                        </CardFooter>
+                          </div>
+                        </CardContent>
                       </Card>
                     )
                   })}
+                  </aside>
                 </div>
               )}
             </div>
           </ScrollArea>
 
-          {backups.length > 0 && (
-            <div className="flex flex-wrap items-center justify-end gap-3">
-              <KeepLatestBackupsToggle
-                id="keep-latest-backups"
-                checked={keepLatestBackups}
-                disabled={pendingAction !== null}
-                onCheckedChange={setKeepLatestBackups}
-              />
-              <Button onClick={() => void createBackup()} disabled={pendingAction !== null}>
-                {pendingAction === 'create' ? <Spinner data-icon="inline-start" /> : <IconPlus data-icon="inline-start" />}
-                Создать бэкап
-              </Button>
-            </div>
-          )}
       </UtilityPanel>
 
       <AlertDialog open={!!confirmAction} onOpenChange={(next) => !next}>

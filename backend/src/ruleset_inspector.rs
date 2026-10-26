@@ -69,10 +69,17 @@ pub async fn get_ruleset_files() -> Response {
                     "installed": metadata.as_ref().is_some_and(|m| m.is_file()), "size": metadata.map(|m| m.len()).unwrap_or(0)}));
             }
         }
-        Ok::<_, String>(files)
+        let mut geofiles = Vec::new();
+        for (name, kind, format) in [("geosite.dat", "domain", "dat"), ("geoip.dat", "ip", "dat"),
+            ("country.mmdb", "ip", "mmdb"), ("geoip.metadb", "ip", "mmdb"), ("ASN.mmdb", "asn", "mmdb")] {
+            let metadata = tokio::fs::metadata(format!("{MIHOMO_CONF_DIR}/{name}")).await.ok();
+            geofiles.push(serde_json::json!({"name":name, "kind":kind, "format":format,
+                "installed":metadata.as_ref().is_some_and(|m| m.is_file()), "size":metadata.map(|m| m.len()).unwrap_or(0)}));
+        }
+        Ok::<_, String>((files, geofiles, parsed["geodata-mode"].as_bool().unwrap_or(false)))
     }.await;
     match result {
-        Ok(files) => (StatusCode::OK, axum::Json(serde_json::json!({"success": true, "files": files}))).into_response(),
+        Ok((files, geofiles, geodata_mode)) => (StatusCode::OK, axum::Json(serde_json::json!({"success": true, "files": files, "geofiles": geofiles, "geodataMode":geodata_mode}))).into_response(),
         Err(error) => error_response(error),
     }
 }

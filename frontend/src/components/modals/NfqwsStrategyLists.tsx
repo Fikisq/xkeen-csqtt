@@ -116,7 +116,7 @@ export function NfqwsStrategyLists({ readOnly, active }: { readOnly: boolean; ac
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-2">
           {busy && !loaded && <p className="text-muted-foreground text-sm">Загрузка списков…</p>}
           {loaded && lists.length === 0 && <p className="text-muted-foreground rounded-xl border border-dashed p-6 text-center text-sm">Добавьте список или импортируйте JSON.</p>}
-          {lists.map((list, listIndex) => <section key={list.id} ref={element => { if (element) listElements.current.set(list.id, element); else listElements.current.delete(list.id) }} className="scroll-mt-2 space-y-3 rounded-xl border border-border bg-input-background p-3">
+          {lists.map((list, listIndex) => <section key={list.id} ref={element => { if (element) listElements.current.set(list.id, element); else listElements.current.delete(list.id) }} className="scroll-mt-2 space-y-3 rounded-xl border border-border bg-card p-3">
             <div className="flex items-center gap-3">
               <Checkbox aria-label={`Использовать список ${list.name}`} disabled={busy || readOnly} checked={list.enabled} onCheckedChange={value => editList(listIndex, { enabled: value === true })} />
               <Input aria-label="Название списка" className="font-semibold" maxLength={120} disabled={busy} readOnly={readOnly} value={list.name} onChange={event => editList(listIndex, { name: event.target.value })} />
@@ -125,7 +125,7 @@ export function NfqwsStrategyLists({ readOnly, active }: { readOnly: boolean; ac
             </div>
             <Button variant="outline" size="sm" disabled={busy || readOnly || lists.reduce((sum, item) => sum + item.entries.length, 0) >= 256} onClick={() => addEntry(listIndex)}><IconPlus className="size-4" />Добавить стратегию</Button>
             <div className="space-y-3">
-              {list.entries.map((entry, entryIndex) => <details key={entry.id} ref={element => { if (element) entryElements.current.set(entry.id, element); else entryElements.current.delete(entry.id) }} className="scroll-mt-2 rounded-lg border border-border/70 bg-input-background p-2.5">
+              {list.entries.map((entry, entryIndex) => <details key={entry.id} ref={element => { if (element) entryElements.current.set(entry.id, element); else entryElements.current.delete(entry.id) }} className="scroll-mt-2 rounded-lg border border-border/70 bg-card p-2.5">
                 <summary className="cursor-pointer text-sm font-medium">{entry.name || 'Без названия'}</summary>
                 <div className="mt-3 space-y-3">
                   <div className="flex gap-2"><Input aria-label="Название стратегии" maxLength={180} disabled={busy} readOnly={readOnly} value={entry.name} onChange={event => editEntry(listIndex, entryIndex, { name: event.target.value })} /><Button size="icon" variant="ghost" disabled={busy || readOnly} aria-label={`Удалить стратегию ${entry.name}`} onClick={() => editList(listIndex, { entries: list.entries.filter((_, i) => i !== entryIndex) })}><IconTrash className="size-4" /></Button></div>

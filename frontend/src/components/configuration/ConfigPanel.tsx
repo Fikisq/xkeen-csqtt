@@ -1,3 +1,4 @@
+import { addMissingMihomoStarterRoutes } from '@/lib/mihomoStarterRoutes'
 import { LogPanel } from '@/components/log/LogPanel'
 import { readSelections, withSelections } from '@/lib/mihomoRoutingBackup'
 import { Button } from '@/components/ui/button'
@@ -49,6 +50,7 @@ import type { CodeMirrorRef } from './CodeMirror'
 
 const ConnectionsPanel = lazyLoad(() => import('./mihomo/Connections'), 'ConnectionsPanel')
 const GeoFilesPanel = lazyLoad(() => import('../modals/GeoScan'), 'GeoScanModal')
+const AutoSwitchPanel = lazyLoad(() => import('./AutoSwitchPanel'), 'AutoSwitchPanel')
 const BackupsModal = lazyLoad(() => import('../modals/Backups'), 'BackupsModal')
 const SelectorsPanel = lazyLoad(() => import('./mihomo/Selectors'), 'SelectorsPanel')
 const XrayGlobalRoutingTable = lazyLoad(() => import('./xray/XrayGlobalRoutingTable'), 'XrayGlobalRoutingTable')
@@ -288,7 +290,7 @@ export function ConfigPanel({ onOpenTemplate, onRefreshConfigs, editorRef, confi
 
   const [, setIsEditorMounted] = useState(false)
 
-  const [activePanel, setActivePanel] = useState<'selectors' | 'connections' | 'config' | 'backups' | 'geofiles'>('selectors')
+  const [activePanel, setActivePanel] = useState<'selectors' | 'connections' | 'config' | 'backups' | 'geofiles' | 'autoswitch'>('selectors')
   const [mountedPanels, setMountedPanels] = useState<Set<string>>(() => new Set(['selectors']))
   const [mode, setMode] = useState<ClashMode>('rule')
   const [routingDraft, setRoutingDraft] = useState<{ file: string; base: string; content: string; preserveOrder?: boolean } | null>(null)
@@ -304,7 +306,8 @@ export function ConfigPanel({ onOpenTemplate, onRefreshConfigs, editorRef, confi
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
   }, [routingDraft, routingAutoSaving])
-  const currentPanel = activePanel === 'backups' || activePanel === 'geofiles' ? activePanel : isRunning ? currentCore === 'xray' && activePanel === 'connections' ? 'selectors' : activePanel : 'config'
+  const navigationTabClass = 'h-ui-control flex-none rounded-lg border-transparent bg-transparent px-3 py-2 text-sm font-semibold md:text-[17px] text-muted-foreground hover:bg-muted/50 hover:text-foreground data-[state=active]:border-transparent! data-[state=active]:bg-primary! data-[state=active]:text-primary-foreground! data-[state=active]:shadow-sm after:hidden'
+  const currentPanel = activePanel === 'backups' || activePanel === 'geofiles' || activePanel === 'autoswitch' ? activePanel : isRunning ? currentCore === 'xray' && activePanel === 'connections' ? 'selectors' : activePanel : 'config'
 
   useEffect(() => {
     setActivePanel('selectors')
@@ -464,6 +467,29 @@ export function ConfigPanel({ onOpenTemplate, onRefreshConfigs, editorRef, confi
     return nextConfigs
   }, [activeConfigFile, loadConfigIntoEditor, onRefreshConfigs, saveViewState])
 
+  const autoSwitchRevision = useRef<number | null>(null)
+  useEffect(() => {
+    let disposed = false
+    let busy = false
+    const check = async () => {
+      if (busy) return
+      busy = true
+      try {
+        const data = await apiCall<{success: boolean; revision: number}>('GET', 'autoswitch', undefined, {timeoutMs: 5000})
+        if (disposed || !data.success) return
+        if (autoSwitchRevision.current === null) autoSwitchRevision.current = data.revision
+        if (data.revision !== autoSwitchRevision.current && !routingDraft && !routingAutoSaving && !configsRef.current.some(config => config.isDirty)) {
+          await refreshConfigsAndEditor()
+          autoSwitchRevision.current = data.revision
+        }
+      } catch { /* Keep unsaved editor contents when the router is unavailable. */ }
+      finally { busy = false }
+    }
+    void check()
+    const timer = setInterval(() => void check(), 5000)
+    return () => { disposed = true; clearInterval(timer) }
+  }, [refreshConfigsAndEditor, routingDraft, routingAutoSaving])
+
   const switchTab = useCallback(
     (index: number) => {
       if (index === activeIndexRef.current) return
@@ -488,7 +514,7 @@ export function ConfigPanel({ onOpenTemplate, onRefreshConfigs, editorRef, confi
     if (!content.trim()) return showToast('Конфигурация пустая', 'error')
     if (!editorRef.current.isValid(cfg.file)) return showToast('Файл содержит ошибки', 'error')
 
-    const result = await apiCall<{ success: boolean; error?: string }>('PUT', 'configs', { file: cfg.file, content })
+    const result = await apiCall<{ success: boolean; error?: string }>('PUT', 'configs', { file: cfg.file, content, previous_content: cfg.savedContent })
     if (result.success) {
       editorRef.current.setSavedContent(content)
       dispatch({ type: 'SAVE_CONFIG', index: activeIndexRef.current, content })
@@ -518,7 +544,7 @@ export function ConfigPanel({ onOpenTemplate, onRefreshConfigs, editorRef, confi
       }
     }
 
-    const saveResult = await apiCall<{ success: boolean; error?: string }>('PUT', url, { file: cfg.file, content })
+    const saveResult = await apiCall<{ success: boolean; error?: string }>('PUT', url, { file: cfg.file, content, previous_content: cfg.savedContent })
     if (!saveResult.success) {
       dispatch({ type: 'SET_SERVICE_STATUS', status: isRunning ? 'running' : 'stopped' })
       return showToast(
@@ -556,7 +582,7 @@ export function ConfigPanel({ onOpenTemplate, onRefreshConfigs, editorRef, confi
   const xraySelectorsConfig = currentCore === 'xray' ? coreConfigs.find((config) => {
     try {
       const parsed = parseJsonc(config.savedContent)
-      return Array.isArray(parsed?.routing?.rules) && parsed.routing.rules.some((rule: any) => rule.ruleTag === 'VPN')
+      return Array.isArray(parsed?.routing?.rules) && parsed.routing.rules.some((rule: RoutingRule) => baseRuleTag(rule) === 'VPN')
     } catch { return false }
   }) : undefined
   const hasXraySelectors = !!xraySelectorsConfig
@@ -794,7 +820,7 @@ export function ConfigPanel({ onOpenTemplate, onRefreshConfigs, editorRef, confi
     try {
       const fresh = await apiCall<{configs: Array<{file: string; content: string}>}>('GET', 'configs?core=mihomo')
       if (fresh.configs.find(c => c.file === mihomoConfig.file)?.content !== draft.base) throw new Error('Конфигурация уже изменилась. Загрузите актуальные настройки и повторите действие')
-      const put = await apiCall<{success: boolean; error?: string}>('PUT', 'configs?core=mihomo&validate=mihomo', {file: mihomoConfig.file, content: draft.content})
+      const put = await apiCall<{success: boolean; error?: string}>('PUT', 'configs?core=mihomo&validate=mihomo', {file: mihomoConfig.file, content: draft.content, previous_content: draft.base})
       if (!put.success) throw new Error(put.error || 'Проверка Mihomo не пройдена')
       saved = true
       const warning = await applyRuntime(draft.content, readSelections(draft.content))
@@ -815,7 +841,7 @@ export function ConfigPanel({ onOpenTemplate, onRefreshConfigs, editorRef, confi
       return true
     } catch (error) {
       if (saved) {
-        const rollback = await apiCall<{success: boolean}>('PUT', 'configs?core=mihomo&validate=mihomo', {file: mihomoConfig.file, content: mihomoConfig.savedContent}).catch(() => null)
+        const rollback = await apiCall<{success: boolean}>('PUT', 'configs?core=mihomo&validate=mihomo', {file: mihomoConfig.file, content: mihomoConfig.savedContent, previous_content: draft.content}).catch(() => null)
         if (rollback?.success) await applyRuntime(mihomoConfig.savedContent, previousChoices).catch(() => showToast('Не удалось полностью восстановить настройки после ошибки', 'error'))
       }
       showToast(error instanceof Error ? error.message : 'Ошибка применения Mihomo', 'error')
@@ -882,8 +908,9 @@ export function ConfigPanel({ onOpenTemplate, onRefreshConfigs, editorRef, confi
     }, 'Правила импортированы')
   }
 
-  async function removeMihomoRoute(tag: string): Promise<boolean> {
-    return editMihomoCustomRoute((content) => removeMihomoRouteDefinition(content, tag), 'Маршрут удалён')
+  async function removeMihomoRoute(tag: string | string[]): Promise<boolean> {
+    const tags=(Array.isArray(tag)?tag:[tag]).filter(value=>value!=='VPN')
+    return editMihomoCustomRoute((content) => tags.reduce((current,value)=>removeMihomoRouteDefinition(current,value),content), 'Маршруты удалены')
   }
 
   async function reorderMihomoRoute(source: RouteTag, target: RouteTag): Promise<boolean> {
@@ -920,10 +947,10 @@ export function ConfigPanel({ onOpenTemplate, onRefreshConfigs, editorRef, confi
     <TooltipProvider delayDuration={500}>
       <>
         <div className="border-border bg-card flex flex-col overflow-hidden rounded-xl border md:min-h-0 md:flex-1">
-          <div className={cn('flex shrink-0 flex-col gap-2 px-3 pt-3 sm:px-4 sm:pt-4 md:flex-row md:items-start')}>
-            <div className="flex min-w-0 shrink-0 items-center gap-2">
+          <div className={cn('flex shrink-0 flex-col gap-2 px-3 pt-3 pb-4 sm:px-4 sm:pt-4 sm:pb-5 md:flex-row md:items-start')}>
+            <div className="flex min-w-0 flex-1 items-center gap-2">
               {(
-                <div className="min-w-0 scrollbar-none overflow-x-auto md:overflow-x-visible [&::-webkit-scrollbar]:hidden">
+                <div className="min-w-0 w-full">
                   <Tabs
                     value={currentPanel}
                     onValueChange={(value) => {
@@ -931,22 +958,23 @@ export function ConfigPanel({ onOpenTemplate, onRefreshConfigs, editorRef, confi
                       setActivePanel(panel)
                       setMountedPanels((prev) => (prev.has(panel) ? prev : new Set([...prev, panel])))
                     }}
-                    className="w-max flex-row!"
+                    className="min-w-0 w-full flex-row!"
                   >
-                    <TabsList variant="line" className="mb-2 w-max shrink-0 gap-3 p-0 whitespace-nowrap md:mb-0">
-                      <TabsTrigger value="selectors" className="p-0 text-sm font-semibold md:text-lg" disabled={!isRunning}>
+                    <TabsList aria-label="Разделы панели" className="h-auto! w-fit max-w-full flex-wrap justify-start gap-1 rounded-xl border border-border/50 bg-input-background p-1.5">
+                      <TabsTrigger value="selectors" className={navigationTabClass} disabled={!isRunning}>
                         Маршрутизация
                       </TabsTrigger>
                       {isMihomo && (
-                        <TabsTrigger value="connections" className="p-0 text-sm font-semibold md:text-lg" disabled={!isRunning}>
+                        <TabsTrigger value="connections" className={navigationTabClass} disabled={!isRunning}>
                           Соединения
                         </TabsTrigger>
                       )}
-                      <TabsTrigger value="config" className="p-0 text-sm font-semibold md:text-lg" disabled={routingAutoSaving}>
+                      <TabsTrigger value="autoswitch" className={navigationTabClass}>Автопереключение</TabsTrigger>
+                      <TabsTrigger value="backups" className={navigationTabClass}>Резервные копии</TabsTrigger>
+                      <TabsTrigger value="geofiles" className={navigationTabClass}>Геофайлы</TabsTrigger>
+                      <TabsTrigger value="config" className={navigationTabClass} disabled={routingAutoSaving}>
                         Конфигурация
                       </TabsTrigger>
-                      <TabsTrigger value="backups" className="p-0 text-sm font-semibold md:text-lg">Резервные копии</TabsTrigger>
-                      <TabsTrigger value="geofiles" className="p-0 text-sm font-semibold md:text-lg">Геофайлы</TabsTrigger>
                     </TabsList>
                   </Tabs>
                 </div>
@@ -1026,11 +1054,12 @@ export function ConfigPanel({ onOpenTemplate, onRefreshConfigs, editorRef, confi
                 )}
               </div>
             )}
-            {xrayMigrationConfig && <Button variant="outline" className="text-[13px]" onClick={() => void applyXrayRoutingEdit(xrayMigrationConfig.file, enableXrayRoutingCards, 'Карточки Xray и маршрутизация для IP включены', true)}>Включить карточки Xray</Button>}
+            {xrayMigrationConfig && currentPanel === 'selectors' && <Button variant="outline" className="text-[13px]" onClick={() => void applyXrayRoutingEdit(xrayMigrationConfig.file, enableXrayRoutingCards, 'Карточки Xray и маршрутизация для IP включены', true)}>Включить карточки Xray</Button>}
           </div>
 
           {currentPanel === 'backups' && <LazyBoundary><BackupsModal embedded open onOpenChange={() => {}} onRefreshConfigs={refreshConfigsAndEditor} /></LazyBoundary>}
           {currentPanel === 'geofiles' && <LazyBoundary><GeoFilesPanel embedded /></LazyBoundary>}
+          {currentPanel === 'autoswitch' && <LazyBoundary><AutoSwitchPanel /></LazyBoundary>}
           <div className={cn('relative', currentPanel !== 'config' ? '' : 'min-h-175! md:min-h-0 md:flex-1')}>
             {isMihomo && (
               <>
@@ -1052,6 +1081,7 @@ export function ConfigPanel({ onOpenTemplate, onRefreshConfigs, editorRef, confi
                         onBulkOutbound={bulkMihomoOutbound}
                         onImportRoutes={importMihomoRoutes}
                         onRemoveRoute={removeMihomoRoute}
+                        onAddStarterRoutes={() => editMihomoCustomRoute(addMissingMihomoStarterRoutes, 'Добавлены недостающие стандартные правила')}
                         onReorderRoute={reorderMihomoRoute}
                         onToggleRoute={toggleMihomoRoute}
                       />

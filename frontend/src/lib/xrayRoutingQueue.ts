@@ -1,5 +1,5 @@
 import { applyEdits, modify, parse as parseJsonc } from 'jsonc-parser'
-import { baseRuleTag, normalizeDevicePriority, type RoutingRule } from './xrayDeviceRouting'
+import { baseRuleTag, normalizeDevicePriority, type RoutingRule } from './xrayDeviceRouting.ts'
 
 export function rebaseXrayRouting(previous: string, desired: string, latest: string): string {
   const before: RoutingRule[] = parseJsonc(previous)?.routing?.rules

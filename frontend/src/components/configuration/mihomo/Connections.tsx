@@ -1238,7 +1238,7 @@ export function ConnectionsPanel({ clashApiPort, clashApiSecret, clashApiUnix }:
 
   return (
     <TooltipProvider delayDuration={500} skipDelayDuration={0}>
-      <div className="border-border bg-input-background absolute inset-4 flex flex-col overflow-hidden rounded-xl border">
+      <div className="border-border bg-input-background relative m-3 flex h-[65vh] min-h-80 flex-col overflow-hidden rounded-xl border">
         <ConnectionsHeader
           filter={filter}
           activeTab={activeTab}
@@ -1249,7 +1249,7 @@ export function ConnectionsPanel({ clashApiPort, clashApiSecret, clashApiUnix }:
           caseSensitive={caseSensitive}
           onToggleCaseSensitive={toggleCaseSensitive}
         />
-        <div className="flex-1 scrollbar-thin overflow-auto">
+        <div className="min-h-0 flex-1 scrollbar-thin overflow-auto">
           <Table className="min-w-240 md:min-w-190">
             <ConnectionsTableHead sortColumn={sortColumn} sortDirection={sortDirection} onSort={toggleSort} />
             {activeTab === 'active' ? (

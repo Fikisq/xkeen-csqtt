@@ -19,6 +19,7 @@ mod wdtt_plus;
 mod frontend_embedder;
 mod geo;
 mod geodata_update;
+mod autoswitch;
 mod logger;
 mod log_retention;
 mod log_sources;
@@ -485,6 +486,7 @@ async fn main() {
     }
     panel_releases::start(state.clone());
     geodata_update::start(state.clone());
+    autoswitch::start(state.clone());
     nfqws2::start_reconciler();
     csqtt_health::start();
     xray_routes::warm_after_start(state.clone());
@@ -520,6 +522,9 @@ async fn main() {
                 .patch(configs::patch_config),
         )
         .route("/api/xray-config", get(configs::get_xray_setup).put(configs::put_xray_setup))
+        .route("/api/autoswitch", get(autoswitch::get_settings).put(autoswitch::save_settings))
+        .route("/api/autoswitch/check", post(autoswitch::check))
+        .route("/api/autoswitch/restore", post(autoswitch::restore))
         .route("/api/subscription/preview", post(subscription::preview_subscription))
         .route("/api/xray/subscription-refresh-check", get(xray_subscription_refresh::dry_run))
     .route("/api/csqtt/status", get(csqtt::status))

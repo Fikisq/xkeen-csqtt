@@ -71,7 +71,7 @@ async fn sync_global_firewall(core: &str, enabled: bool) -> Result<(), String> {
     Ok(())
 }
 
-async fn set_global_direct(core: &str, enabled: bool) -> Result<bool, String> {
+pub(crate) async fn set_global_direct(core: &str, enabled: bool) -> Result<bool, String> {
     let init = fs::read_to_string("/opt/etc/init.d/S05xkeen").await.map_err(|e| e.to_string())?;
     if !init.contains("global_direct_${name_client}.flag") {
         return Err("Скрипт XKeen не поддерживает постоянный полный обход; настройка не применена".into())
@@ -104,7 +104,7 @@ pub async fn mihomo_global_direct(State(state): State<AppState>, Json(request): 
 }
 
 #[derive(Deserialize)]
-pub struct MihomoDevicesRequest { ips: Vec<Ipv4Addr> }
+pub struct MihomoDevicesRequest { pub(crate) ips: Vec<Ipv4Addr> }
 
 pub async fn mihomo_devices(State(state): State<AppState>, Json(request): Json<MihomoDevicesRequest>) -> Json<Value> {
     if state.core.read().unwrap().name != "mihomo" {

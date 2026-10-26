@@ -5,6 +5,11 @@ allow-lan: true
 mode: rule
 log-level: warning
 ipv6: false
+geodata-mode: true
+geodata-loader: memconservative
+# The panel refreshes shared GeoSite/GeoIP databases without duplicating flash storage.
+geo-auto-update: false
+geo-update-interval: 24
 routing-mark: 255
 external-controller-unix: /opt/etc/mihomo/mihomo-api.sock
 profile:
@@ -24,7 +29,43 @@ proxies:
     port: 1088
     udp: true
 proxy-providers:
+rule-providers:
+  metacubex-discord:
+    type: http
+    behavior: domain
+    format: mrs
+    url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/discord.mrs
+    path: ./ruleset/metacubex-discord.mrs
+    interval: 86400
+  metacubex-telegram-ips:
+    type: http
+    behavior: ipcidr
+    format: mrs
+    url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/telegram.mrs
+    path: ./ruleset/metacubex-telegram-ips.mrs
+    interval: 86400
 proxy-groups:
+  - name: Discord
+    type: select
+    proxies: [DIRECT, VPN, CSQTT, WDTT Plus, nfqws2 · zapret2]
+  - name: Игры
+    type: select
+    proxies: [DIRECT, VPN, CSQTT, WDTT Plus, nfqws2 · zapret2]
+  - name: GitHub
+    type: select
+    proxies: [DIRECT, VPN, CSQTT, WDTT Plus, nfqws2 · zapret2]
+  - name: Реклама
+    type: select
+    proxies: [REJECT, DIRECT, VPN, CSQTT, WDTT Plus, nfqws2 · zapret2]
+  - name: YouTube
+    type: select
+    proxies: [DIRECT, VPN, CSQTT, WDTT Plus, nfqws2 · zapret2]
+  - name: AI
+    type: select
+    proxies: [DIRECT, VPN, CSQTT, WDTT Plus, nfqws2 · zapret2]
+  - name: RU
+    type: select
+    proxies: [DIRECT, VPN, CSQTT, WDTT Plus, nfqws2 · zapret2]
   - name: VPN
     type: select
     proxies: [DIRECT, CSQTT, WDTT Plus, nfqws2 · zapret2]
@@ -33,4 +74,16 @@ rules:
   - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
   - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
   - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - GEOSITE,discord,Discord
+  - GEOSITE,category-games,Игры
+  - GEOSITE,github,GitHub
+  # xkeen-custom-route %7B%22tag%22%3A%22custom%3A%D0%A0%D0%B5%D0%BA%D0%BB%D0%B0%D0%BC%D0%B0%22%2C%22name%22%3A%22%D0%A0%D0%B5%D0%BA%D0%BB%D0%B0%D0%BC%D0%B0%22%2C%22domains%22%3A%5B%22geosite%3Acategory-ads-all%22%5D%7D
+  - GEOSITE,category-ads-all,Реклама
+  - GEOSITE,youtube,YouTube
+  - GEOSITE,openai,AI
+  - GEOSITE,anthropic,AI
+  - GEOSITE,google-gemini,AI
+  - GEOSITE,perplexity,AI
+  - GEOSITE,category-ru,RU
+  - GEOIP,ru,RU,no-resolve
   - MATCH,VPN

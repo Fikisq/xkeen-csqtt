@@ -196,7 +196,7 @@ export function StatusBar({
           </div>
         </div>
 
-        <div className="order-1 flex items-center justify-center md:absolute md:left-1/2 md:order-2 md:-translate-x-1/2">
+        <div className="order-1 flex items-center justify-center md:order-2 xl:absolute xl:left-1/2 xl:-translate-x-1/2">
           <a
             href="https://github.com/zxc-rv/XKeen-UI"
             target="_blank"
@@ -211,7 +211,7 @@ export function StatusBar({
           </a>
         </div>
 
-        <div className="order-3 ml-auto flex w-full items-center justify-center gap-1.5 md:w-auto md:justify-end">
+        <div className="order-3 ml-auto flex w-full flex-wrap items-center justify-center gap-1.5 md:w-auto md:justify-end">
           {isConfigsLoading || !version ? (
             <Skeleton className="h-9 w-35.75" />
           ) : (
@@ -219,9 +219,9 @@ export function StatusBar({
               <TooltipTrigger render={
                 <Button variant="outline" onClick={onOpenCoreManage}>
                   <IconCpu data-icon="inline-start" className="size-4.5" />
-                  <span className="text-[13px]">{capitalize(currentCore)}</span>
+                  <span className="text-ui">{capitalize(currentCore)}</span>
                   {coreVersions[currentCore] && (
-                    <span className="text-muted-foreground/60 mt-0.5 text-xs">{coreVersions[currentCore]}</span>
+                    <span className="text-muted-foreground text-ui font-normal">{coreVersions[currentCore]}</span>
                   )}
                   {isOutdatedCore && (
                     <span className="relative mb-3 -ml-0.75 flex">
@@ -236,22 +236,22 @@ export function StatusBar({
           )}
           {!isConfigsLoading && version && (
             <Tooltip>
-              <TooltipTrigger render={<Button variant="outline" onClick={() => onOpenUpdate(currentCore)} aria-label={`Версии ${capitalize(currentCore)}`}><IconDownload className="size-4" /><span className="hidden text-xs sm:inline">Версии</span></Button>} />
+              <TooltipTrigger render={<Button variant="outline" onClick={() => onOpenUpdate(currentCore)} aria-label={`Версии ${capitalize(currentCore)}`}><IconDownload className="size-4" /><span className="hidden text-ui sm:inline">Версии</span></Button>} />
               <TooltipContent>Установить или обновить {capitalize(currentCore)}</TooltipContent>
             </Tooltip>
           )}
           {!isConfigsLoading && version && <Tooltip>
             <TooltipTrigger render={<Button variant="outline" className="relative" onClick={() => setPanelReleasesOpen(true)} aria-label={`Версии панели, установлена ${version}${hasNewPanelRelease ? ', доступен новый стабильный релиз' : ''}`}>
               <IconDownload className="size-4" />
-              <span className="hidden text-[13px] sm:inline">Панель</span>
-              <span className="text-muted-foreground/60 mt-0.5 text-xs">v{version.replace(/^v/, '')}</span>
+              <span className="hidden text-ui sm:inline">Панель</span>
+              <span className="text-muted-foreground text-ui font-normal">v{version.replace(/^v/, '')}</span>
               {hasNewPanelRelease && <span className="pointer-events-none absolute -right-1.5 -top-2 rounded border border-amber-400/40 bg-amber-100 px-1 text-[9px] font-bold leading-3.5 text-amber-800 dark:bg-amber-950 dark:text-amber-300">NEW</span>}
             </Button>} />
             <TooltipContent>{hasNewPanelRelease ? 'Доступен новый стабильный релиз панели' : 'Релизы и предварительные версии панели'}</TooltipContent>
           </Tooltip>}
           {panelReleasesOpen && <LazyBoundary><PanelReleases open={panelReleasesOpen} onClose={() => setPanelReleasesOpen(false)} version={version} /></LazyBoundary>}
           <Tooltip>
-            <TooltipTrigger render={<Button variant="outline" onClick={() => setTerminalOpen(true)} aria-label="Консоль Entware"><IconTerminal2 className="size-4" /><span className="hidden text-xs sm:inline">Консоль</span></Button>} />
+            <TooltipTrigger render={<Button variant="outline" onClick={() => setTerminalOpen(true)} aria-label="Консоль Entware"><IconTerminal2 className="size-4" /><span className="hidden text-ui sm:inline">Консоль</span></Button>} />
             <TooltipContent>Консоль Entware</TooltipContent>
           </Tooltip>
           {terminalOpen && <LazyBoundary><EntwareTerminal onClose={() => setTerminalOpen(false)} /></LazyBoundary>}

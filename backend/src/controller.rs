@@ -69,20 +69,17 @@ pub(crate) async fn resolve_init_file(state: &AppState) -> Result<String, String
 
 pub async fn run_init_command(state: &AppState, args: &[&str]) -> Result<(), String> {
     let path = resolve_init_file(state).await?;
-    let result = if let Ok(f) = std::fs::OpenOptions::new()
+    let mut command = Command::new(&path);
+    command.args(args).stdin(std::process::Stdio::null()).kill_on_drop(true);
+    if let Ok(f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(error_log_path())
     {
-        Command::new(&path)
-            .args(args)
-            .stdout(f.try_clone().unwrap())
-            .stderr(f)
-            .status()
-            .await
-    } else {
-        Command::new(&path).args(args).status().await
-    };
+        command.stdout(f.try_clone().map_err(|e| e.to_string())?).stderr(f);
+    }
+    let result = tokio::time::timeout(std::time::Duration::from_secs(60), command.status()).await
+        .map_err(|_| format!("Команда XKeen «{}» превысила 60 секунд. Проверьте журнал службы", args.join(" ")))?;
     match result {
         Ok(status) if status.success() => Ok(()),
         Ok(status) => Err(format!("{} завершился с ошибкой: {}", path, status)),
@@ -395,6 +392,11 @@ pub async fn post_control(State(state): State<AppState>, Json(req): Json<Control
             }
 
             if let Err(e) = run_init_command(&state, &["start", "on"]).await {
+                // The init script may have started the new core before timing
+                // out in firewall setup. Stop it before restoring the old one.
+                if let Err(stop_error) = run_init_command(&state, &["stop"]).await {
+                    log("ERROR", format!("Не удалось остановить новое ядро при откате: {stop_error}"));
+                }
                 let restore_result = fs::write(&init_file, content).await;
                 *state.core.write().unwrap() = get_core_info(&old);
                 if let Err(restore_error) = restore_result {

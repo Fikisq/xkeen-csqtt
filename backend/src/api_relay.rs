@@ -1,7 +1,7 @@
 use axum::body::{Body, to_bytes};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{MatchedPath, Query, State};
-use axum::http::{HeaderMap, HeaderName, Request, StatusCode};
+use axum::http::{HeaderMap, HeaderName, Method, Request, StatusCode};
 use axum::response::{IntoResponse, Json, Response};
 use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use serde::Deserialize;
@@ -87,6 +87,12 @@ pub async fn proxy_http(State(state): State<AppState>, matched_path: MatchedPath
         Ok(b) => b,
         Err(e) => return make_error(StatusCode::BAD_GATEWAY, e.to_string()),
     };
+
+    // Preserve user selections made while the geodata updater reloads Mihomo:
+    // queue controller mutations behind that reload and its selection restore.
+    let controller_mutation = !matches!(parts.method, Method::GET | Method::HEAD | Method::OPTIONS)
+        && (path == "configs" || path.starts_with("configs/") || path.starts_with("proxies/") || path.starts_with("providers/"));
+    let _config_guard = if controller_mutation { Some(state.app_config_lock.lock().await) } else { None };
 
     match target {
         ClashTarget::Tcp { host, port, secret } => {

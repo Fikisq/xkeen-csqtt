@@ -13,12 +13,13 @@ function extractClashErrorMessage(bodyText: string): string {
   }
 }
 
-export async function apiCall<T = unknown>(method: string, endpoint: string, body?: unknown): Promise<T> {
+export async function apiCall<T = unknown>(method: string, endpoint: string, body?: unknown, options?: {timeoutMs: number}): Promise<T> {
   const isGet = method === 'GET'
   const res = await fetch(`/api/${endpoint}`, {
     method,
     headers: !isGet ? { 'Content-Type': 'application/json' } : {},
     body: !isGet ? JSON.stringify(body) : undefined,
+    signal: options ? AbortSignal.timeout(options.timeoutMs) : undefined,
   })
   return (await res.json()) as T
 }
@@ -26,9 +27,9 @@ export async function apiCall<T = unknown>(method: string, endpoint: string, bod
 export async function clashFetch<T = unknown>(
   port: string,
   path: string,
-  options?: { method?: string; secret?: string | null; body?: unknown; unix?: string | null; retry?: boolean }
+  options?: { method?: string; secret?: string | null; body?: unknown; unix?: string | null; retry?: boolean; timeoutMs?: number }
 ): Promise<T> {
-  const { method = 'GET', secret, body, unix, retry = true } = options ?? {}
+  const { method = 'GET', secret, body, unix, retry = true, timeoutMs } = options ?? {}
   const canRetry = retry && method === 'GET'
   const normalizedPath = path.replace(/^\/+/, '')
 
@@ -49,7 +50,7 @@ export async function clashFetch<T = unknown>(
   for (let attempt = 0; attempt <= maxAttempts; attempt++) {
     let res: Response
     try {
-      res = await fetch(`/clash/${normalizedPath}`, reqOptions)
+      res = await fetch(`/clash/${normalizedPath}`, { ...reqOptions, signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined })
     } catch (error) {
       if (attempt === maxAttempts) throw error
       await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]))

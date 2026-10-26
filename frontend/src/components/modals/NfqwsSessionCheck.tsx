@@ -62,12 +62,12 @@ export function NfqwsSessionCheck() {
             <label className="text-sm font-medium">IP устройства<Input className="mt-1" value={device} disabled={busy || session?.running} onChange={event => setDevice(event.target.value)} placeholder="192.168.1.100" inputMode="decimal" /></label>
             <label className="text-sm font-medium">Сервис<select className="bg-input-background border-border mt-1 h-9 w-full rounded-md border px-2 text-sm" value={service} disabled={busy || session?.running} onChange={event => setService(event.target.value)}><option value="roblox">Roblox</option><option value="discord">Голос Discord</option></select></label>
           </div>
-          <div className="rounded-xl border border-border/70 bg-input-background p-3 text-xs text-muted-foreground space-y-2">
+          <div className="rounded-xl border border-border/70 bg-card p-3 text-xs text-muted-foreground space-y-2">
             <p>1. Направьте проверяемый трафик устройства через nfqws2. Если он идёт внутри VPN, панель увидит соединение VPN. Не запускайте другие сетевые приложения во время наблюдения.</p>
             <p>2. Нажмите «Начать», затем подключитесь к игре Roblox или голосовому каналу Discord. Если приложение уже открыто — переподключитесь.</p>
             <p>3. После наблюдения подтвердите результат. Ответы в таблице показывают сетевой обмен и сами по себе не подтверждают загрузку игры или наличие звука.</p>
           </div>
-          {session?.id && <div className="rounded-xl border border-border/70 bg-input-background p-3 text-sm space-y-2">
+          {session?.id && <div className="rounded-xl border border-border/70 bg-card p-3 text-sm space-y-2">
             <p className="font-medium">{session.service === 'discord' ? 'Голос Discord' : 'Roblox'} · {session.deviceIp} · {session.running ? `осталось ${session.remainingSeconds} с` : session.reason === 'strategy-changed' ? 'Стратегия или процесс nfqws2 изменились — начните заново' : 'Наблюдение завершено'}</p>
             <p className="text-xs text-muted-foreground">Соединений замечено: {session.connectionCount || 0} · с ответами: {session.connectionsWithReplies || 0}. Выбранный сервис — метка проверки: приложение по одному порту не определяется.</p>
             {!session.gamesRulesEnabled && <p className="text-xs text-yellow-400">Дополнительные правила Roblox и голоса Discord сейчас не сохранены в стратегии.</p>}

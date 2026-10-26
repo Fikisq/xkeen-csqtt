@@ -14,6 +14,10 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime};
 use tokio::task;
 
+fn geo_directory(params: &HashMap<String, String>) -> &'static str {
+    if params.get("core").is_some_and(|core| core == "mihomo") { MIHOMO_CONF_DIR } else { XRAY_ASSET_DIR }
+}
+
 #[derive(Serialize, Clone)]
 pub struct GeoFilesResponse {
     site_files: Vec<String>,
@@ -74,6 +78,7 @@ fn decode_geo_record(mut data: &[u8], is_ip: bool) -> Option<GeoRecord> {
 }
 
 pub async fn get_geo_records(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+    let directory = geo_directory(&params);
     let file = params.get("file").cloned().unwrap_or_default();
     let kind = params.get("kind").cloned().unwrap_or_default();
     let category = params.get("category").cloned().unwrap_or_default();
@@ -85,7 +90,7 @@ pub async fn get_geo_records(Query(params): Query<HashMap<String, String>>) -> i
             || !["domain", "ip"].contains(&kind.as_str()) || category.is_empty() || category.len() > 100 || filter.len() > 200 {
             return Err("Некорректные параметры базы".into());
         }
-        let path = Path::new(XRAY_ASSET_DIR).join(file);
+        let path = Path::new(directory).join(file);
         if !std::fs::symlink_metadata(&path).map_err(|_| "База не установлена")?.file_type().is_file() {
             return Err("Нужен обычный файл базы".into());
         }
@@ -179,16 +184,20 @@ pub(crate) fn validate_uploaded_geo(data: &[u8], is_ip: bool) -> Result<(), Stri
 }
 
 pub async fn upload_geo(State(state): State<AppState>, Query(params): Query<HashMap<String, String>>, body: axum::body::Bytes) -> Json<serde_json::Value> {
+    let directory = geo_directory(&params);
     let filename = params.get("file").cloned().unwrap_or_default();
     let kind = params.get("kind").cloned().unwrap_or_default();
     if filename.len() > 100 || !filename.ends_with(".dat") || filename.starts_with('.')
         || !filename.bytes().all(|c| c.is_ascii_alphanumeric() || b"._-".contains(&c))
-        || !["domain", "ip"].contains(&kind.as_str()) || body.is_empty() {
+        || !["domain", "ip"].contains(&kind.as_str()) || body.is_empty()
+        || (directory == MIHOMO_CONF_DIR && filename != if kind == "ip" { "geoip.dat" } else { "geosite.dat" }) {
         return Json(serde_json::json!({"success": false, "error": "Нужен файл .dat с именем из латинских букв, цифр, точек, - или _"}))
     }
+    // Serialize installation with the geodata updater's managed-file recheck.
+    let _config_guard = state.app_config_lock.lock().await;
     let result = task::spawn_blocking(move || -> Result<String, String> {
         validate_uploaded_geo(&body, kind == "ip")?;
-        let directory = Path::new(XRAY_ASSET_DIR);
+        let directory = Path::new(directory);
         std::fs::create_dir_all(directory).map_err(|e| e.to_string())?;
         let destination = directory.join(&filename);
         let temporary = directory.join(format!(".geo-upload-{}", uuid::Uuid::new_v4()));
@@ -215,6 +224,7 @@ pub async fn upload_geo(State(state): State<AppState>, Query(params): Query<Hash
 }
 
 pub async fn get_geosite_categories(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+    let directory = geo_directory(&params);
     let filename = params.get("file").cloned().unwrap_or_else(|| "geosite.dat".into());
     let kind = params.get("kind").cloned().unwrap_or_else(|| "domain".into());
     let result = task::spawn_blocking(move || -> Result<Vec<GeoCategory>, String> {
@@ -223,7 +233,7 @@ pub async fn get_geosite_categories(Query(params): Query<HashMap<String, String>
             || !["domain", "ip"].contains(&kind.as_str()) {
             return Err("Некорректное имя или тип базы".into())
         }
-        let path = Path::new(XRAY_ASSET_DIR).join(&filename);
+        let path = Path::new(directory).join(&filename);
         if !std::fs::symlink_metadata(&path).map_err(|_| "База не установлена")?.file_type().is_file() {
             return Err("Нужен обычный файл базы".into())
         }
@@ -437,11 +447,15 @@ fn detect_geo_file_type(data: &[u8]) -> (bool, bool) {
 }
 
 pub fn list_geo_files(cache_arc: Arc<RwLock<crate::types::GeoCache>>) -> Result<GeoFilesResponse, String> {
+    list_geo_files_in(XRAY_ASSET_DIR, cache_arc)
+}
+
+fn list_geo_files_in(directory: &str, cache_arc: Arc<RwLock<crate::types::GeoCache>>) -> Result<GeoFilesResponse, String> {
     let mut site_files = Vec::new();
     let mut ip_files = Vec::new();
     let mut new_cache_entries = Vec::new();
 
-    for entry in std::fs::read_dir(XRAY_ASSET_DIR).map_err(|e| e.to_string())?.flatten() {
+    for entry in std::fs::read_dir(directory).map_err(|e| e.to_string())?.flatten() {
         let path = entry.path();
         if !entry.file_type().map_or(false, |ft| ft.is_file()) {
             continue;
@@ -456,7 +470,8 @@ pub fn list_geo_files(cache_arc: Arc<RwLock<crate::types::GeoCache>>) -> Result<
             .metadata()
             .and_then(|m| m.modified())
             .unwrap_or(SystemTime::UNIX_EPOCH);
-        let cached = cache_arc.read().unwrap().get(&name).cloned();
+        let cache_key = format!("{directory}/{name}");
+        let cached = cache_arc.read().unwrap().get(&cache_key).cloned();
         let (is_site, is_ip) = match cached {
             Some((cached_time, s, i)) if cached_time == mtime => (s, i),
             _ => {
@@ -465,7 +480,7 @@ pub fn list_geo_files(cache_arc: Arc<RwLock<crate::types::GeoCache>>) -> Result<
                     .and_then(|f| unsafe { MmapOptions::new().map(&f) }.ok())
                     .map(|mmap| detect_geo_file_type(&mmap))
                     .unwrap_or((false, false));
-                new_cache_entries.push((name.clone(), mtime, result.0, result.1));
+                new_cache_entries.push((cache_key, mtime, result.0, result.1));
                 result
             }
         };
@@ -489,9 +504,10 @@ pub fn list_geo_files(cache_arc: Arc<RwLock<crate::types::GeoCache>>) -> Result<
     Ok(GeoFilesResponse { site_files, ip_files })
 }
 
-pub async fn get_geo(State(state): State<AppState>) -> impl IntoResponse {
+pub async fn get_geo(State(state): State<AppState>, Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
     let cache = state.geo_cache.clone();
-    match task::spawn_blocking(move || list_geo_files(cache)).await {
+    let directory = geo_directory(&params);
+    match task::spawn_blocking(move || list_geo_files_in(directory, cache)).await {
         Ok(Ok(data)) => Json(ApiResponse {
             success: true,
             error: None,
@@ -591,7 +607,7 @@ async fn geo_query_handler(
             data: None,
         });
     };
-    let base = Path::new(XRAY_ASSET_DIR);
+    let base = Path::new(geo_directory(&params));
     let Some(path) = Path::new(filename)
         .file_name()
         .map(|n| base.join(n))

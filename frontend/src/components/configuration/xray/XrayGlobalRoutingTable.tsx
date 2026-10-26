@@ -4,7 +4,8 @@ import { parse as parseJsonc } from 'jsonc-parser'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
-import { DeviceTab } from '@/components/configuration/DeviceTab'
+import { DeviceSidebar } from '@/components/configuration/DeviceSidebar'
+import { ProtocolName, latencyTone } from '@/components/configuration/ProtocolName'
 import { cn } from '@/lib/utils'
 import { groupRuRows, isRuGroup, reorderRuGroups, ruBranchResources, sameRuGroup } from '@/lib/xrayRuGroup'
 import { routeLabel } from '@/components/configuration/RouteIcon'
@@ -19,15 +20,15 @@ import { addCustomIpRoute, addCustomRoute, baseRuleTag, isFullBypass, readDevice
 
 const DISABLED_SOURCE = '192.0.2.255'
 function ProtocolDetails({ outbound }: { outbound: { tag: string; protocol: string; streamSettings?: { network?: string; security?: string } } }) {
-  if (outbound.tag === 'wdtt-plus') return <span className="text-muted-foreground text-sm">socks5 · tcp/udp</span>
+  if (outbound.tag === 'wdtt-plus') return <span className="text-muted-foreground text-[13px]">socks5 · tcp/udp</span>
   if (!['vless', 'vmess', 'trojan', 'hysteria', 'hysteria2', 'tuic', 'shadowsocks'].includes(outbound.protocol)) {
-    return <span className="text-muted-foreground text-sm">{outbound.tag === 'direct' ? 'Напрямую; правила ресурсов действуют' : outboundTransport(outbound)}</span>
+    return <span className="text-muted-foreground text-[13px]">{outbound.tag === 'direct' ? 'Напрямую; правила ресурсов действуют' : outboundTransport(outbound)}</span>
   }
   const quic = ['hysteria', 'hysteria2', 'tuic'].includes(outbound.protocol)
   const protocol = outbound.protocol === 'hysteria' ? 'hysteria2' : outbound.protocol
   const network = quic ? 'quic' : outbound.streamSettings?.network === 'raw' ? 'tcp' : outbound.streamSettings?.network ?? 'tcp'
   const security = quic ? 'tls' : outbound.streamSettings?.security ?? 'none'
-  return <span className="text-muted-foreground text-sm">{[protocol, network, security].map(value => value.toLowerCase()).join(' · ')}</span>
+  return <span className="text-muted-foreground text-[13px]">{[protocol, network, security].map(value => value.toLowerCase()).join(' · ')}</span>
 }
 const PROTOCOL_ORDER_KEY = 'xkeen-xray-protocol-card-order'
 const managed = (rule: XrayRule, tags: string[]) => tags.includes(baseRuleTag(rule))
@@ -311,21 +312,14 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
   }
 
   return <div className="space-y-5 p-3">
-    <div className="border-border flex flex-col gap-2 border-b pb-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" variant={!deviceIp ? 'default' : 'outline'} onClick={() => { setSelection({ scope: '', ids: [] }); setDeviceIp('') }}>Общая маршрутизация</Button>
-        {deviceTabs.map(ip => <DeviceTab key={ip} ip={ip} selected={deviceIp === ip} disabled={false} onSelect={() => { setSelection({ scope: ip, ids: [] }); setDeviceIp(ip) }} onRemove={() => {
-        if (window.confirm(`Удалить отдельные правила ${ip}?`)) {
-          if (devices.includes(ip)) void onDeviceChange(ip, current => current.filter(rule => !baseRuleTag(rule).replace(/^disabled:/, '').startsWith(`device:${ip}:`)))
-          setPendingIps(current => current.filter(item => item !== ip))
-          if (deviceIp === ip) { setSelection({ scope: '', ids: [] }); setDeviceIp('') }
-        }
-        }} />)}
-        {deviceIp && !deviceTabs.includes(deviceIp) && <Button size="sm" variant="outline">{deviceIp}</Button>}
-        <Button size="sm" variant="outline" onClick={() => setAddIpOpen(true)}>+ Добавить IP</Button>
-        <Button size="sm" variant="outline" onClick={() => setDiagnosticsOpen(true)}>Диагностика</Button>
-      </div>
-    </div>
+    <div className="grid gap-4 lg:grid-cols-[210px_minmax(0,1fr)]">
+    <DeviceSidebar devices={deviceTabs} selected={deviceIp} onSelect={ip => { setSelection({ scope: ip, ids: [] }); setDeviceIp(ip) }} onAdd={() => setAddIpOpen(true)} onDiagnostics={() => setDiagnosticsOpen(true)} onRemove={ip => {
+      if (!window.confirm(`Удалить отдельные правила ${ip}?`)) return
+      if (devices.includes(ip)) void onDeviceChange(ip, current => current.filter(rule => !baseRuleTag(rule).replace(/^disabled:/, '').startsWith(`device:${ip}:`)))
+      setPendingIps(current => current.filter(item => item !== ip))
+      if (deviceIp === ip) { setSelection({ scope: '', ids: [] }); setDeviceIp('') }
+    }} />
+    <div className="protocol-container min-w-0 space-y-4">
     <ConnectionDiagnostics open={diagnosticsOpen} onOpenChange={setDiagnosticsOpen} devices={deviceTabs} selectedDevice={deviceIp} titles={Object.fromEntries(outbounds.map(out => [out.tag, out.label]))} />
     <ConnectionPicker open={pickerOpen} onOpenChange={setPickerOpen} connections={orderedCards.map(out => ({tag: out.tag, label: out.label, details: outboundTransport((parsed.outbounds as any[]).find(raw => raw.tag === out.tag))}))} shown={visibleCards.map(out => out.tag)} limit={cardLimit} activeTag={activeProtocol} onToggle={toggleCard} latencies={latencies} pingPending={pingPending} ping={ping} />
     <Dialog open={addIpOpen} onOpenChange={open => { setAddIpOpen(open); if (!open) setNewIp('') }}>
@@ -339,13 +333,13 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
     </Dialog>
     <section className="border-border bg-input-background space-y-3 rounded-xl border p-3">
       <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-base font-semibold">Протоколы</h3>{selectedRuleIds.length > 0 && <span className="text-primary text-sm">Для выбранных правил: {selectedRuleIds.length}</span>}<div className="ml-auto flex items-center gap-2"><Button size="sm" variant="outline" onClick={() => setPickerOpen(true)}>Все подключения ({orderedCards.length})</Button><Button size="sm" variant="outline" disabled={testingAll || pingPending !== null} onClick={() => void pingAll()}><IconBolt size={16} /> {testingAll ? 'Проверка…' : 'Пинг'}</Button></div></div>
-      <div ref={gridRef} className="grid grid-cols-2 auto-rows-[100px] gap-2 sm:grid-cols-3 lg:grid-cols-6 2xl:grid-cols-7">
-        {visibleCards.map(out => <div key={out.tag} draggable onDragStart={event => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', out.tag); setDraggedProtocol(out.tag) }} onDragOver={event => { if (draggedProtocol) { event.preventDefault(); event.dataTransfer.dropEffect = 'move' } }} onDrop={event => { event.preventDefault(); if (draggedProtocol) moveProtocol(draggedProtocol, out.tag); setDraggedProtocol(null) }} onDragEnd={() => setDraggedProtocol(null)} title="Перетащите карточку, чтобы изменить порядок в браузере" className={cn('relative cursor-grab rounded-md border text-sm transition-colors active:cursor-grabbing', draggedProtocol === out.tag && 'opacity-60', activeProtocol === out.tag && !isFullBypass(selectedVpn) ? 'border-blue-400 bg-blue-500/20' : 'border-ring/40 hover:border-blue-400 hover:bg-blue-500/10')}>
+      <div ref={gridRef} className="protocol-grid">
+        {visibleCards.map(out => <div key={out.tag} draggable onDragStart={event => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', out.tag); setDraggedProtocol(out.tag) }} onDragOver={event => { if (draggedProtocol) { event.preventDefault(); event.dataTransfer.dropEffect = 'move' } }} onDrop={event => { event.preventDefault(); if (draggedProtocol) moveProtocol(draggedProtocol, out.tag); setDraggedProtocol(null) }} onDragEnd={() => setDraggedProtocol(null)} title="Перетащите карточку, чтобы изменить порядок в браузере" className={cn('relative cursor-grab rounded-md border text-ui transition-colors active:cursor-grabbing', draggedProtocol === out.tag && 'opacity-60', activeProtocol === out.tag && !isFullBypass(selectedVpn) ? 'border-blue-400 bg-blue-500/20' : 'border-ring/40 hover:border-blue-400 hover:bg-blue-500/10')}>
           <button type="button" disabled={bulkApplying} className="flex h-full min-w-0 w-full flex-col gap-1 px-3 py-1.5 text-left disabled:cursor-wait disabled:opacity-60" aria-pressed={activeProtocol === out.tag && !isFullBypass(selectedVpn)} onClick={() => chooseVpn(out.tag)}>
-            <span title={out.label} className="line-clamp-2 h-10 shrink-0 w-full min-w-0 break-words pr-16 font-medium leading-5">{out.label}</span>
-            <span className="line-clamp-2 shrink-0 w-full break-words leading-5"><ProtocolDetails outbound={(parsed.outbounds as any[]).find(raw => raw.tag === out.tag)} /></span>
+            <span title={out.label} className="line-clamp-2 h-10 shrink-0 w-full min-w-0 break-words pr-16 font-medium leading-5"><ProtocolName name={out.label} tag={out.tag} /></span>
+            <span className="line-clamp-1 shrink-0 w-full break-words leading-5"><ProtocolDetails outbound={(parsed.outbounds as any[]).find(raw => raw.tag === out.tag)} /></span>
           </button>
-          <button type="button" className={cn('absolute right-2 top-1.5 w-16 rounded p-1 text-xs font-medium tabular-nums hover:bg-blue-500/20', latencies[out.tag]?.ms !== undefined ? 'text-green-400' : latencies[out.tag]?.error ? 'text-red-400' : 'text-sky-400')} disabled={testingAll || pingPending !== null} onClick={() => void ping(out.tag)} title={latencies[out.tag]?.error || 'Проверить соединение через узел'} aria-label={`Пинг ${out.label}`}>{pingPending === out.tag ? '…' : latencies[out.tag]?.ms !== undefined ? `${latencies[out.tag].ms} мс` : latencies[out.tag]?.error ? '✕' : <IconBolt size={17} />}</button>
+          <button type="button" className={cn('absolute right-2 top-1.5 w-16 rounded p-1 text-xs font-normal tabular-nums hover:bg-blue-500/20', latencyTone(latencies[out.tag]?.ms, latencies[out.tag]?.error))} disabled={testingAll || pingPending !== null} onClick={() => void ping(out.tag)} title={latencies[out.tag]?.error || 'Проверить соединение через узел'} aria-label={`Пинг ${out.label}`}>{pingPending === out.tag ? '…' : latencies[out.tag]?.ms !== undefined ? `${latencies[out.tag].ms} мс` : latencies[out.tag]?.error ? '✕' : <IconBolt size={17} />}</button>
         </div>)}
       </div>
     </section>
@@ -361,6 +355,13 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
       onImportFile={importRules} onExportRules={exportRules}
       onAddRule={row => edit('', row, true)}
       onEditRule={(id, row) => edit(id, row, false)}
+      onDeleteSelected={async ids => {
+        if(bulkLock.current)return false;bulkLock.current=true;setBulkApplying(true)
+        try{return await onChange(current=>ids.filter(id=>id!=='VPN').reduce((changed,id)=>{
+          const selected=changed.find(rule=>baseRuleTag(rule)===id);if(!selected)return changed
+          return (isRuGroup(selected)?['RU','RU_IP']:[id]).reduce((rules,tag)=>removeCustomRoute(rules,tag).filter(rule=>!baseRuleTag(rule).startsWith('disabled:device:')||!baseRuleTag(rule).endsWith(`:${tag}`)),changed)
+        },current))}catch(error){onError(error instanceof Error?error.message:'Не удалось удалить правила');return false}finally{bulkLock.current=false;setBulkApplying(false)}
+      }}
       onDeleteRule={id => run(current => {
         const selected = current.find(rule => baseRuleTag(rule) === id)
         if (!selected) throw new Error('Правило уже удалено')
@@ -379,5 +380,6 @@ export function XrayGlobalRoutingTable({ content, onChange, onDeviceChange, onEr
       canToggle={row => row.id !== 'VPN'}
     />
     </>}
+    </div></div>
   </div>
 }

@@ -28,7 +28,11 @@ fn mtime_string(time: Result<SystemTime, std::io::Error>, tz: i32) -> String {
 
 const BACKUP_DIR: &str = "/opt/backups";
 const BACKUP_SUFFIX: &str = "xkeen-ui.tar";
-const CONTENT_ORDER: [&str; 4] = ["xkeen", "xkeen-ui", "xray", "mihomo"];
+const CONTENT_ORDER: [&str; 6] = ["xkeen", "xkeen-ui", "xray", "mihomo", "csqtt", "wdtt-plus"];
+const CSQTT_CONF_DIR: &str = "/opt/etc/csqtt";
+const CSQTT_FILES: [&str; 2] = ["csqtt.conf", "vk_token"];
+const WDTT_CONF_DIR: &str = "/opt/etc/wdtt-plus";
+const WDTT_FILES: [&str; 5] = ["wdtt-plus.conf", "password", "device_id", "vk_token", "rt-masque-v1.json"];
 
 #[derive(Serialize)]
 struct BackupListData {
@@ -58,6 +62,10 @@ struct BackupContentFiles {
     xray: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     mihomo: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    csqtt: Vec<String>,
+    #[serde(rename = "wdtt-plus", skip_serializing_if = "Vec::is_empty")]
+    wdtt_plus: Vec<String>,
 }
 
 impl BackupContentFiles {
@@ -67,6 +75,8 @@ impl BackupContentFiles {
             "xkeen-ui" => self.xkeen_ui.push(file),
             "xray" => self.xray.push(file),
             "mihomo" => self.mihomo.push(file),
+            "csqtt" => self.csqtt.push(file),
+            "wdtt-plus" => self.wdtt_plus.push(file),
             _ => unreachable!("unknown backup content: {key}"),
         }
     }
@@ -76,6 +86,8 @@ impl BackupContentFiles {
         self.xkeen_ui.sort();
         self.xray.sort();
         self.mihomo.sort();
+        self.csqtt.sort();
+        self.wdtt_plus.sort();
     }
 }
 
@@ -116,41 +128,65 @@ pub async fn get_backups(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 #[derive(Deserialize)]
-pub struct DownloadBackup { name: String }
+pub struct DownloadBackup {
+    name: String,
+}
 
-pub async fn download_backup(axum::extract::Query(req): axum::extract::Query<DownloadBackup>) -> axum::response::Response {
+pub async fn download_backup(
+    axum::extract::Query(req): axum::extract::Query<DownloadBackup>,
+) -> axum::response::Response {
     let result = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, String> {
         let path = resolve_backup_path(&req.name)?;
-        if fs::metadata(&path).map_err(io_error)?.len() > 16 * 1024 * 1024 { return Err("Архив больше 16 МБ".into()) }
+        if fs::metadata(&path).map_err(io_error)?.len() > 16 * 1024 * 1024 {
+            return Err("Архив больше 16 МБ".into());
+        }
         fs::read(path).map_err(io_error)
-    }).await;
+    })
+    .await;
     match result {
-        Ok(Ok(bytes)) => ([("content-type", "application/x-tar"), ("cache-control", "no-store")], bytes).into_response(),
+        Ok(Ok(bytes)) => (
+            [("content-type", "application/x-tar"), ("cache-control", "no-store")],
+            bytes,
+        )
+            .into_response(),
         Ok(Err(error)) => (axum::http::StatusCode::BAD_REQUEST, error).into_response(),
         Err(_) => axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
 
 pub async fn upload_backup(body: axum::body::Bytes) -> impl IntoResponse {
-    run_blocking(tokio::task::spawn_blocking(move || {
-        use std::os::unix::fs::OpenOptionsExt;
-        use std::io::Write;
-        if body.is_empty() || body.len() > 16 * 1024 * 1024 { return Err("Допустим архив до 16 МБ".into()) }
-        ensure_backup_dir().map_err(io_error)?;
-        let name = format!("import-{}_{}", uuid::Uuid::new_v4(), BACKUP_SUFFIX);
-        let path = Path::new(BACKUP_DIR).join(name);
-        let temporary = path.with_extension("upload");
-        let result = (|| {
-            let mut file = fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary).map_err(io_error)?;
-            file.write_all(&body).map_err(io_error)?;
-            file.sync_all().map_err(io_error)?;
-            validate_backup_entries(&temporary)?;
-            fs::rename(&temporary, &path).map_err(io_error)?;
-            Ok(None::<()>)
-        })();
-        if result.is_err() { let _ = fs::remove_file(&temporary); }
-        result
-    }), "Не удалось загрузить архив").await
+    run_blocking(
+        tokio::task::spawn_blocking(move || {
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            if body.is_empty() || body.len() > 16 * 1024 * 1024 {
+                return Err("Допустим архив до 16 МБ".into());
+            }
+            ensure_backup_dir().map_err(io_error)?;
+            let name = format!("import-{}_{}", uuid::Uuid::new_v4(), BACKUP_SUFFIX);
+            let path = Path::new(BACKUP_DIR).join(name);
+            let temporary = path.with_extension("upload");
+            let result = (|| {
+                let mut file = fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(&temporary)
+                    .map_err(io_error)?;
+                file.write_all(&body).map_err(io_error)?;
+                file.sync_all().map_err(io_error)?;
+                validate_backup_entries(&temporary)?;
+                fs::rename(&temporary, &path).map_err(io_error)?;
+                Ok(None::<()>)
+            })();
+            if result.is_err() {
+                let _ = fs::remove_file(&temporary);
+            }
+            result
+        }),
+        "Не удалось загрузить архив",
+    )
+    .await
 }
 
 pub async fn put_backup(State(state): State<AppState>) -> impl IntoResponse {
@@ -251,11 +287,18 @@ fn create_backup_sync(tz: i32) -> Result<BackupItem, String> {
 
     let name = next_backup_name(tz);
     let final_path = Path::new(BACKUP_DIR).join(&name);
-    let temp_path = final_path.with_extension("tar.tmp");
+    let temp_path = final_path.with_extension(format!("{}.tar.tmp", uuid::Uuid::new_v4()));
     let content = collect_backup_content(files.iter().map(|(_, rel)| rel.as_str()));
 
     let write_result = (|| -> io::Result<()> {
-        let file = File::create(&temp_path)?;
+        let mut options = fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(&temp_path)?;
         let mut builder = Builder::new(file);
         builder.follow_symlinks(true);
         for (source, relative) in &files {
@@ -314,24 +357,39 @@ fn restore_backup_sync(name: &str, requested_contents: Option<Vec<String>>) -> R
         let target =
             archive_relative_to_target(&relative).ok_or_else(|| format!("недопустимый путь в архиве: {relative}"))?;
 
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent).map_err(io_error)?;
-        }
-
-        let mut output = File::create(&target).map_err(io_error)?;
-        io::copy(&mut entry, &mut output).map_err(io_error)?;
-
-        #[cfg(unix)]
-        if let Ok(mode) = entry.header().mode() {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&target, fs::Permissions::from_mode(mode));
-        }
+        restore_entry(&mut entry, &target, content)?;
 
         restored_contents.insert(content);
     }
 
     validate_restored_contents(&requested_contents, &restored_contents)?;
     log("INFO", restore_log_message(&backup_path, &requested_contents));
+    Ok(())
+}
+
+fn restore_entry<R: io::Read>(entry: &mut tar::Entry<'_, R>, target: &Path, content: &str) -> Result<(), String> {
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(io_error)?;
+    }
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut output = options.open(target).map_err(io_error)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = if matches!(content, "csqtt" | "wdtt-plus") {
+            0o600
+        } else {
+            entry.header().mode().map_err(io_error)? & 0o777
+        };
+        fs::set_permissions(target, fs::Permissions::from_mode(mode)).map_err(io_error)?;
+    }
+    io::copy(entry, &mut output).map_err(io_error)?;
     Ok(())
 }
 
@@ -358,7 +416,14 @@ fn rename_backup_sync(name: &str, new_name: &str) -> Result<(), String> {
         return Err("файл с таким именем уже существует".into());
     }
     fs::rename(&backup_path, &new_path).map_err(io_error)?;
-    log("INFO", format!("Бэкап конфигураций переименован: {} -> {}", backup_path.display(), new_path.display()));
+    log(
+        "INFO",
+        format!(
+            "Бэкап конфигураций переименован: {} -> {}",
+            backup_path.display(),
+            new_path.display()
+        ),
+    );
     Ok(())
 }
 
@@ -373,15 +438,34 @@ fn is_tar_file(path: &Path) -> bool {
 fn collect_backup_files() -> io::Result<Vec<(PathBuf, String)>> {
     let mut files = Vec::new();
     let device_id = Path::new(crate::router_device_id::ID_FILE);
-    if device_id.is_file() { files.push((device_id.to_path_buf(), to_archive_relative(device_id))); }
+    if device_id.is_file() {
+        files.push((device_id.to_path_buf(), to_archive_relative(device_id)));
+    }
     files.extend(collect_dir_files(XKEEN_CONF_DIR, &["lst", "json"])?);
     for name in ["xray-subscription-url", "global_direct_xray.flag", "global_direct_mihomo.flag"] {
         let path = Path::new(XKEEN_CONF_DIR).join(name);
-        if path.is_file() { files.push((path.clone(), to_archive_relative(&path))); }
+        if path.is_file() {
+            files.push((path.clone(), to_archive_relative(&path)));
+        }
     }
     files.extend(collect_dir_files(XRAY_CONF_DIR, &["json"])?);
     files.extend(collect_dir_files(MIHOMO_CONF_DIR, &["yaml", "yml"])?);
-    files.extend(collect_dir_files(&format!("{MIHOMO_CONF_DIR}/proxy_providers"), &["yaml", "yml"])?);
+    files.extend(collect_dir_files(
+        &format!("{MIHOMO_CONF_DIR}/proxy_providers"),
+        &["yaml", "yml"],
+    )?);
+    for name in CSQTT_FILES {
+        let path = Path::new(CSQTT_CONF_DIR).join(name);
+        if path.is_file() {
+            files.push((path.clone(), to_archive_relative(&path)));
+        }
+    }
+    for name in WDTT_FILES {
+        let path = Path::new(WDTT_CONF_DIR).join(name);
+        if path.is_file() {
+            files.push((path.clone(), to_archive_relative(&path)));
+        }
+    }
     files.sort_by(|a, b| a.1.cmp(&b.1));
     Ok(files)
 }
@@ -511,28 +595,45 @@ fn archive_relative_to_target(relative: &str) -> Option<PathBuf> {
 }
 
 fn detect_content_key(relative: &str) -> Option<&'static str> {
-    if relative == APP_CONFIG.trim_start_matches('/') || relative == crate::router_device_id::ID_FILE.trim_start_matches('/') {
+    if relative == APP_CONFIG.trim_start_matches('/')
+        || relative == crate::router_device_id::ID_FILE.trim_start_matches('/')
+    {
         return Some("xkeen-ui");
     }
 
     let check_prefix = |prefix: &str, exts: &[&str]| {
         relative
-            .strip_prefix(prefix.trim_start_matches('/'))
-            .map(|rest| rest.trim_start_matches('/'))
+            .strip_prefix(&format!("{}/", prefix.trim_start_matches('/')))
             .filter(|name| !name.contains('/') && matches_file_name(name, exts))
     };
 
+    if CSQTT_FILES
+        .iter()
+        .any(|name| relative == format!("{}/{name}", CSQTT_CONF_DIR.trim_start_matches('/')))
+    {
+        return Some("csqtt");
+    }
+    if WDTT_FILES
+        .iter()
+        .any(|name| relative == format!("{}/{name}", WDTT_CONF_DIR.trim_start_matches('/')))
+    {
+        return Some("wdtt-plus");
+    }
     if check_prefix(XKEEN_CONF_DIR, &["lst", "json"]).is_some()
         || ["xray-subscription-url", "global_direct_xray.flag", "global_direct_mihomo.flag"]
-            .iter().any(|name| relative == format!("{}/{}", XKEEN_CONF_DIR.trim_start_matches('/'), name)) {
+            .iter()
+            .any(|name| relative == format!("{}/{}", XKEEN_CONF_DIR.trim_start_matches('/'), name))
+    {
         return Some("xkeen");
     }
     if check_prefix(XRAY_CONF_DIR, &["json"]).is_some() {
         return Some("xray");
     }
     if check_prefix(MIHOMO_CONF_DIR, &["yaml", "yml"]).is_some()
-        || relative.strip_prefix(&format!("{}/proxy_providers/", MIHOMO_CONF_DIR.trim_start_matches('/')))
-            .is_some_and(|name| !name.contains('/') && matches_file_name(name, &["yaml", "yml"])) {
+        || relative
+            .strip_prefix(&format!("{}/proxy_providers/", MIHOMO_CONF_DIR.trim_start_matches('/')))
+            .is_some_and(|name| !name.contains('/') && matches_file_name(name, &["yaml", "yml"]))
+    {
         return Some("mihomo");
     }
 
@@ -609,6 +710,8 @@ fn content_label(content: &str) -> &'static str {
         "xkeen-ui" => "XKeen UI",
         "xray" => "Xray",
         "mihomo" => "Mihomo",
+        "csqtt" => "CSQTT",
+        "wdtt-plus" => "WDTT Plus",
         _ => unreachable!("unknown backup content: {content}"),
     }
 }
@@ -618,6 +721,8 @@ fn content_file_name(key: &str, relative: &str) -> String {
         "xkeen" => strip_content_prefix(relative, XKEEN_CONF_DIR),
         "xray" => strip_content_prefix(relative, XRAY_CONF_DIR),
         "mihomo" => strip_content_prefix(relative, MIHOMO_CONF_DIR),
+        "csqtt" => strip_content_prefix(relative, CSQTT_CONF_DIR),
+        "wdtt-plus" => strip_content_prefix(relative, WDTT_CONF_DIR),
         "xkeen-ui" => Path::new(relative)
             .file_name()
             .and_then(|v| v.to_str())
@@ -676,4 +781,108 @@ fn backup_now(tz: i32) -> DateTime<FixedOffset> {
 
 fn backup_offset(tz: i32) -> FixedOffset {
     FixedOffset::east_opt(tz.clamp(-12, 14) * 3600).unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Fixture(PathBuf);
+    impl Fixture {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!("xkeen-backup-test-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn addons_and_mihomo_round_trip_without_touching_live_settings() {
+        let fixture = Fixture::new();
+        let path = fixture.0.join("fixture.tar");
+        let samples = [
+            ("opt/etc/csqtt/csqtt.conf", "SERVER=example.invalid\n"),
+            ("opt/etc/csqtt/vk_token", "synthetic-test-token"),
+            ("opt/etc/wdtt-plus/wdtt-plus.conf", "PEER=example.invalid:57000\n"),
+            ("opt/etc/wdtt-plus/password", "synthetic-test-password"),
+            ("opt/etc/wdtt-plus/device_id", "synthetic-device-id"),
+            ("opt/etc/mihomo/config.yaml", "mode: rule\n"),
+            ("opt/etc/mihomo/proxy_providers/test.yaml", "proxies: []\n"),
+        ];
+        let mut builder = Builder::new(File::create(&path).unwrap());
+        for (name, contents) in samples {
+            let mut header = tar::Header::new_gnu();
+            header.set_size(contents.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder.append_data(&mut header, name, contents.as_bytes()).unwrap();
+        }
+        builder.finish().unwrap();
+        drop(builder);
+        validate_backup_entries(&path).unwrap();
+        let content = inspect_backup_content(&path).unwrap();
+        assert_eq!(content.csqtt.len(), 2);
+        assert_eq!(content.wdtt_plus.len(), 3);
+        assert_eq!(content.mihomo.len(), 2);
+        let mut archive = Archive::new(File::open(&path).unwrap());
+        for entry in archive.entries().unwrap() {
+            let mut entry = entry.unwrap();
+            let relative = normalize_entry_path(&entry.path().unwrap()).unwrap();
+            let category = detect_content_key(&relative).unwrap();
+            let target = fixture.0.join("restored").join(&relative);
+            restore_entry(&mut entry, &target, category).unwrap();
+            let expected = samples.iter().find(|(name, _)| *name == relative).unwrap().1;
+            assert_eq!(fs::read_to_string(&target).unwrap(), expected);
+            #[cfg(unix)]
+            if matches!(category, "csqtt" | "wdtt-plus") {
+                use std::os::unix::fs::PermissionsExt;
+                assert_eq!(fs::metadata(&target).unwrap().permissions().mode() & 0o777, 0o600);
+            }
+        }
+    }
+
+    #[test]
+    fn backup_paths_reject_runtime_files_and_neighbor_directories() {
+        for path in [
+            "opt/etc/csqtt/csqtt-client",
+            "opt/etc/csqtt/csqtt.log",
+            "opt/etc/csqtt/vk_api_calls.lock",
+            "opt/etc/wdtt-plus/wdtt-plus-client",
+            "opt/etc/wdtt-plus/client-version",
+            "opt/etc/csqtt-other/csqtt.conf",
+            "opt/etc/mihomo-other/config.yaml",
+            "opt/etc/xkeen-other/settings.json",
+            "opt/etc/xray/configs-other/config.json",
+        ] {
+            assert!(detect_content_key(path).is_none(), "{path}");
+        }
+        assert!(normalize_entry_path(Path::new("../etc/shadow")).is_err());
+        assert!(normalize_entry_path(Path::new("/etc/shadow")).is_err());
+        assert!(detect_content_key("opt/etc/wdtt-plus/rt-masque-v1.json").is_some());
+    }
+
+    #[test]
+    fn selection_supports_new_categories_and_legacy_archives() {
+        let requested = normalize_requested_contents(Some(vec!["csqtt".into(), "wdtt-plus".into()]))
+            .unwrap()
+            .unwrap();
+        assert!(requested.contains("csqtt") && requested.contains("wdtt-plus"));
+        let legacy = collect_backup_content(
+            [
+                "opt/etc/xkeen/xkeen.json",
+                "opt/etc/xray/configs/00_config.json",
+                "opt/etc/mihomo/config.yaml",
+            ]
+            .into_iter(),
+        );
+        assert!(legacy.csqtt.is_empty() && legacy.wdtt_plus.is_empty());
+        assert!(!legacy.xkeen.is_empty() && !legacy.xray.is_empty() && !legacy.mihomo.is_empty());
+        let json = serde_json::to_value(legacy).unwrap();
+        assert!(json.get("csqtt").is_none() && json.get("wdtt-plus").is_none());
+    }
 }

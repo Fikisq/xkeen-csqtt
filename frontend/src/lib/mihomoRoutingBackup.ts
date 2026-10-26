@@ -13,7 +13,28 @@ export function replaceSection(content: string, key: string, value: string): str
   return old ? content.replace(old, value) : `${content.trimEnd()}\n${value}`
 }
 export function readSelections(content: string): Record<string, string> {
-  try { return JSON.parse(decodeURIComponent(/^# xkeen-ui-selections (\S+)$/m.exec(content)?.[1] ?? '%7B%7D')) } catch { return {} }
+  try {
+    const value = JSON.parse(decodeURIComponent(/^# xkeen-ui-selections (\S+)$/m.exec(content)?.[1] ?? '%7B%7D'))
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : {}
+  } catch { return {} }
+}
+
+/** Restore surviving selections without treating removed groups/nodes as a failed core start. */
+export function resolveSelections(saved: Record<string, string>, live: Record<string, {all?: string[]}>, aliases: Record<string, string>) {
+  const selections: Record<string, string> = {}
+  const skipped: string[] = []
+  for (const [oldGroup, oldNode] of Object.entries(saved)) {
+    const candidates = Object.keys(live).filter(name => name.toLowerCase() === oldGroup.toLowerCase())
+    const group = live[oldGroup]?.all ? oldGroup : live[aliases[oldGroup]]?.all ? aliases[oldGroup] : candidates.length === 1 ? candidates[0] : ''
+    const choices = live[group]?.all ?? []
+    const nodes = choices.filter(name => name.trim() === oldNode.trim())
+    const node = choices.includes(oldNode) ? oldNode : nodes.length === 1 ? nodes[0] : ''
+    if (!group || !node) { skipped.push(oldGroup); continue }
+    // An explicit entry for the current name takes precedence over an old alias.
+    if (!(group in selections) || group === oldGroup) selections[group] = node
+  }
+  return { selections, skipped }
 }
 export function withSelections(content: string, choices: Record<string, string>): string {
   const clean = content.replace(/^# xkeen-ui-selections [^\n]*\n?/gm, '')

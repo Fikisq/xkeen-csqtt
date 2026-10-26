@@ -15,8 +15,9 @@ import { type Config, type ThemeMode } from './lib/types'
 import { parseClashApiCredentials } from './lib/utils'
 import { parse as parseJsonc } from 'jsonc-parser'
 import { defaultMihomoChoices, mihomoRouteTags, readMihomoDevices, readMihomoFullBypass, isMihomoFullRoute } from './lib/mihomoDeviceRouting'
-import { readSelections } from './lib/mihomoRoutingBackup'
+import { readSelections, resolveSelections } from './lib/mihomoRoutingBackup'
 import { transferXrayFullBypass } from './lib/fullBypassTransfer'
+import { monitorCoreSwitch } from './lib/coreSwitchMonitor'
 
 const CommentsWarningModal = lazyLoad(() => import('./components/modals/CommentsWarning'), 'CommentsWarningModal')
 const CoreManageModal = lazyLoad(() => import('./components/modals/CoreManagement'), 'CoreManageModal')
@@ -133,6 +134,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     return () => window.removeEventListener('mihomo:open-subscriptions', open)
   }, [])
   const editorRef = useRef<CodeMirrorRef | null>(null)
+  const coreSwitchInProgress = useRef(false)
   const configActionsRef = useRef<{ switchTab: (index: number) => void; getActiveIndex: () => number }>({
     switchTab: () => { },
     getActiveIndex: () => 0,
@@ -156,7 +158,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
     async (core?: string, skipProxies = false, silent = false): Promise<Config[]> => {
       if (!silent) dispatch({ type: 'SET_CONFIGS_LOADING', loading: true })
       try {
-        const result = await apiCall<any>('GET', core ? `configs?core=${core}` : 'configs')
+        const result = await apiCall<any>('GET', core ? `configs?core=${core}` : 'configs', undefined, {timeoutMs: 15000})
         if (result.success && result.configs) {
           const configs: Config[] = result.configs.map((c: any) => ({ ...c, savedContent: c.content, isDirty: false }))
           dispatch({ type: 'SET_CONFIGS', configs })
@@ -270,6 +272,10 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
 
   const switchCore = useCallback(
     async (core: string) => {
+      if (coreSwitchInProgress.current) {
+        showToast('Дождитесь завершения синхронизации ядра', 'error')
+        return
+      }
       const appState = getAppState()
       if (core === appState.currentCore) {
         showToast('Это ядро уже активно', 'error')
@@ -280,47 +286,65 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
         return
       }
       const old = appState.currentCore
+      const switchApiCall = <T,>(method: string, endpoint: string, body?: unknown) => apiCall<T>(method, endpoint, body, {timeoutMs: endpoint === 'control' && method === 'POST' ? 300000 : method === 'GET' ? 15000 : 60000})
       const file = core === 'mihomo' ? '/opt/etc/mihomo/config.yaml' : '/opt/etc/xray/configs/00_config.json'
       let switched = false
       let originalTarget: string | null = null
       let transferredTarget: string | null = null
       let transferredDevices = 0
+      let stopMonitoring = () => {}
+      let monitorPublish: Promise<void> = Promise.resolve()
+      coreSwitchInProgress.current = true
       dispatch({ type: 'SET_SERVICE_STATUS', status: 'pending', pendingText: 'Переключение...' })
       try {
         // Only explicitly requested whole-device bypasses cross the core boundary.
-        const targetResponse = await apiCall<{success: boolean; configs: Array<{file: string; content: string}>}>('GET', `configs?core=${core}`)
+        const targetResponse = await switchApiCall<{success: boolean; configs: Array<{file: string; content: string}>}>('GET', `configs?core=${core}`)
         let content = targetResponse.configs?.find(item => item.file === file)?.content
         if (!targetResponse.success || !content) throw new Error('Не удалось прочитать настройки выбранного ядра')
         if (old === 'xray' && core === 'mihomo') {
-          const source = await apiCall<{success: boolean; configs: Array<{file: string; content: string}>}>('GET', 'configs?core=xray')
+          const source = await switchApiCall<{success: boolean; configs: Array<{file: string; content: string}>}>('GET', 'configs?core=xray')
           const xray = source.configs?.find(item => item.file === '/opt/etc/xray/configs/00_config.json')?.content
           if (!source.success || !xray) throw new Error('Не удалось прочитать полный обход Xray')
           const transfer = transferXrayFullBypass(xray, content)
           transferredDevices = transfer.devices.length
           if (transfer.content !== content) {
-            const fresh = await apiCall<{configs: Array<{file: string; content: string}>}>('GET', 'configs?core=mihomo')
+            const fresh = await switchApiCall<{configs: Array<{file: string; content: string}>}>('GET', 'configs?core=mihomo')
             if (fresh.configs?.find(item => item.file === file)?.content !== content) throw new Error('Настройки Mihomo изменились. Повторите переключение')
             originalTarget = content
-            const saved = await apiCall<{success: boolean; error?: string}>('PUT', 'configs?core=mihomo&validate=mihomo', {file, content: transfer.content})
+            const saved = await switchApiCall<{success: boolean; error?: string}>('PUT', 'configs?core=mihomo&validate=mihomo', {file, content: transfer.content, previous_content: content})
             if (!saved.success) throw new Error(saved.error || 'Mihomo не принял полный обход')
             transferredTarget = transfer.content
             content = transfer.content
           }
         }
         dispatch({ type: 'SET_SERVICE_STATUS', status: 'pending', pendingText: 'Переключение...' })
-        const result = await apiCall<{success: boolean; error?: string}>('POST', 'control', { action: 'switchCore', core })
+        stopMonitoring = monitorCoreSwitch(core,
+          () => apiCall('GET', 'control', undefined, {timeoutMs: 3000}),
+          data => {
+            monitorPublish = (async () => {
+              dispatch({ type: 'SET_CONFIGS_LOADING', loading: true })
+              dispatch({ type: 'SET_CONFIGS', configs: [] })
+              dispatch({ type: 'SET_DASHBOARD_PORT', port: null, secret: null, unix: null } as any)
+              dispatch({ type: 'SET_CORE_INFO', currentCore: data.currentCore, coreVersions: getAppState().coreVersions, availableCores: data.cores })
+              dispatch({ type: 'SET_SERVICE_STATUS', status: 'running' })
+              await loadConfigs(data.currentCore)
+            })()
+            return monitorPublish
+          })
+        const result = await switchApiCall<{success: boolean; error?: string}>('POST', 'control', { action: 'switchCore', core })
         if (!result.success) throw new Error(result.error || 'Не удалось переключить ядро')
         switched = true
         if (core === 'mihomo') {
           const {port, secret, unix} = parseClashApiCredentials(content)
           if (!port && !unix) throw new Error('В Mihomo не настроен API для применения выбора подключений')
-          const selected = readSelections(content)
-          const live = await clashFetch<{proxies: Record<string, {all?: string[]; now?: string}>}>(port ?? '', 'proxies', {secret, unix})
-          for (const [group, node] of Object.entries(selected)) {
-            if (!live.proxies[group]?.all?.includes(node)) throw new Error(`В группе Mihomo «${group}» нет подключения «${node}»`)
-            await clashFetch(port ?? '', `proxies/${encodeURIComponent(group)}`, {method: 'PUT', secret, unix, body: {name: node}, retry: false})
-          }
+          const live = await clashFetch<{proxies: Record<string, {all?: string[]; now?: string}>}>(port ?? '', 'proxies', {secret, unix, timeoutMs: 5000})
           const defaults = defaultMihomoChoices(content)
+          const aliases = Object.fromEntries(Object.entries(defaults).filter(([tag, group]) => tag === 'VPN' || group !== defaults.VPN))
+          const {selections: selected, skipped} = resolveSelections(readSelections(content), live.proxies, aliases)
+          for (const [group, node] of Object.entries(selected)) {
+            await clashFetch(port ?? '', `proxies/${encodeURIComponent(group)}`, {method: 'PUT', secret, unix, body: {name: node}, retry: false, timeoutMs: 10000})
+          }
+          if (skipped.length) showToast(`Mihomo запущен. Недоступен прежний выбор групп: ${skipped.join(', ')}. Используется сохранённый выбор ядра`, 'error')
           const routes = mihomoRouteTags(content).filter(route => route !== 'VPN')
           const direct = (initial: string): boolean => {
             let name = initial
@@ -334,42 +358,54 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
           }
           const profiles = readMihomoDevices(content)
           const ips = profiles.filter(profile => profile.choices['__disabled:VPN'] !== 'true' && isMihomoFullRoute(profile.choices.VPN) && direct(profile.choices.VPN)).map(profile => profile.ip)
-          const bypass = await apiCall<{success: boolean; error?: string}>('POST', 'mihomo/device-direct', {ips})
+          const bypass = await switchApiCall<{success: boolean; error?: string}>('POST', 'mihomo/device-direct', {ips})
           if (!bypass.success) throw new Error(bypass.error || 'Не удалось перенести локальные исключения Mihomo')
           const selective = profiles.some(profile => !direct(profile.choices.VPN) || routes.some(route => !direct(profile.choices[route] === defaults[route] ? defaults[route] : profile.choices[route])))
-          const global = await apiCall<{success: boolean; error?: string}>('POST', 'mihomo/global-direct', {enabled: readMihomoFullBypass(content) && direct(defaults.VPN) && !selective && routes.every(route => direct(defaults[route]))})
+          const global = await switchApiCall<{success: boolean; error?: string}>('POST', 'mihomo/global-direct', {enabled: readMihomoFullBypass(content) && direct(defaults.VPN) && !selective && routes.every(route => direct(defaults[route]))})
           if (!global.success) throw new Error(global.error || 'Не удалось применить общий режим Mihomo')
         } else {
-          const bypass = await apiCall<{success: boolean; error?: string}>('POST', 'xray/sync-bypass')
+          const bypass = await switchApiCall<{success: boolean; error?: string}>('POST', 'xray/sync-bypass')
           if (!bypass.success) throw new Error(bypass.error || 'Не удалось перенести локальные исключения Xray')
         }
         dispatch({ type: 'SHOW_MODAL', modal: 'showCoreManageModal', show: false })
         showToast(`Ядро изменено на ${capitalize(core)}.${transferredDevices ? ` Перенесён полный обход устройств: ${transferredDevices}` : ' Используются его сохранённые настройки'}`)
-        const data = await apiCall<any>('GET', 'control')
+        const data = await switchApiCall<any>('GET', 'control')
+        if (!data.success) throw new Error('Не удалось обновить состояние выбранного ядра')
+        stopMonitoring()
+        await monitorPublish
         if (data.success) {
           dispatch({ type: 'SET_CONFIGS_LOADING', loading: true })
           dispatch({ type: 'SET_CONFIGS', configs: [] })
           dispatch({ type: 'SET_DASHBOARD_PORT', port: null, secret: null, unix: null } as any)
           dispatch({ type: 'SET_CORE_INFO', currentCore: data.currentCore, coreVersions: getAppState().coreVersions, availableCores: data.cores })
           dispatch({ type: 'SET_SERVICE_STATUS', status: data.running ? 'running' : 'stopped' })
-          await loadConfigs(core)
+          await loadConfigs(data.currentCore)
         }
       } catch (error) {
+        stopMonitoring()
+        await monitorPublish
         if (switched) {
-          const reverted = await apiCall<{success: boolean}>('POST', 'control', {action: 'switchCore', core: old}).catch(() => null)
+          const reverted = await switchApiCall<{success: boolean}>('POST', 'control', {action: 'switchCore', core: old}).catch(() => null)
           if (!reverted?.success) showToast('Не удалось вернуть прежнее ядро. Проверьте статус XKeen', 'error')
         }
         if (originalTarget && transferredTarget) {
-          const fresh = await apiCall<{configs: Array<{file: string; content: string}>}>('GET', `configs?core=${core}`).catch(() => null)
+          const fresh = await switchApiCall<{configs: Array<{file: string; content: string}>}>('GET', `configs?core=${core}`).catch(() => null)
           if (fresh?.configs?.find(item => item.file === file)?.content === transferredTarget) {
-            const restored = await apiCall<{success: boolean}>('PUT', `configs?core=${core}&validate=${core}`, {file, content: originalTarget}).catch(() => null)
+            const restored = await switchApiCall<{success: boolean}>('PUT', `configs?core=${core}&validate=${core}`, {file, content: originalTarget, previous_content: transferredTarget}).catch(() => null)
             if (!restored?.success) showToast('Не удалось восстановить конфигурацию выбранного ядра', 'error')
           }
         }
         showToast(error instanceof Error ? error.message : 'Не удалось переключить ядро', 'error')
-        const data = await apiCall<any>('GET', 'control').catch(() => null)
-        if (data?.success) dispatch({type: 'SET_CORE_INFO', currentCore: data.currentCore, coreVersions: getAppState().coreVersions, availableCores: data.cores})
+        const data = await switchApiCall<any>('GET', 'control').catch(() => null)
+        if (data?.success) {
+          dispatch({type: 'SET_CORE_INFO', currentCore: data.currentCore, coreVersions: getAppState().coreVersions, availableCores: data.cores})
+          dispatch({ type: 'SET_DASHBOARD_PORT', port: null, secret: null, unix: null } as any)
+          await loadConfigs(data.currentCore)
+        }
         dispatch({ type: 'SET_SERVICE_STATUS', status: data?.running ? 'running' : 'stopped' })
+      } finally {
+        stopMonitoring()
+        coreSwitchInProgress.current = false
       }
     },
     [dispatch, showToast, loadConfigs]
@@ -536,7 +572,7 @@ function AppContent({ onLogout }: { onLogout: () => void }) {
   return (
     <div className="bg-muted dark:bg-background flex min-h-dvh flex-col">
       <main className="flex flex-1 flex-col">
-        <div className="mx-auto flex w-full max-w-[1800px] flex-1 flex-col gap-3 px-3 py-3">
+        <div className="flex min-w-0 w-full flex-1 flex-col gap-3 px-3 py-3">
           <StatusBar
             onOpenCoreManage={() => openModal('showCoreManageModal')}
             onOpenSettings={() => openModal('showSettingsModal')}
