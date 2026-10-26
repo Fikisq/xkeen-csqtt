@@ -9,7 +9,7 @@ out=${1:-xkeen-nfqws2-arm64-v8a.tar.gz}
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT HUP INT TERM
 
-curl -fLsS "https://nfqws.github.io/nfqws2-keenetic/aarch64/$package" -o "$work/$package"
+curl -fLsS --retry 3 "https://github.com/nfqws/nfqws2-keenetic/releases/download/v${version}/$package" -o "$work/$package"
 printf '%s  %s\n' "$sha256" "$work/$package" | sha256sum -c - >/dev/null
 (cd "$work" && tar -xzf "$package" && tar -xzf data.tar.gz)
 
